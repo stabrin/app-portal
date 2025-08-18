@@ -1,0 +1,10 @@
+flask
+psycopg2-binary
+python-dotenv
+pandas
+openpyxl
+gunicorn
+xlsxwriter
+Flask-Login
+Flask-WTF
+bcrypt

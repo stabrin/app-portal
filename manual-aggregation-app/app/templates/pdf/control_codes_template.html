@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Управляющие коды</title>
+<style>
+    @page {
+        size: A4;
+        margin: 1.5cm; 
+    }
+    body { 
+        font-family: 'Helvetica', sans-serif; 
+    }
+    .label {
+        width: 9cm; 
+        /* height: 5.5cm; */  /* <-- УДАЛЕНО: Убираем фиксированную высоту */
+        min-height: 5cm;   /* <-- ДОБАВЛЕНО: Задаем минимальную высоту для единообразия */
+        border: 1px solid #ccc;
+        float: left;
+        margin: 5px;
+        padding: 15px; /* Немного увеличим внутренние отступы */
+        box-sizing: border-box;
+        page-break-inside: avoid;
+        
+        /* ИЗМЕНЕНИЯ В FLEXBOX */
+        display: flex;
+        flex-direction: column;
+        /* justify-content: space-between; */ /* <-- УДАЛЕНО: Это главная причина наслоения */
+        justify-content: flex-start;       /* <-- ИЗМЕНЕНО: Элементы будут идти от верха вниз */
+    }
+    .top-content {
+        flex-grow: 1; /* <-- ДОБАВЛЕНО: Блок с текстом будет занимать все доступное место */
+    }
+    .qr-code { 
+        text-align: center;
+        margin-top: 10px; /* <-- ДОБАВЛЕНО: Добавляем отступ сверху, чтобы отделить QR-код от текста */
+        flex-shrink: 0;   /* <-- ДОБАВЛЕНО: Запрещаем QR-коду сжиматься */
+    }
+    .qr-code img { 
+        max-width: 4cm; 
+        max-height: 4cm; 
+    }
+    .title { 
+        font-size: 14pt; 
+        font-weight: bold; 
+        text-align: center; 
+        margin-bottom: 5px; /* Добавим отступ после заголовка */
+    }
+    .description { 
+        font-size: 9pt; 
+        color: #333; 
+    }
+    .code-string { 
+        font-family: 'Courier New', monospace; 
+        font-size: 8pt; 
+        color: #666; 
+        text-align: center; 
+        margin-top: 3px;
+    }
+</style>
+</head>
+<body>
+    {% for label in labels %}
+    <div class="label">
+        <!-- Добавляем обертку для текстового контента -->
+        <div class="top-content">
+            <div class="title">{{ label.title }}</div>
+            <p class="description">{{ label.description }}</p>
+        </div>
+        
+        <div class="qr-code">
+            <img src="data:image/png;base64,{{ label.qr_base64 }}">
+            <div class="code-string">{{ label.code }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</body>
+</html>

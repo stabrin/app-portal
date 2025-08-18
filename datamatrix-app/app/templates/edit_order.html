@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>Редактирование тиражей в Заказе №{{ order.id }}</h2>
+    <p>Клиент: <strong>{{ order.client_name }}</strong>. Выберите тиражи, которые необходимо удалить из этого заказа.</p>
+    <hr>
+
+    <form method="post">
+        <input type="hidden" name="action" value="delete_tirages">
+        <table class="table table-bordered">
+            <thead class="table-light">
+                <tr>
+                    <th><input type="checkbox" id="select_all"></th>
+                    <th>Номер тиража</th>
+                    <th>GTIN</th>
+                    <th>Кол-во кодов</th>
+                    <th>Агрегация</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for tirage in tirages %}
+                <tr>
+                    <td>
+                        <input type="checkbox" class="form-check-input tirage-checkbox" name="tirages_to_delete" value="{{ tirage.tirage_number }}|{{ tirage.gtin }}">
+                    </td>
+                    <td>{{ tirage.tirage_number }}</td>
+                    <td><code>{{ tirage.gtin }}</code></td>
+                    <td>{{ tirage.dm_count }}</td>
+                    <td>
+                        {% if tirage.has_aggregation %}
+                            <span class="badge bg-success">Да</span>
+                        {% else %}
+                            <span class="badge bg-secondary">Нет</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center">В этом заказе нет тиражей.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if tirages %}
+        <button type="submit" class="btn btn-danger" onclick="return confirm('Вы уверены, что хотите удалить выбранные тиражи из заказа?');">Удалить выбранные тиражи</button>
+        {% endif %}
+        <a href="{{ url_for('.admin_page') }}" class="btn btn-secondary">Назад к списку заказов</a>
+    </form>
+<script>
+    // JS для выбора всех чекбоксов
+    document.getElementById('select_all').addEventListener('click', function(event) {
+        document.querySelectorAll('.tirage-checkbox').forEach(checkbox => {
+            checkbox.checked = event.target.checked;
+        });
+    });
+</script>
+{% endblock %}

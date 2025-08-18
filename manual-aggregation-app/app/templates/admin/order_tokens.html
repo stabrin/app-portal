@@ -1,0 +1,31 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}Коды доступа для заказа №{{ order_id }}{% endblock %}
+
+{% block content %}
+    <div class="card text-center">
+        <div class="card-header">
+            Успех!
+        </div>
+        <div class="card-body">
+            <h5 class="card-title">Сгенерировано {{ tokens|length }} кодов доступа для заказа №{{ order_id }}</h5>
+            <p class="card-text">Нажмите кнопку ниже, чтобы скачать PDF-файл с пропусками для печати.</p>
+            
+            <a href="{{ url_for('.download_tokens_pdf', order_id=order_id) }}" class="btn btn-success btn-lg my-3">
+                Скачать PDF с QR-кодами
+            </a>
+            
+            <p class="text-muted">Ниже приведен список сгенерированных токенов для справки:</p>
+            <ul class="list-group list-group-flush">
+            {% for token in tokens %}
+                <li class="list-group-item">
+                    <code>{{ token }}</code>
+                </li>
+            {% endfor %}
+            </ul>
+        </div>
+        <div class="card-footer text-muted">
+             <a href="{{ url_for('.dashboard') }}">Вернуться к списку заказов</a>
+        </div>
+    </div>
+{% endblock %}

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title or 'Datamatrix App' }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('.index') }}"><i class="bi bi-upc-scan"></i> Datamatrix App</a>
+            <div class="collapse navbar-collapse">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    {% if current_user.is_authenticated %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('.orders_list') }}">Заказы</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('.products_list') }}">Справочники</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('.reports_page') }}">Отчеты</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('.admin_page') }}">Администрирование</a></li>
+                    {% endif %}
+                </ul>
+                <div class="d-flex">
+                    {% if current_user.is_authenticated %}
+                        <span class="navbar-text me-3">
+                            <i class="bi bi-person-circle"></i> Привет, {{ current_user.username }}!
+                        </span>
+                        <a href="{{ url_for('.logout') }}" class="btn btn-outline-light">Выйти</a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+    <div class="container mt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category or 'info' }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

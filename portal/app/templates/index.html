@@ -1,0 +1,18 @@
+{% extends "portal_base.html" %}
+
+{% block title %}Главная{% endblock %}
+{% block main_class %}main-content--centered{% endblock %}
+ 
+{% block content %}
+<div class="selection-card">
+    <div class="welcome-section">
+        <h2>Добро пожаловать!</h2>
+        <p>Выберите приложение для начала работы.</p>
+    </div>
+ 
+    <nav class="app-links">
+        <a href="/datamatrix/" class="app-link-button"><span class="icon-datamatrix"></span>Обработка DataMatrix</a>
+        <a href="/manual-aggregation/" class="app-link-button"><span class="icon-manual"></span>Ручная агрегация</a>
+    </nav>
+</div>
+{% endblock %}

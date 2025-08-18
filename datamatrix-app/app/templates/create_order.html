@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>Создание нового заказа</h2>
+    <hr>
+    <form method="post">
+        <div class="mb-3">
+            <label for="client_name" class="form-label">Клиент</label>
+            <input type="text" class="form-control" id="client_name" name="client_name" required placeholder="Введите имя нового или существующего клиента">
+            <!-- В будущем здесь будет select с автодополнением -->
+        </div>
+        <div class="mb-3">
+            <label for="order_date" class="form-label">Дата заказа</label>
+            <input type="date" class="form-control" id="order_date" name="order_date" value="{{ today }}" required>
+        </div>
+        <div class="mb-3">
+            <label for="notes" class="form-label">Примечания</label>
+            <textarea class="form-control" id="notes" name="notes" rows="3"></textarea>
+        </div>
+        <button type="submit" class="btn btn-success">Создать и перейти к заказу</button>
+        <a href="{{ url_for('.index') }}" class="btn btn-secondary">Отмена</a>
+    </form>
+{% endblock %}

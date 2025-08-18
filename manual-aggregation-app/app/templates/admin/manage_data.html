@@ -1,0 +1,117 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}Администрирование данных{% endblock %}
+
+{% block content %}
+<h1 class="mb-4">Администрирование данных</h1>
+
+<!-- Блок полного удаления заказа -->
+<div class="card border-danger mb-4">
+    <div class="card-header bg-danger text-white">
+        <h5 class="mb-0">Полное удаление заказа</h5>
+    </div>
+    <div class="card-body">
+        <p class="card-text"><strong>Внимание:</strong> это действие необратимо. Будет удален сам заказ, все выданные сотрудникам QR-коды и все записи об агрегации, связанные с этим заказом.</p>
+        <form method="POST" action="{{ url_for('.manage_data') }}" onsubmit="return confirm('Вы уверены, что хотите ПОЛНОСТЬЮ удалить выбранный заказ и все его данные?');">
+            <input type="hidden" name="action" value="delete_order">
+            <div class="input-group">
+                <select class="form-select" name="order_id_to_delete" required>
+                    <option value="" disabled selected>--- Выберите заказ для удаления ---</option>
+                    {% for order in orders %}
+                        <option value="{{ order.id }}">
+                            Заказ №{{ order.id }} - {{ order.client_name }} (от {{ order.created_at.strftime('%d.%m.%Y') }})
+                        </option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-danger" type="submit">Удалить навсегда</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Блок управления агрегатами -->
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Просмотр и удаление записей агрегации</h5>
+    </div>
+    <div class="card-body">
+        <p>Выберите заказ, чтобы просмотреть и выборочно удалить записи о вложениях.</p>
+        
+        <!-- Форма для выбора заказа для просмотра -->
+        <form method="GET" action="{{ url_for('.manage_data') }}" class="mb-4">
+             <div class="input-group">
+                <select class="form-select" name="order_id_to_show" required>
+                    <option value="" disabled {% if not selected_order_id %}selected{% endif %}>--- Выберите заказ для просмотра ---</option>
+                    {% for order in orders %}
+                        <option value="{{ order.id }}" {% if order.id == selected_order_id %}selected{% endif %}>
+                            Заказ №{{ order.id }} - {{ order.client_name }} (от {{ order.created_at.strftime('%d.%m.%Y') }})
+                        </option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-secondary" type="submit">Показать записи</button>
+            </div>
+        </form>
+
+        <!-- Таблица с агрегатами (если выбраны) -->
+        {% if aggregations is not none %}
+            <hr>
+            <h4>Записи по заказу №{{ selected_order_id }}</h4>
+            {% if aggregations %}
+            <form method="POST" action="{{ url_for('.manage_data') }}" onsubmit="return confirm('Вы уверены, что хотите удалить выбранные записи?');">
+                <input type="hidden" name="action" value="delete_aggregations">
+                <input type="hidden" name="order_id" value="{{ selected_order_id }}">
+                
+                <div class="table-responsive">
+                    <table class="table table-striped table-bordered">
+                        <thead class="table-light">
+                            <tr>
+                                <th><input type="checkbox" id="select-all"></th>
+                                <th>ID</th>
+                                <th>Родитель (Код)</th>
+                                <th>Родитель (Тип)</th>
+                                <th>Потомок (Код)</th>
+                                <th>Потомок (Тип)</th>
+                                <th>Пропуск</th>
+                                <th>Время</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for agg in aggregations %}
+                            <tr>
+                                <td><input type="checkbox" name="aggregation_ids" value="{{ agg.id }}" class="agg-checkbox"></td>
+                                <td>{{ agg.id }}</td>
+                                <td>{{ agg.parent_code }}</td>
+                                <td>{{ agg.parent_type }}</td>
+                                <td>{{ agg.child_code }}</td>
+                                <td>{{ agg.child_type }}</td>
+                                <td>{{ agg.employee_token_id }}</td>
+                                <td>{{ agg.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <button type="submit" class="btn btn-warning mt-2">Удалить выбранные записи</button>
+            </form>
+            {% else %}
+            <div class="alert alert-info">По этому заказу еще нет записей об агрегации.</div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const selectAll = document.getElementById('select-all');
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.agg-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
+    }
+});
+</script>
+
+{% endblock %}

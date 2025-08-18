@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>Отчеты и интеграции</h2>
+    <hr>
+
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    Представления (VIEW) для Bartender
+                </div>
+                <div class="card-body">
+                    <p>Создает или обновляет представления в БД для использования в Bartender.</p>
+                    <form method="post" action="{{ url_for('.reports_page') }}">
+                        <input type="hidden" name="action" value="create_view">
+                        <div class="mb-3">
+                            <label for="view_order_id" class="form-label">Выберите заказ</label>
+                            <select class="form-select" id="view_order_id" name="order_id" required>
+                                <option value="" disabled selected>-- Выберите заказ --</option>
+                                {% for order in orders %}
+                                    <option value="{{ order.id }}">
+                                        Заказ №{{ order.id }} - {{ order.client_name }} ({{ order.order_date.strftime('%d.%m.%Y') }})
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Создать/Обновить View</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card h-100">
+                <div class="card-header">
+                    Отчет для декларанта
+                </div>
+                <div class="card-body">
+                    <p>Выгружает данные по заказу в формате Excel. Представления для заказа должны быть созданы.</p>
+                     <form method="post" action="{{ url_for('.reports_page') }}">
+                        <input type="hidden" name="action" value="declarator_report">
+                        <div class="mb-3">
+                            <label for="report_order_id" class="form-label">Выберите заказ</label>
+                            <select class="form-select" id="report_order_id" name="order_id" required>
+                                <option value="" disabled selected>-- Выберите заказ --</option>
+                                {% for order in orders %}
+                                    <option value="{{ order.id }}">
+                                        Заказ №{{ order.id }} - {{ order.client_name }} ({{ order.order_date.strftime('%d.%m.%Y') }})
+                                    </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-file-earmark-excel"></i> Скачать отчет
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

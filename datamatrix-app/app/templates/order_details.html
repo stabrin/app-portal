@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center">
+        <h2>Заказ №{{ order.id }} для клиента "{{ order.client_name }}"</h2>
+        <h4>Статус: <span class="badge bg-primary">{{ order.status }}</span></h4>
+    </div>
+    <p>Дата: {{ order.order_date.strftime('%d.%m.%Y') }}</p>
+    {% if order.notes %}
+    <div class="alert alert-info"><strong>Примечания:</strong> {{ order.notes }}</div>
+    {% endif %}
+    <hr>
+
+    <div class="accordion" id="orderActions">
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne">
+                    Шаг 1: Загрузка DataMatrix и Агрегация
+                </button>
+            </h2>
+            <div id="collapseOne" class="accordion-collapse collapse show" data-bs-parent="#orderActions">
+                <div class="accordion-body">
+                    <form method="post" enctype="multipart/form-data">
+                        <input type="hidden" name="action" value="process_dm">
+                        <div class="mb-3">
+                            <label for="dm_files" class="form-label">Выберите файлы (.csv, .txt) с кодами DataMatrix</label>
+                            <input class="form-control" type="file" id="dm_files" name="dm_files" multiple required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Тип кодов в файлах</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="dm_type" id="dm_standard" value="standard" checked>
+                                <label class="form-check-label" for="dm_standard">Стандартный (молоко, вода, и т.д.)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="dm_type" id="dm_tobacco" value="tobacco">
+                                <label class="form-check-label" for="dm_tobacco">Табачный (фиксированная длина 29 симв.)</label>
+                            </div>
+                        </div>
+                        <h5>Режим агрегации</h5>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="aggregation_mode" id="agg_none" value="none" checked>
+                            <label class="form-check-label" for="agg_none">Без агрегации</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="aggregation_mode" id="agg_level1" value="level1">
+                            <label class="form-check-label" for="agg_level1">Агрегация 1-го уровня (короба)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="aggregation_mode" id="agg_level2" value="level2">
+                            <label class="form-check-label" for="agg_level2">Агрегация 2-го уровня (паллеты)</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="aggregation_mode" id="agg_level3" value="level3">
+                            <label class="form-check-label" for="agg_level3">Агрегация 3-го уровня (контейнеры)</label>
+                        </div>
+
+                        <div id="level1_fields" class="ms-4 my-2" style="display: none;">
+                            <label for="level1_qty" class="form-label">Количество единиц товара в коробе</label>
+                            <input type="number" class="form-control" id="level1_qty" name="level1_qty" min="1">
+                        </div>
+                        <div id="level2_fields" class="ms-4 my-2" style="display: none;">
+                            <label for="level2_qty" class="form-label">Количество коробов на паллете</label>
+                            <input type="number" class="form-control" id="level2_qty" name="level2_qty" min="1">
+                        </div>
+                        <div id="level3_fields" class="ms-4 my-2" style="display: none;">
+                            <label for="level3_qty" class="form-label">Количество паллет в контейнере</label>
+                            <input type="number" class="form-control" id="level3_qty" name="level3_qty" min="1">
+                        </div>
+
+                        <button type="submit" class="btn btn-primary mt-3">Загрузить и обработать</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTwo">
+                    Шаг 2: Загрузка задания на агрегацию от клиента
+                </button>
+            </h2>
+            <div id="collapseTwo" class="accordion-collapse collapse" data-bs-parent="#orderActions">
+                <div class="accordion-body">
+                    <p>Загрузите файл от клиента, содержащий информацию для агрегации и печати этикеток SSCC.</p>
+                    <form action="{{ url_for('.order_details', order_id=order.id) }}" method="post" enctype="multipart/form-data">
+                        <input type="hidden" name="action" value="upload_foreign_sscc">
+                        <div class="mb-3">
+                            <label for="owner_name" class="form-label">Имя владельца кодов (Клиент)</label>
+                            <input type="text" class="form-control" id="owner_name" name="owner_name" value="{{ order.client_name }}" required>
+                        </div>
+                        <div class="mb-3">
+                            <label for="task_file" class="form-label">Файл задания (.csv)</label>
+                            <input class="form-control" type="file" id="task_file" name="task_file" required accept=".csv">
+                            <div class="form-text">
+                                Файл должен иметь колонки с заголовками: <strong>container_id, gtin, sscc</strong>.
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-info">Загрузить задание</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Здесь будут другие аккордеоны -->
+    </div>
+
+<script>
+    // JS для динамического отображения полей
+    document.querySelectorAll('input[name="aggregation_mode"]').forEach(radio => {
+        radio.addEventListener('change', function() {
+            let mode = this.value;
+            document.getElementById('level1_fields').style.display = (mode === 'level1' || mode === 'level2' || mode === 'level3') ? 'block' : 'none';
+            document.getElementById('level2_fields').style.display = (mode === 'level2' || mode === 'level3') ? 'block' : 'none';
+            document.getElementById('level3_fields').style.display = (mode === 'level3') ? 'block' : 'none';
+        });
+    });
+</script>
+{% endblock %}

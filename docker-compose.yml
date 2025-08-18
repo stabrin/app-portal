@@ -1,0 +1,67 @@
+services:
+  nginx:
+    build: ./nginx
+    container_name: portal_nginx
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./datamatrix-app/app/static:/app/datamatrix-static
+      - ./portal/app/static:/app/portal-static
+    depends_on:
+      - portal
+      - datamatrix-app
+      - manual-aggregation-app
+    networks:
+      - app-network
+
+  portal:
+    build: ./portal
+    container_name: portal_main
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  datamatrix-app:
+    build: ./datamatrix-app
+    container_name: datamatrix_app
+    restart: unless-stopped
+    volumes:
+      # Монтируем всю папку проекта в /app
+      - ./datamatrix-app:/app
+    environment:
+      # Передаем только нужные переменные
+      - DATABASE_URL=${DATABASE_URL}
+      - SECRET_KEY=${DATAMATRIX_SECRET_KEY}
+      - TABLE_PRODUCTS=${TABLE_PRODUCTS}
+      - TABLE_PACKAGES=${TABLE_PACKAGES}
+      - TABLE_ITEMS=${TABLE_ITEMS}
+      - TABLE_ORDERS=${TABLE_ORDERS}
+      - TABLE_AGGREGATION_TASKS=${TABLE_AGGREGATION_TASKS}
+      - PYTHONPATH=/app
+    networks:
+      - app-network
+
+  manual-aggregation-app:
+    build: ./manual-aggregation-app
+    container_name: manual_aggregation_app
+    restart: unless-stopped
+    networks:
+      - app-network
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - MANUAL_AGGREGATION_SECRET_KEY=${MANUAL_AGGREGATION_SECRET_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+  redis:
+    image: "redis:alpine"
+    container_name: portal_redis
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

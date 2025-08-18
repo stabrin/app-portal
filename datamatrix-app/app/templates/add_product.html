@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block content %}
+    <h2>Добавление нового товара</h2>
+    <p>Если товар с таким GTIN уже существует, его данные будут обновлены.</p>
+    <hr>
+    <form method="post">
+        <div class="mb-3">
+            <label for="gtin" class="form-label">GTIN (14 цифр)</label>
+            <input type="text" class="form-control" id="gtin" name="gtin" required maxlength="14" pattern="\d{14}">
+        </div>
+        <div class="mb-3">
+            <label for="name" class="form-label">Наименование</label>
+            <input type="text" class="form-control" id="name" name="name" required>
+        </div>
+        <div class="mb-3">
+            <label for="description_1" class="form-label">Описание 1</label>
+            <textarea class="form-control" id="description_1" name="description_1" rows="2"></textarea>
+        </div>
+        <div class="mb-3">
+            <label for="description_2" class="form-label">Описание 2</label>
+            <textarea class="form-control" id="description_2" name="description_2" rows="2"></textarea>
+        </div>
+        <div class="mb-3">
+            <label for="description_3" class="form-label">Описание 3</label>
+            <textarea class="form-control" id="description_3" name="description_3" rows="2"></textarea>
+        </div>
+
+        <button type="submit" class="btn btn-success">Сохранить</button>
+        <a href="{{ url_for('.products_list') }}" class="btn btn-secondary">Отмена</a>
+    </form>
+{% endblock %}

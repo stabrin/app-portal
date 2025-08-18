@@ -1,0 +1,12 @@
+Flask==3.0.0
+gunicorn==22.0.0
+psycopg2-binary # Для работы с PostgreSQL
+python-dotenv   # Для чтения .env в скрипте инициализации
+Flask-Login     # Для авторизации
+Flask-WTF       # Для форм
+bcrypt          # Для проверки паролей админов
+qrcode[pil]    # <-- НОВАЯ: для генерации QR-кодов
+WeasyPrint     # <-- НОВАЯ: для создания PDF из HTML
+redis
+pandas          # Для работы с данными и экспортом в Excel
+XlsxWriter      # Движок для создания Excel файлов

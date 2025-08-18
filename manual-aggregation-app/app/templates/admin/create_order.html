@@ -1,0 +1,55 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}Создать новый заказ{% endblock %}
+
+{% block content %}
+    <h1>Создать новый заказ на ручную агрегацию</h1>
+
+    <div class="card mt-4">
+        <div class="card-body">
+            <form method="POST" action="{{ url_for('manual_aggregation_app.create_order') }}">
+                {{ form.hidden_tag() }} {# <--- ВАЖНО: CSRF ТОКЕН #}
+
+                <div class="mb-3">
+                    {{ form.client_name.label(class="form-label") }}
+                    {{ form.client_name(class="form-control" + (" is-invalid" if form.client_name.errors else ""), placeholder="ООО 'Ромашка'") }}
+                    {% for error in form.client_name.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    {{ form.employee_count.label(class="form-label") }}
+                    {{ form.employee_count(class="form-control" + (" is-invalid" if form.employee_count.errors else "")) }}
+                     {% for error in form.employee_count.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">{{ form.levels.label }}</label>
+                    {% for subfield in form.levels %}
+                        <div class="form-check">
+                            {{ subfield(class="form-check-input") }}
+                            {{ subfield.label(class="form-check-label") }}
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="mb-3">
+                    {{ form.set_capacity.label(class="form-label") }}
+                    {{ form.set_capacity(class="form-control" + (" is-invalid" if form.set_capacity.errors else ""), placeholder="Например: 10") }}
+                    <div class="form-text">{{ form.set_capacity.description }}</div>
+                    {% for error in form.set_capacity.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
+                <div class="d-flex justify-content-between mt-4">
+                    <button type="submit" class="btn btn-primary">Создать и сгенерировать QR-коды</button>
+                    <a href="{{ url_for('manual_aggregation_app.dashboard') }}" class="btn btn-secondary">Отмена</a>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}

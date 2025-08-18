@@ -1,0 +1,54 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}Панель управления{% endblock %}
+
+{% block content %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1>Заказы на ручную агрегацию</h1>
+        <!-- Эта ссылка тоже исправлена на полный синтаксис для единообразия -->
+        <a href="{{ url_for('manual_aggregation_app.create_order') }}" class="btn btn-primary">Создать новый заказ</a>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            {% if orders %}
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th scope="col"># Заказа</th>
+                            <th scope="col">Клиент</th>
+                            <th scope="col">Дата создания</th>
+                            <th scope="col">Сотрудников</th>
+                            <th scope="col">Статус</th>
+                            <th scope="col">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in orders %}
+                        <tr>
+                            <th scope="row">{{ order.id }}</th>
+                            <td>{{ order.client_name }}</td>
+                            <td>{{ order.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>{{ order.employee_count }}</td>
+                            <td><span class="badge bg-secondary">{{ order.status }}</span></td>
+                            <td>
+                                <!-- ИЗМЕНЕНИЕ ЗДЕСЬ: Добавлен префикс блюпринта 'manual_aggregation_app' -->
+                                <a href="{{ url_for('manual_aggregation_app.edit_order', order_id=order.id) }}" class="btn btn-sm btn-outline-secondary">
+                                    Редактировать
+                                </a>
+                                
+                                <!-- И ЗДЕСЬ ТОЖЕ: Добавлен префикс 'manual_aggregation_app' -->
+                                <a href="{{ url_for('manual_aggregation_app.download_tokens_pdf', order_id=order.id) }}" class="btn btn-sm btn-outline-success">
+                                    Скачать QR
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="card-text">Пока нет ни одного заказа. Нажмите "Создать новый заказ", чтобы начать.</p>
+            {% endif %}
+        </div>
+    </div>
+{% endblock %}

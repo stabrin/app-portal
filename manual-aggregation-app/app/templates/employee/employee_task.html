@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Задание на агрегацию</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f0f2f5; }
+        .status-bar { font-size: 1.1rem; }
+        .scan-input {
+            height: 60px;
+            font-size: 1.5rem;
+            text-align: center;
+        }
+        .log-container {
+            height: 300px;
+            overflow-y: auto;
+            background-color: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: .375rem;
+            font-family: monospace;
+        }
+        .log-entry {
+            padding: 0.25rem 0.75rem;
+            border-bottom: 1px solid #eee;
+        }
+        .log-entry.error { color: #dc3545; font-weight: bold; }
+        .log-entry.success { color: #198754; }
+        .unit-display {
+            min-height: 100px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">Задание на агрегацию</span>
+            <a href="{{ url_for('.logout') }}" class="btn btn-outline-danger">Завершить смену</a>
+        </div>
+    </nav>
+
+    <main class="container mt-3">
+        <!-- Статус-бар -->
+        <div class="card status-bar mb-3">
+            <div class="card-body d-flex justify-content-between flex-wrap">
+                <span><strong>Сотрудник:</strong> {{ employee_name }}</span>
+                <span><strong>Заказ:</strong> №{{ order_id }} ({{ client_name }})</span>
+                <span><strong>Пропуск:</strong> №{{ pass_id.split(':')[1] }}</span>
+            </div>
+        </div>
+
+        <!-- Инструкция -->
+        <div class="card mb-3">
+            <div class="card-header fw-bold">
+                Инструкция по работе
+            </div>
+            <div class="card-body">
+                {# --- НОВАЯ ДИНАМИЧЕСКАЯ ИНСТРУКЦИЯ --- #}
+                {% if 'box' in aggregation_levels %}
+                <p><strong>Сценарий "Агрегация в КОРОБ":</strong></p>
+                <ol class="list-group list-group-numbered mb-3">
+                    <li class="list-group-item">Последовательно сканируйте DataMatrix-коды <strong>товаров (или наборов)</strong>, которые вы вкладываете в короб.</li>
+                    <li class="list-group-item">Когда все вложения отсканированы, отсканируйте <strong>SSCC-код самого короба</strong> (18 цифр).</li>
+                    <li class="list-group-item">Операция завершится и сохранится <strong>автоматически</strong> после сканирования SSCC.</li>
+                </ol>
+                {% endif %}
+
+                {% if 'set' in aggregation_levels %}
+                <p><strong>Сценарий "Агрегация в НАБОР":</strong></p>
+                <ol class="list-group list-group-numbered">
+                    <li class="list-group-item">Последовательно сканируйте DataMatrix-коды <strong>товаров</strong>, которые вы вкладываете в набор.</li>
+                    <li class="list-group-item">Когда все товары вложены, отсканируйте DataMatrix-код самого <strong>набора</strong>.</li>
+                    <li class="list-group-item">Для сохранения операции отсканируйте управляющий QR-код <strong>"ЗАВЕРШИТЬ ЮНИТ"</strong>.</li>
+                </ol>
+                {% endif %}
+
+                <p class="mt-2 mb-0 text-muted">Для отмены текущей сборки используйте QR-код "ОТМЕНИТЬ ЮНИТ". В случае ошибки система заблокируется — для продолжения работы потребуется сканирование пропуска старшего смены.</p>
+            </div>
+        </div>
+
+        <!-- Основная рабочая область -->
+        <div class="row">
+            <!-- Левая колонка: ввод и лог -->
+            <div class="col-md-7">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">Сканирование</h5>
+                        <p class="card-text text-muted">Установите курсор в поле ниже и начните сканировать коды.</p>
+                        <form id="scan-form" onsubmit="return false;">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <input type="text" id="scan-input" class="form-control scan-input" placeholder="Ожидание сканирования..." autocomplete="off" autofocus>
+                        </form>
+                        <div id="log-container" class="log-container mt-3 p-2">
+                            <div class="log-entry">Система готова к работе.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Правая колонка: текущая операция -->
+            <div class="col-md-5">
+                <div class="card">
+                    <div class="card-header fw-bold">
+                        Текущая операция
+                    </div>
+                    <div id="unit-display" class="card-body unit-display">
+                        <p id="unit-status" class="text-muted">Нет активной операции. Отсканируйте первый товар.</p>
+                        <ul id="unit-items" class="list-group">
+                            <!-- Сюда будут добавляться отсканированные товары -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const scanInput = document.getElementById('scan-input');
+            const scanForm = document.getElementById('scan-form');
+            const logContainer = document.getElementById('log-container');
+            const unitStatus = document.getElementById('unit-status');
+            const unitItemsList = document.getElementById('unit-items');
+            const csrfToken = document.querySelector('input[name="csrf_token"]').value;
+
+            scanInput.focus();
+            // Постоянно возвращаем фокус в поле ввода, т.к. это основное действие
+            document.body.addEventListener('click', () => scanInput.focus(), true);
+            scanInput.addEventListener('blur', () => scanInput.focus());
+
+            scanForm.addEventListener('submit', function(event) {
+                event.preventDefault();
+                const scannedCode = scanInput.value.trim();
+                if (scannedCode) {
+                    sendScanRequest(scannedCode);
+                }
+                scanInput.value = '';
+            });
+
+            function sendScanRequest(code) {
+                fetch("{{ url_for('api.handle_scan') }}", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    body: JSON.stringify({ scanned_code: code })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        // Если ответ не 2xx, создаем ошибку с текстом статуса для catch
+                        throw new Error(`Ошибка сервера: ${response.status} ${response.statusText}`);
+                    }
+                    return response.json(); // Если все хорошо, парсим JSON
+                })
+                .then(data => {
+                    if (data && data.message) {
+                        logMessage(data.message, data.status);
+                    }
+
+                    // Проверяем, не пришла ли от сервера команда на выход
+                    if (data && data.status === 'command' && data.command === 'logout') {
+                        window.location.href = "{{ url_for('.logout') }}";
+                        return; // Прерываем дальнейшую обработку
+                    }
+
+                    updateUI(data.session);
+                })
+                .catch(error => {
+                    // Теперь ошибка будет более информативной
+                    logMessage(error.message || 'Сетевая ошибка или ошибка парсинга ответа.', 'error');
+                });
+            }
+
+            function logMessage(message, status) {
+                const entry = document.createElement('div');
+                entry.className = `log-entry ${status || ''}`;
+                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                logContainer.prepend(entry);
+            }
+
+            function updateUI(session) {
+                if (!session) return;
+                const unit = session.payload.current_unit;
+                unitItemsList.innerHTML = '';
+                if (session.status === 'IDLE') {
+                    unitStatus.textContent = 'Нет активной операции. Отсканируйте первый товар.';
+                } else if (session.status.startsWith('AGGREGATING')) {
+                    const unitType = unit.type === 'set' ? 'набор' : 'короб';
+                    unitStatus.textContent = `Собирается ${unitType}. Отсканировано: ${unit.items.length}`;
+                    unit.items.forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item py-1';
+                        li.textContent = item;
+                        unitItemsList.appendChild(li);
+                    });
+                }
+            }
+        });
+    </script>
+</body>
+</html>
