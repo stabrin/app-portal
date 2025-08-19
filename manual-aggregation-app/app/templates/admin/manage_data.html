@@ -13,6 +13,7 @@
     <div class="card-body">
         <p class="card-text"><strong>Внимание:</strong> это действие необратимо. Будет удален сам заказ, все выданные сотрудникам QR-коды и все записи об агрегации, связанные с этим заказом.</p>
         <form method="POST" action="{{ url_for('.manage_data') }}" onsubmit="return confirm('Вы уверены, что хотите ПОЛНОСТЬЮ удалить выбранный заказ и все его данные?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="delete_order">
             <div class="input-group">
                 <select class="form-select" name="order_id_to_delete" required>
@@ -58,6 +59,7 @@
             <h4>Записи по заказу №{{ selected_order_id }}</h4>
             {% if aggregations %}
             <form method="POST" action="{{ url_for('.manage_data') }}" onsubmit="return confirm('Вы уверены, что хотите удалить выбранные записи?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="action" value="delete_aggregations">
                 <input type="hidden" name="order_id" value="{{ selected_order_id }}">
                 
