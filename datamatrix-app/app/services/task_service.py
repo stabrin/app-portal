@@ -3,6 +3,7 @@ import pandas as pd
 import csv
 from io import StringIO
 from app.db import get_db_connection
+from app.utils import upsert_data_to_db
 
 def process_aggregation_task_file(order_id: int, file_stream, owner_name: str) -> list:
     """

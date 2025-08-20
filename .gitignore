@@ -24,3 +24,6 @@ __pycache__/
 # Кэш сборки Docker
 .dockerignore
 docker-compose.override.yml
+
+# Directory for API testing scripts
+api_tests/
