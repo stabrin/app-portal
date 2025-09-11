@@ -17,10 +17,16 @@ def get_aggregation_report_for_order(order_id: int) -> dict:
             # Получаем все связи для данного заказа, включая ID сотрудника
             cur.execute(
                 """
-                SELECT parent_code, parent_type, child_code, child_type, employee_token_id
-                FROM ma_aggregations
-                WHERE order_id = %s
-                ORDER BY parent_code, child_code;
+                SELECT 
+                    agg.parent_code, 
+                    agg.parent_type, 
+                    agg.child_code, 
+                    agg.child_type,
+                    COALESCE(tok.employee_name, 'ID ' || tok.id::text) as employee_name
+                FROM ma_aggregations as agg
+                LEFT JOIN ma_employee_tokens as tok ON agg.employee_token_id = tok.id
+                WHERE agg.order_id = %s
+                ORDER BY agg.parent_code, agg.child_code;
                 """,
                 (order_id,)
             )
@@ -36,7 +42,7 @@ def get_aggregation_report_for_order(order_id: int) -> dict:
 
         for row in rows:
             parent_code = row['parent_code']
-            employee_id = row['employee_token_id']
+            employee_name = row['employee_name']
             
             # Собираем дерево
             tree[parent_code]['type'] = row['parent_type']
@@ -46,10 +52,10 @@ def get_aggregation_report_for_order(order_id: int) -> dict:
             })
             
             # Собираем данные для сводки: добавляем код упаковки в set сотрудника
-            employee_summary[employee_id].add(parent_code)
+            employee_summary[employee_name].add(parent_code)
 
         # Преобразуем сеты в количество уникальных упаковок
-        final_summary = {emp_id: len(parent_codes) for emp_id, parent_codes in employee_summary.items()}
+        final_summary = {emp_name: len(parent_codes) for emp_name, parent_codes in employee_summary.items()}
             
         return {"order_id": order_id, "tree": dict(tree), "employee_summary": final_summary}
 
@@ -71,16 +77,17 @@ def generate_aggregation_excel_report(order_id: int) -> io.BytesIO:
         # Выбираем все необходимые поля для отчета
         query = """
             SELECT 
-                id,
-                parent_code,
-                parent_type,
-                child_code,
-                child_type,
-                employee_token_id,
-                created_at
-            FROM ma_aggregations
-            WHERE order_id = %s
-            ORDER BY id;
+                agg.id,
+                agg.parent_code,
+                agg.parent_type,
+                agg.child_code,
+                agg.child_type,
+                COALESCE(tok.employee_name, 'ID ' || agg.employee_token_id::text) as employee_name,
+                agg.created_at
+            FROM ma_aggregations as agg
+            LEFT JOIN ma_employee_tokens as tok ON agg.employee_token_id = tok.id
+            WHERE agg.order_id = %s
+            ORDER BY agg.id;
         """
         # Используем pandas для удобного чтения из SQL и записи в Excel
         df = pd.read_sql_query(query, conn, params=(order_id,))
@@ -92,7 +99,7 @@ def generate_aggregation_excel_report(order_id: int) -> io.BytesIO:
             'parent_type': 'Тип упаковки',
             'child_code': 'Код вложения (потомок)',
             'child_type': 'Тип вложения',
-            'employee_token_id': 'ID пропуска сотрудника',
+            'employee_name': 'Сотрудник',
             'created_at': 'Время операции'
         }, inplace=True)
 

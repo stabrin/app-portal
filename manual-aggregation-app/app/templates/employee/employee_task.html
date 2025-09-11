@@ -68,11 +68,20 @@
 
                 {% if 'set' in aggregation_levels %}
                 <p><strong>Сценарий "Агрегация в НАБОР":</strong></p>
+                {# --- НОВАЯ ДИНАМИЧЕСКАЯ ИНСТРУКЦИЯ ДЛЯ НАБОРА --- #}
+                {% if set_capacity %}
+                <ol class="list-group list-group-numbered">
+                    <li class="list-group-item">Последовательно отсканируйте DataMatrix-коды <strong>{{ set_capacity }} товаров</strong>, которые вы вкладываете в набор.</li>
+                    <li class="list-group-item">Следующий ({{ set_capacity + 1 }}-й) отсканированный код будет считаться кодом самого <strong>набора</strong>.</li>
+                    <li class="list-group-item">Операция завершится и сохранится <strong>автоматически</strong> после сканирования кода набора.</li>
+                </ol>
+                {% else %}
                 <ol class="list-group list-group-numbered">
                     <li class="list-group-item">Последовательно сканируйте DataMatrix-коды <strong>товаров</strong>, которые вы вкладываете в набор.</li>
                     <li class="list-group-item">Когда все товары вложены, отсканируйте DataMatrix-код самого <strong>набора</strong>.</li>
                     <li class="list-group-item">Для сохранения операции отсканируйте управляющий QR-код <strong>"ЗАВЕРШИТЬ ЮНИТ"</strong>.</li>
                 </ol>
+                {% endif %}
                 {% endif %}
 
                 <p class="mt-2 mb-0 text-muted">Для отмены текущей сборки используйте QR-код "ОТМЕНИТЬ ЮНИТ". В случае ошибки система заблокируется — для продолжения работы потребуется сканирование пропуска старшего смены.</p>
@@ -171,25 +180,35 @@
             }
 
             function logMessage(message, status) {
+                const gs_char = String.fromCharCode(29);
+                const highlighted_message = message.replace(new RegExp(gs_char, 'g'), '<span class="text-danger fw-bold">[GS]</span>');
+
                 const entry = document.createElement('div');
                 entry.className = `log-entry ${status || ''}`;
-                entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${highlighted_message}`;
                 logContainer.prepend(entry);
             }
 
             function updateUI(session) {
                 if (!session) return;
+
+                const gs_char = String.fromCharCode(29);
+                const highlight_gs = (text) => text.replace(new RegExp(gs_char, 'g'), '<span class="text-danger fw-bold">[GS]</span>');
+
                 const unit = session.payload.current_unit;
                 unitItemsList.innerHTML = '';
+
                 if (session.status === 'IDLE') {
                     unitStatus.textContent = 'Нет активной операции. Отсканируйте первый товар.';
                 } else if (session.status.startsWith('AGGREGATING')) {
                     const unitType = unit.type === 'set' ? 'набор' : 'короб';
                     unitStatus.textContent = `Собирается ${unitType}. Отсканировано: ${unit.items.length}`;
+
                     unit.items.forEach(item => {
                         const li = document.createElement('li');
                         li.className = 'list-group-item py-1';
-                        li.textContent = item;
+                        // Используем innerHTML для отображения стилизованных [GS] символов
+                        li.innerHTML = highlight_gs(item);
                         unitItemsList.appendChild(li);
                     });
                 }

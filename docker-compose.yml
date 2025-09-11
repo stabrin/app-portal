@@ -12,6 +12,7 @@ services:
       - portal
       - datamatrix-app
       - manual-aggregation-app
+      - dmkod-integration-app
     networks:
       - app-network
 
@@ -61,6 +62,16 @@ services:
     restart: unless-stopped
     networks:
       - app-network
+  
+  dmkod-integration-app:
+    build: ./dmkod-integration-app
+    container_name: dmkod-integration-app
+    restart: unless-stopped
+    networks:
+      - app-network
+    environment:
+      - API_BASE_URL=${API_BASE_URL}
+    
 
 networks:
   app-network:

@@ -1,0 +1,13 @@
+{% extends "layout.html" %}
+{% block title %}Вход в систему{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-md-6">
+    <h2 class="text-center">Вход в систему интеграции</h2>
+    <form method="POST" action="">
+        {{ form.hidden_tag() }}
+        <div class="mb-3">{{ form.username.label(class="form-label") }}{{ form.username(class="form-control") }}</div>
+        <div class="mb-3">{{ form.password.label(class="form-label") }}{{ form.password(class="form-control") }}</div>
+        {{ form.submit(class="btn btn-primary w-100") }}
+    </form>
+</div></div>
+{% endblock %}

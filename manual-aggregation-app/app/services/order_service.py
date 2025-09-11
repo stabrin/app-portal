@@ -111,6 +111,41 @@ def get_tokens_for_order(order_id: int) -> list:
             return cur.fetchall()
     return []
 
+def assign_name_to_token(access_token: str, employee_name: str) -> bool:
+    """Присваивает имя сотрудника токену доступа."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE ma_employee_tokens SET employee_name = %s WHERE access_token = %s;",
+                (employee_name, access_token)
+            )
+            # Проверяем, была ли обновлена хотя бы одна строка
+            success = cur.rowcount > 0
+        conn.commit()
+        return success
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"КРИТИЧЕСКАЯ ОШИБКА в assign_name_to_token: {e}")
+        return False
+    finally:
+        if conn: conn.close()
+
+def get_token_details_by_id(token_id: int):
+    """Получает детали токена по его ID, включая имя сотрудника."""
+    conn = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM ma_employee_tokens WHERE id = %s;", (token_id,))
+            return cur.fetchone()
+    except Exception as e:
+        print(f"КРИТИЧЕСКАЯ ОШИБКА в get_token_details_by_id: {e}")
+        return None
+    finally:
+        if conn: conn.close()
+
 def delete_order_completely(order_id: int) -> dict:
     """
     Полностью удаляет заказ и все связанные с ним данные (токены, агрегации).
