@@ -56,10 +56,12 @@
 
             <div class="card mt-4">
                 <div class="card-body">
-                    <div class="mb-3">
-                        <label for="scan-input" class="form-label"><strong>Поле для сканирования</strong></label>
-                        <input type="text" id="scan-input" class="form-control form-control-lg" placeholder="Ожидание сканирования..." autocomplete="off" autofocus>
-                    </div>
+                    <form id="scan-form" onsubmit="return false;">
+                        <div class="mb-3">
+                            <label for="scan-input" class="form-label"><strong>Поле для сканирования</strong></label>
+                            <input type="text" id="scan-input" class="form-control form-control-lg" placeholder="Ожидание сканирования..." autocomplete="off" autofocus>
+                        </div>
+                    </form>
 
                     <div id="result-container" class="d-none">
                         <hr>
@@ -138,9 +140,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     scanInput.addEventListener('blur', () => scanInput.focus());
 
+    const scanForm = document.getElementById('scan-form');
 
-    scanInput.addEventListener('change', function(event) {
-        const code = event.target.value; // Не тримим, чтобы видеть пробелы по краям
+    scanForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const code = scanInput.value; // Не тримим, чтобы видеть пробелы по краям
         if (!code) {
             return;
         }
