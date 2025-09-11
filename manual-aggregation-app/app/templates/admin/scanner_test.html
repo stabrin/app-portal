@@ -42,12 +42,13 @@
                 <div class="card-body">
                     <p>Эта страница поможет вам проверить, правильно ли ваш сканер (например, Zebra DS2208) передает коды DataMatrix в систему.</p>
                     <ol>
-                        <li><strong>Цель:</strong> Убедиться, что сканер передает специальный невидимый символ-разделитель <strong>GS (Group Separator)</strong>. Система использует его для корректного разбора кода.</li>
+                        <li><strong>Цель:</strong> Убедиться, что сканер передает разделитель групп, который система сможет распознать. Чаще всего браузеры преобразуют невидимый символ <strong>GS (Group Separator)</strong> в обычный пробел.</li>
                         <li><strong>Тест:</strong> Установите курсор в поле "Поле для сканирования" и отсканируйте любой DataMatrix код с товара.</li>
                         <li><strong>Анализ:</strong>
                             <ul>
-                                <li><strong class="text-success">УСПЕХ:</strong> Если в таблице "Посимвольный анализ" появится зеленая строка с `Char Code = 29`, а вверху - зеленое сообщение, ваш сканер настроен верно.</li>
-                                <li><strong class="text-danger">ПРОБЛЕМА:</strong> Если такой строки нет, но есть пробелы (Char Code = 32), или результат не появляется, сканер нужно настроить.</li>
+                                <li><strong class="text-success">УСПЕХ:</strong> Если в таблице анализа появится строка с <strong>пробелом (Char Code 32)</strong>. Это стандартное и ожидаемое поведение для веб-приложений. Система на сервере автоматически преобразует его обратно в GS.</li>
+                                <li><strong class="text-primary">ИДЕАЛЬНО:</strong> Если в таблице появится строка с <strong>GS (Char Code 29)</strong>. Это означает, что ваш браузер не заменяет символ, что тоже хорошо.</li>
+                                <li><strong class="text-danger">ПРОБЛЕМА:</strong> Если в отсканированном коде на месте разделителя <strong>нет ни пробела, ни символа GS</strong> (т.е. части кода слиплись). Это означает, что браузер полностью вырезает символ, что может помешать работе.</li>
                             </ul>
                         </li>
                     </ol>
@@ -90,6 +91,20 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Новый блок для отладки -->
+            <div class="card mt-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">Журнал событий клавиатуры (Live Debug Log)</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">
+                        Если тест по-прежнему не проходит, пожалуйста, отсканируйте код и скопируйте весь текст из поля ниже.
+                        Это поможет разработчику точно определить, какие сигналы отправляет сканер.
+                    </p>
+                    <pre id="debug-log" style="height: 200px; overflow-y: scroll; border: 1px solid #ccc; background: #f8f9fa; padding: 10px; font-size: 0.8rem;"></pre>
+                </div>
+            </div>
         </div>
 
         <div class="col-lg-4">
@@ -129,6 +144,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const statusMessage = document.getElementById('status-message');
     const rawStringOutput = document.getElementById('raw-string-output');
     const analysisTableBody = document.querySelector('#char-analysis-table tbody');
+    const debugLog = document.getElementById('debug-log');
 
     // Фокусируемся на поле ввода
     scanInput.focus();
@@ -140,17 +156,46 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     scanInput.addEventListener('blur', () => scanInput.focus());
 
-    const scanForm = document.getElementById('scan-form');
+    // --- НОВАЯ, БОЛЕЕ НАДЕЖНАЯ ЛОГИКА ОБРАБОТКИ ВВОДА ---
+    // Проблема: Некоторые браузеры полностью вырезают управляющие символы (типа GS)
+    // из значения input.value. Предыдущий метод, читающий input.value по событию submit,
+    // никогда не видел этот символ.
+    // Решение: Мы слушаем события нажатия клавиш (keydown) и собираем свой собственный
+    // "чистый" буфер данных. Это позволяет нам перехватить символ GS (event.key === 'GroupSeparator')
+    // до того, как браузер его удалит. Анализ будет проводиться по нашему буферу, а не по input.value.
 
-    scanForm.addEventListener('submit', function(event) {
-        event.preventDefault();
-        const code = scanInput.value; // Не тримим, чтобы видеть пробелы по краям
-        if (!code) {
+    let scanBuffer = '';
+
+    scanInput.addEventListener('keydown', function(event) {
+        // --- ДИАГНОСТИКА: Логируем каждое нажатие, чтобы понять, что видит браузер ---
+        const logMessage = `Key: "${event.key}", Code: "${event.code}", KeyCode: ${event.keyCode}, Which: ${event.which}\n`;
+        // Используем textContent, чтобы избежать проблем с HTML-инъекцией
+        debugLog.textContent += logMessage;
+        // Автоматическая прокрутка вниз
+        debugLog.scrollTop = debugLog.scrollHeight;
+        // --- КОНЕЦ ДИАГНОСТИКИ ---
+
+        // Сканер закончил ввод и прислал "Enter"
+        if (event.key === 'Enter') {
+            event.preventDefault(); // Предотвращаем отправку формы
+            if (scanBuffer) {
+                analyzeCode(scanBuffer);
+                scanBuffer = ''; // Очищаем наш буфер
+                scanInput.value = ''; // Очищаем видимое поле
+            }
             return;
         }
 
-        analyzeCode(code);
-        scanInput.value = ''; // Очищаем для следующего сканирования
+        // Мы поймали специальный символ-разделитель!
+        // Проверяем и современное свойство 'key' и устаревшее, но надежное 'keyCode'
+        if (event.key === 'GroupSeparator' || event.keyCode === 29) {
+            event.preventDefault(); // Не даем браузеру обработать его (и, возможно, вырезать)
+            scanBuffer += '\x1d'; // Добавляем настоящий символ GS (код 29) в наш буфер
+        } else if (event.key.length === 1) {
+            // Это обычный печатный символ (буква, цифра, знак)
+            scanBuffer += event.key;
+        }
+        // Другие управляющие клавиши (Shift, Alt, F5 и т.д.) будут проигнорированы
     });
 
     function analyzeCode(code) {
@@ -159,6 +204,7 @@ document.addEventListener('DOMContentLoaded', function() {
         analysisTableBody.innerHTML = ''; // Очищаем таблицу
 
         let gsFound = false;
+        let spaceFound = false;
         const GS_CHAR_CODE = 29;
 
         for (let i = 0; i < code.length; i++) {
@@ -185,7 +231,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 gsFound = true;
                 row.classList.add('gs-found', 'table-success');
             } else if (char === ' ') {
-                note = 'Пробел';
+                note = 'Пробел (вероятная замена GS)';
+                spaceFound = true;
+                row.classList.add('table-info');
             } else if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
                 note = 'Непечатаемый управляющий символ';
             }
@@ -196,15 +244,21 @@ document.addEventListener('DOMContentLoaded', function() {
         if (gsFound) {
             statusMessage.innerHTML = `
                 <div class="alert alert-success">
-                    <strong>УСПЕХ!</strong> Символ-разделитель GS (Char Code 29) успешно обнаружен. Ваш сканер настроен правильно.
+                    <strong>ИДЕАЛЬНЫЙ РЕЗУЛЬТАТ!</strong> Символ-разделитель GS (Char Code 29) успешно обнаружен. Ваш сканер и браузер передают код без изменений.
+                </div>
+            `;
+        } else if (spaceFound) {
+            statusMessage.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>УСПЕХ!</strong> Обнаружен пробел (Char Code 32). Это <strong>нормальное и ожидаемое поведение</strong> в большинстве браузеров, которые заменяют невидимый символ GS на пробел. Система настроена на обработку такой замены.
                 </div>
             `;
         } else {
             statusMessage.innerHTML = `
                 <div class="alert alert-danger">
-                    <strong>ПРОВЕРКА НЕ ПРОЙДЕНА.</strong> Символ-разделитель GS (Char Code 29) не найден.
+                    <strong>ПРОВЕРКА НЕ ПРОЙДЕНА.</strong> В коде не обнаружен ни символ-разделитель GS (код 29), ни пробел на его месте.
                     <br>
-                    Если в коде есть пробелы, вероятно, сканер заменяет GS на пробел. Попробуйте перенастроить сканер с помощью штрихкодов справа.
+                    Это означает, что браузер может полностью вырезать управляющий символ. Работа системы не гарантируется. Попробуйте использовать другой браузер или обратитесь к администратору.
                 </div>
             `;
         }
