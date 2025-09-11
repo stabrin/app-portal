@@ -148,14 +148,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Фокусируемся на поле ввода
     scanInput.focus();
-    document.body.addEventListener('click', (e) => {
-        // Не перехватываем клики по ссылкам и кнопкам
-        if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON') {
+    document.body.addEventListener('click', function(e) {
+        // Цель: всегда держать фокус на поле ввода для сканера,
+        // НО позволять пользователю взаимодействовать с важными элементами:
+        // ссылками, кнопками и, что важно, областями, откуда нужно копировать текст.
+        const isInteractive = e.target.closest('a, button, #result-container, #debug-log');
+
+        if (!isInteractive) {
             scanInput.focus();
         }
     });
-    scanInput.addEventListener('blur', () => scanInput.focus());
-
+    // Агрессивный обработчик 'blur' удален, так как он мешал выделению текста в логах.
     // --- НОВАЯ, БОЛЕЕ НАДЕЖНАЯ ЛОГИКА ОБРАБОТКИ ВВОДА ---
     // Проблема: Некоторые браузеры полностью вырезают управляющие символы (типа GS)
     // из значения input.value. Предыдущий метод, читающий input.value по событию submit,
@@ -165,30 +168,63 @@ document.addEventListener('DOMContentLoaded', function() {
     // до того, как браузер его удалит. Анализ будет проводиться по нашему буферу, а не по input.value.
 
     let scanBuffer = '';
+    // --- НОВАЯ ЛОГИКА ДЛЯ ALT-NUMPAD ---
+    // Флаг, что мы находимся в процессе ввода Alt-кода (например, Alt + 0029)
+    let isAltSequence = false;
+    // Буфер для цифр, вводимых при зажатом Alt
+    let altCodeBuffer = '';
 
     scanInput.addEventListener('keydown', function(event) {
         // --- ДИАГНОСТИКА: Логируем каждое нажатие, чтобы понять, что видит браузер ---
-        const logMessage = `Key: "${event.key}", Code: "${event.code}", KeyCode: ${event.keyCode}, Which: ${event.which}\n`;
+        const logMessage = `KEYDOWN -> Key: "${event.key}", Code: "${event.code}", KeyCode: ${event.keyCode}\n`;
         // Используем textContent, чтобы избежать проблем с HTML-инъекцией
         debugLog.textContent += logMessage;
         // Автоматическая прокрутка вниз
         debugLog.scrollTop = debugLog.scrollHeight;
         // --- КОНЕЦ ДИАГНОСТИКИ ---
 
-        // Сканер закончил ввод и прислал "Enter"
+        // 1. Завершение сканирования по Enter
         if (event.key === 'Enter') {
             event.preventDefault(); // Предотвращаем отправку формы
             if (scanBuffer) {
                 analyzeCode(scanBuffer);
                 scanBuffer = ''; // Очищаем наш буфер
+                isAltSequence = false; // Сбрасываем все состояния
+                altCodeBuffer = '';
                 scanInput.value = ''; // Очищаем видимое поле
             }
             return;
         }
 
-        // Мы поймали специальный символ-разделитель!
-        // Проверяем и современное свойство 'key' и устаревшее, но надежное 'keyCode'
-        if (event.key === 'GroupSeparator' || event.keyCode === 29) {
+        // 2. Обработка последовательности Alt-Numpad
+        // Начало последовательности (нажатие Alt)
+        if (event.key === 'Alt' && !isAltSequence) {
+            isAltSequence = true;
+            altCodeBuffer = '';
+            event.preventDefault();
+            return;
+        }
+
+        // Сбор цифр во время удержания Alt
+        if (isAltSequence && event.code.startsWith('Numpad')) {
+            altCodeBuffer += event.key;
+            event.preventDefault();
+            return;
+        }
+
+        // Если пришла не цифра во время Alt-последовательности, сбрасываем
+        if (isAltSequence) {
+            // Это означает, что была нажата какая-то другая клавиша,
+            // прерывающая последовательность Alt-Numpad.
+            isAltSequence = false;
+            altCodeBuffer = '';
+        }
+
+        // 3. Обработка обычных символов и обратная совместимость
+        // Этот блок сработает, только если мы НЕ в середине Alt-последовательности.
+
+        // Прямой перехват GS (если сканер настроен иначе)
+        if (event.key === 'GroupSeparator' || event.keyCode === 29) { // keyCode 29 - это GS
             event.preventDefault(); // Не даем браузеру обработать его (и, возможно, вырезать)
             scanBuffer += '\x1d'; // Добавляем настоящий символ GS (код 29) в наш буфер
         } else if (event.key.length === 1) {
@@ -196,6 +232,29 @@ document.addEventListener('DOMContentLoaded', function() {
             scanBuffer += event.key;
         }
         // Другие управляющие клавиши (Shift, Alt, F5 и т.д.) будут проигнорированы
+    });
+
+    scanInput.addEventListener('keyup', function(event) {
+        // --- ДИАГНОСТИКА ---
+        const logMessage = `KEYUP   -> Key: "${event.key}", Code: "${event.code}", KeyCode: ${event.keyCode}\n`;
+        debugLog.textContent += logMessage;
+        debugLog.scrollTop = debugLog.scrollHeight;
+        // --- КОНЕЦ ДИАГНОСТИКИ ---
+
+        // Завершение последовательности Alt-Numpad (отпускание Alt)
+        if (event.key === 'Alt' && isAltSequence) {
+            isAltSequence = false;
+            if (altCodeBuffer) {
+                try {
+                    const charCode = parseInt(altCodeBuffer, 10);
+                    if (!isNaN(charCode) && charCode > 0) {
+                        scanBuffer += String.fromCharCode(charCode);
+                    }
+                } catch (e) { /* Игнорируем ошибки парсинга */ }
+            }
+            altCodeBuffer = '';
+            event.preventDefault();
+        }
     });
 
     function analyzeCode(code) {

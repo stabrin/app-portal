@@ -133,18 +133,57 @@
             const unitItemsList = document.getElementById('unit-items');
             const csrfToken = document.querySelector('input[name="csrf_token"]').value;
 
-            scanInput.focus();
-            // Постоянно возвращаем фокус в поле ввода, т.к. это основное действие
-            document.body.addEventListener('click', () => scanInput.focus(), true);
-            scanInput.addEventListener('blur', () => scanInput.focus());
+            // --- НАЧАЛО: НАДЕЖНАЯ ОБРАБОТКА ВВОДА СО СКАНЕРА ---
+            // Этот код перенесен со страницы тестирования для обеспечения
+            // корректного захвата символа GS, в том числе в режиме Alt-Numpad.
 
-            scanForm.addEventListener('submit', function(event) {
-                event.preventDefault();
-                const scannedCode = scanInput.value.trim();
-                if (scannedCode) {
-                    sendScanRequest(scannedCode);
+            let scanBuffer = '';
+            let isAltSequence = false;
+            let altCodeBuffer = '';
+
+            // Умная фокусировка на поле ввода, не мешающая кликам по ссылкам/кнопкам
+            scanInput.focus();
+            document.body.addEventListener('click', function(e) {
+                if (!e.target.closest('a, button')) {
+                    scanInput.focus();
                 }
-                scanInput.value = '';
+            });
+
+            // Обработчики событий клавиатуры для перехвата сканера
+            scanInput.addEventListener('keydown', function(event) {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (scanBuffer) {
+                        sendScanRequest(scanBuffer);
+                        scanBuffer = ''; isAltSequence = false; altCodeBuffer = ''; scanInput.value = '';
+                    }
+                    return;
+                }
+                if (event.key === 'Alt' && !isAltSequence) {
+                    isAltSequence = true; altCodeBuffer = ''; event.preventDefault(); return;
+                }
+                if (isAltSequence && event.code.startsWith('Numpad')) {
+                    altCodeBuffer += event.key; event.preventDefault(); return;
+                }
+                if (isAltSequence) { isAltSequence = false; altCodeBuffer = ''; }
+                if (event.key === 'GroupSeparator' || event.keyCode === 29) {
+                    event.preventDefault(); scanBuffer += '\x1d';
+                } else if (event.key.length === 1) {
+                    scanBuffer += event.key;
+                }
+            });
+
+            scanInput.addEventListener('keyup', function(event) {
+                if (event.key === 'Alt' && isAltSequence) {
+                    isAltSequence = false;
+                    if (altCodeBuffer) {
+                        try {
+                            const charCode = parseInt(altCodeBuffer, 10);
+                            if (!isNaN(charCode) && charCode > 0) scanBuffer += String.fromCharCode(charCode);
+                        } catch (e) { /* ignore */ }
+                    }
+                    altCodeBuffer = ''; event.preventDefault();
+                }
             });
 
             function sendScanRequest(code) {
@@ -179,21 +218,35 @@
                 });
             }
 
-            function logMessage(message, status) {
-                const gs_char = String.fromCharCode(29);
-                const highlighted_message = message.replace(new RegExp(gs_char, 'g'), '<span class="text-danger fw-bold">[GS]</span>');
+            // --- КОНЕЦ: НАДЕЖНАЯ ОБРАБОТКА ВВОДА СО СКАНЕРА ---
 
+            /**
+             * Безопасно заменяет невидимый символ GS на видимый и стилизованный HTML-элемент.
+             * Экранирует остальные части строки, чтобы избежать HTML-инъекций из отсканированного кода.
+             */
+            function GStoHTML(text) {
+                const gs_char = String.fromCharCode(29);
+                // Вспомогательная функция для экранирования HTML.
+                const escape = (str) => {
+                    const p = document.createElement('p');
+                    p.textContent = str;
+                    return p.innerHTML;
+                };
+                // Разделяем строку по символу GS, экранируем каждую часть и соединяем обратно
+                // с нашим стилизованным HTML. Это предотвращает поломку верстки, если в коде
+                // есть символы '<' или '>'.
+                return text.split(gs_char).map(escape).join('<span class="text-danger fw-bold">[GS]</span>');
+            }
+
+            function logMessage(message, status) {
                 const entry = document.createElement('div');
                 entry.className = `log-entry ${status || ''}`;
-                entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${highlighted_message}`;
+                entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${GStoHTML(message)}`;
                 logContainer.prepend(entry);
             }
 
             function updateUI(session) {
                 if (!session) return;
-
-                const gs_char = String.fromCharCode(29);
-                const highlight_gs = (text) => text.replace(new RegExp(gs_char, 'g'), '<span class="text-danger fw-bold">[GS]</span>');
 
                 const unit = session.payload.current_unit;
                 unitItemsList.innerHTML = '';
@@ -208,7 +261,7 @@
                         const li = document.createElement('li');
                         li.className = 'list-group-item py-1';
                         // Используем innerHTML для отображения стилизованных [GS] символов
-                        li.innerHTML = highlight_gs(item);
+                        li.innerHTML = GStoHTML(item);
                         unitItemsList.appendChild(li);
                     });
                 }

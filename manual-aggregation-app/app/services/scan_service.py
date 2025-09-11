@@ -49,10 +49,12 @@ def process_scan(employee_token_id: int, order_info: dict, scanned_code: str) ->
 
     # Если это не команда, то это код данных (DM, SSCC).
     # Некоторые сканеры заменяют непечатаемый символ GS (ASCII 29) на пробел.
-    # Чтобы унифицировать обработку, мы заменяем пробелы обратно на GS_SEPARATOR.
+    # Ранее здесь была замена пробелов на GS, но это могло приводить к ошибкам,
+    # если в коде были легитимные пробелы. Теперь мы полностью полагаемся на
+    # новую логику фронтенда, которая гарантированно присылает корректный символ GS (\x1d).
     # .strip() убирает случайные пробелы/переводы строк по краям, которые может добавить сканер.
     if not is_command:
-        scanned_code = scanned_code.strip().replace(' ', GS_SEPARATOR)
+        scanned_code = scanned_code.strip()
 
     try:
         processor = ScanProcessor(employee_token_id, order_info)
