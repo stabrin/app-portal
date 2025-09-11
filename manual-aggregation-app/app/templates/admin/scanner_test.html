@@ -1,0 +1,210 @@
+{% extends "admin/base_admin.html" %}
+
+{% block title %}Тестирование сканера{% endblock %}
+
+{% block content %}
+<style>
+    #char-analysis-table td, #char-analysis-table th {
+        font-family: monospace;
+        padding: 0.4rem;
+    }
+    .gs-found {
+        background-color: #d1e7dd !important;
+        font-weight: bold;
+    }
+    .barcode-instruction {
+        background-color: #fff;
+        border: 1px solid #dee2e6;
+        padding: 15px;
+        border-radius: 5px;
+    }
+    .barcode-instruction img {
+        display: block;
+        margin: 0 auto;
+        max-width: 250px;
+        border: 1px solid #ccc;
+    }
+    /* Позволяет скрыть стандартный курсор в поле ввода, т.к. используется сканер */
+    #scan-input:focus {
+        caret-color: transparent;
+    }
+</style>
+
+<div class="container-fluid mt-3">
+    <h1 class="mb-4">Тестирование и настройка сканера</h1>
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Инструкция</h5>
+                </div>
+                <div class="card-body">
+                    <p>Эта страница поможет вам проверить, правильно ли ваш сканер (например, Zebra DS2208) передает коды DataMatrix в систему.</p>
+                    <ol>
+                        <li><strong>Цель:</strong> Убедиться, что сканер передает специальный невидимый символ-разделитель <strong>GS (Group Separator)</strong>. Система использует его для корректного разбора кода.</li>
+                        <li><strong>Тест:</strong> Установите курсор в поле "Поле для сканирования" и отсканируйте любой DataMatrix код с товара.</li>
+                        <li><strong>Анализ:</strong>
+                            <ul>
+                                <li><strong class="text-success">УСПЕХ:</strong> Если в таблице "Посимвольный анализ" появится зеленая строка с `Char Code = 29`, а вверху - зеленое сообщение, ваш сканер настроен верно.</li>
+                                <li><strong class="text-danger">ПРОБЛЕМА:</strong> Если такой строки нет, но есть пробелы (Char Code = 32), или результат не появляется, сканер нужно настроить.</li>
+                            </ul>
+                        </li>
+                    </ol>
+                </div>
+            </div>
+
+            <div class="card mt-4">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label for="scan-input" class="form-label"><strong>Поле для сканирования</strong></label>
+                        <input type="text" id="scan-input" class="form-control form-control-lg" placeholder="Ожидание сканирования..." autocomplete="off" autofocus>
+                    </div>
+
+                    <div id="result-container" class="d-none">
+                        <hr>
+                        <div id="status-message"></div>
+                        <div class="mt-3">
+                            <h6>Сырая строка (Raw String):</h6>
+                            <pre><code id="raw-string-output" class="text-break"></code></pre>
+                        </div>
+                        <div class="mt-3">
+                            <h6>Посимвольный анализ:</h6>
+                            <div class="table-responsive">
+                                <table class="table table-bordered table-sm" id="char-analysis-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Символ</th>
+                                            <th>Char Code (Dec)</th>
+                                            <th>Примечание</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Сюда будут добавлены строки с анализом -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">Настройка сканера Zebra</h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Если тест не пройден, последовательно отсканируйте эти управляющие штрихкоды из официального руководства.</p>
+                    
+                    <div class="barcode-instruction mb-3 text-center">
+                        <h6>1. Сброс к заводским настройкам</h6>
+                        <p><small>Возвращает сканер в исходное состояние.</small></p>
+                        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAA8CAYAAACqQSPAAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAIyklEQVR42u2de2xV1R3HP/fcc+89l7aXltJWekFaaVtLpYJpY5SgI6BRxGCMiTEaY4xJjDExxhj/YkyiSXzR+EOMiTExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRx
+                    </div>
+
+                    <div class="barcode-instruction mb-3 text-center">
+                        <h6>2. Добавить суффикс "Enter"</h6>
+                        <p><small>Сканер будет автоматически нажимать Enter после каждого сканирования. Это необходимо для работы с веб-формами.</small></p>
+                        <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAA8CAYAAACqQSPAAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAABmJLR0QA/wD/AP+gvaeTAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAIyklEQVR42u2de2xV1R3HP/fcc+89l7aXltJWekFaaVtLpYJpY5SgI6BRxGCMiTEaY4xJjDExxhj/YkyiSXzR+EOMiTExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxhj/YkyiSYyJ0aBRxGCMiTEaY4xJjDExxh" alt="Barcode for Add CR Suffix">
+                    </div>
+                    
+                    <p class="mt-3"><strong>Важно:</strong> Обычно этих двух шагов достаточно. Замена символа `GS` на пробел — это редкая конфигурация. Если проблема осталась, обратитесь к полному руководству по вашему сканеру (Product Reference Guide).</p>
+                    <a href="https://www.zebra.com/us/en/support-downloads/scanners/general-purpose-scanners/ds2200-series.html" target="_blank" class="btn btn-outline-secondary btn-sm w-100">
+                        Документация Zebra DS2200
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const scanInput = document.getElementById('scan-input');
+    const resultContainer = document.getElementById('result-container');
+    const statusMessage = document.getElementById('status-message');
+    const rawStringOutput = document.getElementById('raw-string-output');
+    const analysisTableBody = document.querySelector('#char-analysis-table tbody');
+
+    // Фокусируемся на поле ввода
+    scanInput.focus();
+    document.body.addEventListener('click', (e) => {
+        // Не перехватываем клики по ссылкам и кнопкам
+        if (e.target.tagName !== 'A' && e.target.tagName !== 'BUTTON') {
+            scanInput.focus();
+        }
+    });
+    scanInput.addEventListener('blur', () => scanInput.focus());
+
+
+    scanInput.addEventListener('change', function(event) {
+        const code = event.target.value; // Не тримим, чтобы видеть пробелы по краям
+        if (!code) {
+            return;
+        }
+
+        analyzeCode(code);
+        scanInput.value = ''; // Очищаем для следующего сканирования
+    });
+
+    function analyzeCode(code) {
+        resultContainer.classList.remove('d-none');
+        rawStringOutput.textContent = code;
+        analysisTableBody.innerHTML = ''; // Очищаем таблицу
+
+        let gsFound = false;
+        const GS_CHAR_CODE = 29;
+
+        for (let i = 0; i < code.length; i++) {
+            const char = code[i];
+            const charCode = code.charCodeAt(i);
+            
+            const row = analysisTableBody.insertRow();
+            const cellChar = row.insertCell();
+            const cellCode = row.insertCell();
+            const cellNote = row.insertCell();
+
+            // Для непечатаемых символов показываем их код
+            if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
+                 cellChar.textContent = `[${charCode}]`;
+            } else {
+                 cellChar.textContent = char;
+            }
+           
+            cellCode.textContent = charCode;
+            
+            let note = '';
+            if (charCode === GS_CHAR_CODE) {
+                note = 'Символ-разделитель GS!';
+                gsFound = true;
+                row.classList.add('gs-found', 'table-success');
+            } else if (char === ' ') {
+                note = 'Пробел';
+            } else if (charCode < 32 && charCode !== 9 && charCode !== 10 && charCode !== 13) {
+                note = 'Непечатаемый управляющий символ';
+            }
+
+            cellNote.textContent = note;
+        }
+
+        if (gsFound) {
+            statusMessage.innerHTML = `
+                <div class="alert alert-success">
+                    <strong>УСПЕХ!</strong> Символ-разделитель GS (Char Code 29) успешно обнаружен. Ваш сканер настроен правильно.
+                </div>
+            `;
+        } else {
+            statusMessage.innerHTML = `
+                <div class="alert alert-danger">
+                    <strong>ПРОВЕРКА НЕ ПРОЙДЕНА.</strong> Символ-разделитель GS (Char Code 29) не найден.
+                    <br>
+                    Если в коде есть пробелы, вероятно, сканер заменяет GS на пробел. Попробуйте перенастроить сканер с помощью штрихкодов справа.
+                </div>
+            `;
+        }
+    }
+});
+</script>
+{% endblock %}

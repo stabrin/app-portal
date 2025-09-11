@@ -288,6 +288,13 @@ def manage_data():
                            aggregations=aggregations_to_show,
                            selected_order_id=selected_order_id_for_view)
 
+@manual_aggregation_bp.route('/admin/scanner-test')
+@login_required
+@admin_required
+def scanner_test():
+    """Страница для тестирования и настройки сканера."""
+    return render_template('admin/scanner_test.html')
+
 # --- РОУТЫ СОТРУДНИКА ---
 @manual_aggregation_bp.route('/task')
 @login_required
