@@ -1,13 +1,12 @@
 import os
 from flask import Flask
 from flask_wtf.csrf import CSRFProtect
+from markupsafe import Markup
+import html
 
 # --- Импорты из нашего приложения ---
 # Импортируем экземпляры расширений, которые нужно инициализировать
 from .auth import login_manager 
-# Импортируем наши blueprints (наборы роутов)
-from .routes import manual_aggregation_bp
-from .api import api_bp
 
 # Инициализируем CSRF-защиту. 
 # Это необходимо для безопасности, особенно при работе с AJAX-запросами.
@@ -29,22 +28,33 @@ def create_app():
         REDIS_PORT=int(os.getenv('REDIS_PORT', 6379))
     )
 
-    # --- 2. Инициализация расширений ---
+    # --- 2. Регистрация кастомных фильтров для шаблонов ---
+    @app.template_filter('gs_highlight')
+    def gs_highlight_filter(text):
+        """Фильтр Jinja2 для подсветки символа GS в строке."""
+        if not text or not isinstance(text, str):
+            return text
+        gs_char = '\x1d'
+        highlighted_gs = '<span class="text-danger fw-bold">[GS]</span>'
+        # Безопасный способ: экранируем части строки, затем соединяем
+        parts = text.split(gs_char)
+        escaped_parts = [html.escape(part) for part in parts]
+        return Markup(highlighted_gs.join(escaped_parts))
+
+    # --- 3. Инициализация расширений ---
     # Связываем расширения с нашим приложением.
     login_manager.init_app(app)
     csrf.init_app(app) # Включаем CSRF защиту для всего приложения
 
-    # --- 3. Регистрация Blueprints ---
-    # Регистрируем роуты.
-    # Nginx уже направляет все запросы с /manual-aggregation/* на это приложение,
-    # поэтому мы можем задать префикс здесь, чтобы все url_for работали корректно.
-    
-    # Все UI-роуты (админка, логин и т.д.)
+    # --- 4. Регистрация Blueprints ---
+    # Импортируем и регистрируем Blueprints внутри фабрики,
+    # чтобы избежать циклических зависимостей, которые могут вызывать
+    # ошибки при запуске приложения.
+    from .routes import manual_aggregation_bp
+    from .api import api_bp
+
     app.register_blueprint(manual_aggregation_bp, url_prefix='/manual-aggregation')
-    
-    # Новый API для сканирования. Он будет доступен по пути /manual-aggregation/api/*
-    # Префикс /api задан внутри api.py, он автоматически добавится к этому.
     app.register_blueprint(api_bp, url_prefix='/manual-aggregation')
     
-    # --- 4. Возвращаем готовое приложение ---
+    # --- 5. Возвращаем готовое приложение ---
     return app

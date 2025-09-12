@@ -168,17 +168,25 @@ def delete_order_completely(order_id: int) -> dict:
         if conn: conn.close()
 
 def get_aggregations_for_order(order_id: int) -> list:
-    """Получает все записи об агрегации для указанного заказа."""
+    """Получает все записи об агрегации для указанного заказа, включая имя сотрудника."""
     conn = None
     try:
         conn = get_db_connection()
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT id, parent_code, parent_type, child_code, child_type, employee_token_id, created_at
-                FROM ma_aggregations
-                WHERE order_id = %s
-                ORDER BY id DESC;
+                SELECT
+                    agg.id,
+                    agg.parent_code,
+                    agg.parent_type,
+                    agg.child_code,
+                    agg.child_type,
+                    COALESCE(tok.employee_name, 'ID ' || agg.employee_token_id::text) as employee_name,
+                    agg.created_at
+                FROM ma_aggregations as agg
+                LEFT JOIN ma_employee_tokens as tok ON agg.employee_token_id = tok.id
+                WHERE agg.order_id = %s
+                ORDER BY agg.id DESC;
                 """,
                 (order_id,)
             )

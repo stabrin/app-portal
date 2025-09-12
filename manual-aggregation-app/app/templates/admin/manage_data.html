@@ -73,7 +73,7 @@
                                 <th>Родитель (Тип)</th>
                                 <th>Потомок (Код)</th>
                                 <th>Потомок (Тип)</th>
-                                <th>Пропуск</th>
+                                <th>Сотрудник</th>
                                 <th>Время</th>
                             </tr>
                         </thead>
@@ -82,11 +82,11 @@
                             <tr>
                                 <td><input type="checkbox" name="aggregation_ids" value="{{ agg.id }}" class="agg-checkbox"></td>
                                 <td>{{ agg.id }}</td>
-                                <td>{{ agg.parent_code }}</td>
+                                <td>{{ agg.parent_code | gs_highlight }}</td>
                                 <td>{{ agg.parent_type }}</td>
-                                <td>{{ agg.child_code }}</td>
+                                <td>{{ agg.child_code | gs_highlight }}</td>
                                 <td>{{ agg.child_type }}</td>
-                                <td>{{ agg.employee_token_id }}</td>
+                                <td>{{ agg.employee_name }}</td>
                                 <td>{{ agg.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                             </tr>
                             {% endfor %}
