@@ -48,6 +48,15 @@
                         <div class="invalid-feedback d-block">{{ error }}</div>
                     {% endfor %}
                 </div>
+
+                <div class="mb-3">
+                    {{ form.status.label(class="form-label") }}
+                    {{ form.status(class="form-select" + (" is-invalid" if form.status.errors else "")) }}
+                    {% for error in form.status.errors %}
+                        <div class="invalid-feedback d-block">{{ error }}</div>
+                    {% endfor %}
+                </div>
+
                 <hr>
                 {{ form.submit(class="btn btn-primary") }}
             </form>

@@ -17,8 +17,8 @@ def create_new_order(client_name: str, aggregation_levels: list, employee_count:
         with conn.cursor() as cur:
             levels_json = json.dumps(aggregation_levels)
             cur.execute(
-                "INSERT INTO ma_orders (client_name, employee_count, aggregation_levels, set_capacity) VALUES (%s, %s, %s, %s) RETURNING id;",
-                (client_name, employee_count, levels_json, set_capacity)
+                "INSERT INTO ma_orders (client_name, employee_count, aggregation_levels, set_capacity, status) VALUES (%s, %s, %s, %s, %s) RETURNING id;",
+                (client_name, employee_count, levels_json, set_capacity, 'new')
             )
             order_id = cur.fetchone()[0]
             generated_tokens = []
@@ -63,7 +63,7 @@ def get_order_by_id(order_id: int):
     finally:
         if conn: conn.close()
 
-def update_order(order_id: int, client_name: str, aggregation_levels: list, new_employee_count: int, set_capacity: Optional[int]) -> dict:
+def update_order(order_id: int, client_name: str, aggregation_levels: list, new_employee_count: int, set_capacity: Optional[int], status: str) -> dict:
     if not client_name.strip():
         return {"success": False, "message": "Название клиента не может быть пустым."}
     
@@ -82,8 +82,8 @@ def update_order(order_id: int, client_name: str, aggregation_levels: list, new_
             
             levels_json = json.dumps(aggregation_levels)
             cur.execute(
-                "UPDATE ma_orders SET client_name = %s, aggregation_levels = %s, employee_count = %s, set_capacity = %s WHERE id = %s;",
-                (client_name, levels_json, new_employee_count, set_capacity, order_id)
+                "UPDATE ma_orders SET client_name = %s, aggregation_levels = %s, employee_count = %s, set_capacity = %s, status = %s WHERE id = %s;",
+                (client_name, levels_json, new_employee_count, set_capacity, status, order_id)
             )
 
             tokens_to_add = new_employee_count - current_count

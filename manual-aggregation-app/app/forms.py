@@ -7,7 +7,8 @@ from wtforms import (
     SubmitField, 
     SelectMultipleField, 
     IntegerField,
-    widgets
+    widgets,
+    SelectField
 )
 from wtforms.validators import DataRequired, Regexp, NumberRange, Optional
 
@@ -82,5 +83,15 @@ class OrderForm(FlaskForm):
             NumberRange(min=1, message="Значение должно быть больше нуля.")
         ],
         description="Если указано, система не даст отсканировать больше товаров для одного набора."
+    )
+    status = SelectField(
+        'Статус заказа',
+        choices=[
+            ('new', 'Новый (не запущен)'),
+            ('active', 'Активный (в работе)'),
+            ('closed', 'Закрыт (завершен)')
+        ],
+        default='new',
+        validators=[DataRequired(message="Укажите статус заказа.")]
     )
     submit = SubmitField('Сохранить заказ')

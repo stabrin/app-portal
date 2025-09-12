@@ -15,7 +15,8 @@ from .services.order_service import (
     get_tokens_for_order,
     delete_order_completely,
     get_aggregations_for_order,
-    delete_aggregations_by_ids
+    delete_aggregations_by_ids,
+    assign_name_to_token
 )
 from .services.pdf_service import generate_tokens_pdf, generate_control_codes_pdf
 from .services.report_service import get_aggregation_report_for_order, generate_aggregation_excel_report
@@ -60,24 +61,40 @@ def login_employee():
         
     form = EmployeeTokenForm()
     if form.validate_on_submit():
-        # Получаем данные из обоих полей формы
         last_name = form.last_name.data
         access_token = form.access_token.data
         
-        # Проверяем только токен, как и раньше
         user = verify_employee_token(access_token)
         
         if user:
-            # Если пользователь найден, сохраняем его ФИО в сессию
-            # чтобы потом использовать на странице задания
+            # Проверка статуса заказа, к которому привязан токен
+            order_id = user.data.get('order_id')
+            order = get_order_by_id(order_id)
+            if not order:
+                flash("Ошибка: заказ, к которому привязан ваш пропуск, не найден.", "danger")
+                return render_template('auth/login_employee.html', form=form)
+
+            if order.get('status') != 'active':
+                status = order.get('status')
+                if status == 'closed':
+                    message = "Доступ запрещен: Заказ, к которому привязан ваш пропуск, был закрыт администратором."
+                elif status == 'new':
+                    message = "Доступ запрещен: Заказ еще не был активирован администратором."
+                else:
+                    message = f"Доступ запрещен: Заказ находится в статусе '{status}' и недоступен для работы."
+                flash(message, "danger")
+                return render_template('auth/login_employee.html', form=form)
+
+            # Сохраняем ФИО сотрудника в базу данных
+            assign_name_to_token(access_token, last_name)
+            
+            # Сохраняем ФИО в сессию для отображения на странице задания
             session['employee_name'] = last_name
             
             login_user(user)
             return redirect(url_for('.employee_task_page'))
             
         flash("Неверный или неактивный код доступа.", "danger")
-    
-    # Если GET запрос или форма не прошла валидацию, просто показываем страницу
     return render_template('auth/login_employee.html', form=form)
     
 @manual_aggregation_bp.route('/logout')
@@ -152,7 +169,8 @@ def edit_order(order_id):
             form.client_name.data, 
             form.levels.data, 
             form.employee_count.data,
-            form.set_capacity.data
+            form.set_capacity.data,
+            form.status.data
         )
         flash(result.get('message'), 'success' if result.get('success') else 'danger')
         return redirect(url_for('.edit_order', order_id=order_id))
@@ -163,6 +181,7 @@ def edit_order(order_id):
         form.levels.data = order_data.get('aggregation_levels', [])
         form.employee_count.data = order_data.get('employee_count')
         form.set_capacity.data = order_data.get('set_capacity')
+        form.status.data = order_data.get('status')
 
     return render_template('admin/edit_order.html', order=order_data, form=form)
     
