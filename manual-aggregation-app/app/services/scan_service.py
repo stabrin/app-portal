@@ -177,9 +177,16 @@ class ScanProcessor:
             }
 
         if scanned_code == CMD_CANCEL_UNIT:
-            result = self._handle_cancel()
-            self._save_state()
-            return result
+            # Если мы в процессе сборки - отменяем текущую операцию в сессии.
+            if status != 'IDLE':
+                result = self._handle_cancel()
+                self._save_state()
+                return result
+            # Если мы в состоянии IDLE - отменяем последнюю сохраненную в БД операцию.
+            else:
+                result = self._handle_undo_last_save()
+                # Состояние не меняется и не сохраняется, т.к. мы уже в IDLE.
+                return result
 
         if scanned_code == CMD_COMPLETE_UNIT:
             result = self._complete_unit_from_command()
@@ -334,6 +341,43 @@ class ScanProcessor:
         self._save_state()
         response = self._build_success_response("Текущая операция отменена.")
         return response
+
+    def _handle_undo_last_save(self):
+        """Находит и удаляет последнюю сохраненную этим сотрудником упаковку."""
+        conn = None
+        try:
+            conn = get_db_connection()
+            with conn.cursor() as cur:
+                # 1. Найти parent_code последней операции этого сотрудника в этом заказе
+                cur.execute(
+                    """
+                    SELECT parent_code FROM ma_aggregations
+                    WHERE employee_token_id = %s AND order_id = %s
+                    ORDER BY id DESC
+                    LIMIT 1;
+                    """,
+                    (self.token_id, self.order['id'])
+                )
+                result = cur.fetchone()
+                if not result:
+                    return self._build_success_response("Нет сохраненных операций для отмены.")
+
+                last_parent_code = result[0]
+
+                # 2. Удалить все записи, связанные с этим parent_code
+                cur.execute(
+                    "DELETE FROM ma_aggregations WHERE parent_code = %s AND order_id = %s;",
+                    (last_parent_code, self.order['id'])
+                )
+                deleted_count = cur.rowcount
+            conn.commit()
+            return self._build_success_response(f"Последняя сохраненная упаковка ({last_parent_code}) и ее {deleted_count} вложений были удалены. Можете сканировать заново.")
+        except Exception as e:
+            if conn: conn.rollback()
+            print(f"ОШИБКА в _handle_undo_last_save: {e}")
+            return self._build_error_response("Ошибка базы данных при отмене последней операции.")
+        finally:
+            if conn: conn.close()
 
     def _save_aggregation(self, parent_code, child_items):
         """Сохраняет пачку записей в ma_aggregations."""
