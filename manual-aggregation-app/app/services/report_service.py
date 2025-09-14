@@ -22,9 +22,14 @@ def get_aggregation_report_for_order(order_id: int) -> dict:
                     agg.parent_type, 
                     agg.child_code, 
                     agg.child_type,
-                    COALESCE(tok.employee_name, 'ID ' || tok.id::text) as employee_name
+                    COALESCE(
+                        ws.employee_name, 
+                        tok.employee_name, 
+                        'ID ' || tok.id::text
+                    ) as employee_name
                 FROM ma_aggregations as agg
                 LEFT JOIN ma_employee_tokens as tok ON agg.employee_token_id = tok.id
+                LEFT JOIN ma_work_sessions as ws ON agg.work_session_id = ws.id
                 WHERE agg.order_id = %s
                 ORDER BY agg.parent_code, agg.child_code;
                 """,
@@ -82,10 +87,15 @@ def generate_aggregation_excel_report(order_id: int) -> io.BytesIO:
                 agg.parent_type,
                 agg.child_code,
                 agg.child_type,
-                COALESCE(tok.employee_name, 'ID ' || agg.employee_token_id::text) as employee_name,
+                COALESCE(
+                    ws.employee_name, 
+                    tok.employee_name, 
+                    'ID ' || agg.employee_token_id::text
+                ) as employee_name,
                 agg.created_at
             FROM ma_aggregations as agg
             LEFT JOIN ma_employee_tokens as tok ON agg.employee_token_id = tok.id
+            LEFT JOIN ma_work_sessions as ws ON agg.work_session_id = ws.id
             WHERE agg.order_id = %s
             ORDER BY agg.id;
         """

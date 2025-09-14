@@ -40,7 +40,7 @@ def _get_senior_token(order_id: int) -> Optional[str]:
         if conn:
             conn.close()
 
-def process_scan(employee_token_id: int, order_info: dict, scanned_code: str) -> dict:
+def process_scan(work_session_id: int, order_info: dict, scanned_code: str) -> dict:
     """
     Основная точка входа для обработки сканирования.
     Создает экземпляр ScanProcessor, обрабатывает код и возвращает результат.
@@ -59,8 +59,8 @@ def process_scan(employee_token_id: int, order_info: dict, scanned_code: str) ->
         scanned_code = scanned_code.strip()
 
     try:
-        processor = ScanProcessor(employee_token_id, order_info)
-        result = processor.process(scanned_code) # Используем обработанный код
+        processor = ScanProcessor(work_session_id, order_info)
+        result = processor.process(scanned_code)
         return result
     except redis.exceptions.ConnectionError as e:
         print(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось подключиться к Redis. {e}")
@@ -82,17 +82,38 @@ def process_scan(employee_token_id: int, order_info: dict, scanned_code: str) ->
         }
 
 class ScanProcessor:
-    def __init__(self, employee_token_id, order_info):
-        self.token_id = employee_token_id
+    def __init__(self, work_session_id, order_info):
+        self.work_session_id = work_session_id
         self.order = order_info
         self.senior_token = None # Ленивая загрузка токена старшего
         
-        # Получаем сессию из Redis
-        self.session = state_manager.get_state(self.token_id)
+        self.employee_token_id = self._get_token_id_from_session()
+        if not self.employee_token_id:
+            raise ValueError("Критическая ошибка: не удалось определить пропуск по текущей рабочей сессии.")
+
+        # Получаем сессию из Redis по ID пропуска (состояние привязано к пропуску)
+        self.session = state_manager.get_state(self.employee_token_id)
         if not self.session:
             # Если сессии нет, создаем начальное состояние и сохраняем его
             self.session = self._get_initial_state()
             self._save_state()
+
+    def _get_token_id_from_session(self) -> Optional[int]:
+        """Получает ID физического пропуска (employee_token_id) из рабочей сессии."""
+        conn = None
+        try:
+            conn = get_db_connection()
+            with conn.cursor() as cur:
+                cur.execute("SELECT employee_token_id FROM ma_work_sessions WHERE id = %s;", (self.work_session_id,))
+                result = cur.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            print(f"ОШИБКА в _get_token_id_from_session: {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
+
 
     def _validate_data_code(self, code: str) -> tuple[bool, str]:
         """
@@ -134,7 +155,7 @@ class ScanProcessor:
     def _save_state(self):
         """Сохраняет текущее состояние сессии в Redis."""
         state_manager.set_state(
-            self.token_id, 
+            self.employee_token_id, 
             self.session['status'], 
             self.session['payload']
         )
@@ -389,7 +410,7 @@ class ScanProcessor:
                     ORDER BY id DESC
                     LIMIT 1;
                     """,
-                    (self.token_id, self.order['id'])
+                    (self.employee_token_id, self.order['id'])
                 )
                 result = cur.fetchone()
                 if not result:
@@ -434,12 +455,12 @@ class ScanProcessor:
                 
                 args_list = []
                 for child_code in child_items:
-                    args_list.append((self.order['id'], self.token_id, child_code, child_type, parent_code, parent_type))
+                    args_list.append((self.order['id'], self.employee_token_id, self.work_session_id, child_code, child_type, parent_code, parent_type))
                 
                 # Используем execute_values для быстрой вставки
                 execute_values(
                     cur,
-                    "INSERT INTO ma_aggregations (order_id, employee_token_id, child_code, child_type, parent_code, parent_type) VALUES %s",
+                    "INSERT INTO ma_aggregations (order_id, employee_token_id, work_session_id, child_code, child_type, parent_code, parent_type) VALUES %s",
                     args_list
                 )
             conn.commit()

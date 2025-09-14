@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, session
 from flask_login import current_user, login_required
 
 from .services.scan_service import process_scan
@@ -22,18 +22,22 @@ def handle_scan():
         if not scanned_code:
             return jsonify({"status": "error", "message": "Пустой код"}), 400
 
-        # Извлекаем чистый ID из user.id, который имеет формат 'employee:123'
-        token_id = current_user.id.split(':', 1)[1]
+        # Получаем ID рабочей сессии, сохраненный при входе
+        work_session_id = session.get('work_session_id')
+        if not work_session_id:
+            # Если ID сессии нет, пользователь должен перелогиниться
+            return jsonify({"status": "error", "message": "Ошибка сессии: не найдена рабочая сессия. Пожалуйста, перезайдите в систему."}), 401
+
         order_id = current_user.data.get('order_id')
         
         # Получаем актуальные данные заказа, т.к. они могли измениться с момента входа
         order_info = get_order_by_id(order_id)
         if not order_info:
             return jsonify({"status": "error", "message": f"Заказ {order_id} не найден."}), 404
-
+        
         # Вызываем основную бизнес-логику
         result = process_scan(
-            employee_token_id=int(token_id), # ИСПРАВЛЕНО: правильное имя аргумента
+            work_session_id=work_session_id,
             order_info=order_info,
             scanned_code=scanned_code
         )

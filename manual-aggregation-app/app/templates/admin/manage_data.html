@@ -56,7 +56,19 @@
         <!-- Таблица с агрегатами (если выбраны) -->
         {% if aggregations is not none %}
             <hr>
-            <h4>Записи по заказу №{{ selected_order_id }}</h4>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4>Записи по заказу №{{ selected_order_id }}</h4>
+                
+                {# Показываем сводку, если она есть и в заказе были наборы #}
+                {% if aggregations.summary and aggregations.summary.total_sets > 0 %}
+                <span class="fs-6 text-muted">
+                    Собрано наборов: <strong>{{ aggregations.summary.total_sets }}</strong>
+                    {% if aggregations.summary.error_sets > 0 %}
+                        , из них с ошибками: <strong class="text-danger">{{ aggregations.summary.error_sets }}</strong>
+                    {% endif %}
+                </span>
+                {% endif %}
+            </div>
             {% if aggregations %}
             <form method="POST" action="{{ url_for('.manage_data') }}" onsubmit="return confirm('Вы уверены, что хотите удалить выбранные записи?');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

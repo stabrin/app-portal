@@ -112,24 +112,39 @@ def get_tokens_for_order(order_id: int) -> list:
             return cur.fetchall()
     return []
 
-def assign_name_to_token(access_token: str, employee_name: str) -> bool:
-    """Присваивает имя сотрудника токену доступа."""
+def create_work_session(access_token: str, employee_name: str) -> Optional[int]:
+    """
+    Создает новую рабочую сессию для сотрудника и возвращает ее ID.
+    Не перезаписывает имя в ma_employee_tokens, а создает новую запись в ma_work_sessions.
+    """
     conn = None
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
+            # 1. Найти ID токена по его значению
+            cur.execute("SELECT id FROM ma_employee_tokens WHERE access_token = %s;", (access_token,))
+            token_record = cur.fetchone()
+            if not token_record:
+                return None # Токен не найден
+            
+            employee_token_id = token_record[0]
+
+            # 2. Создать новую запись в ma_work_sessions
             cur.execute(
-                "UPDATE ma_employee_tokens SET employee_name = %s WHERE access_token = %s;",
-                (employee_name, access_token)
+                "INSERT INTO ma_work_sessions (employee_token_id, employee_name) VALUES (%s, %s) RETURNING id;",
+                (employee_token_id, employee_name)
             )
-            # Проверяем, была ли обновлена хотя бы одна строка
-            success = cur.rowcount > 0
+            session_id = cur.fetchone()[0]
+            
+            # 3. Опционально: если у токена еще нет имени, запишем его в первый раз как "основное".
+            cur.execute("UPDATE ma_employee_tokens SET employee_name = %s WHERE id = %s AND (employee_name IS NULL OR employee_name = '');", (employee_name, employee_token_id))
+
         conn.commit()
-        return success
+        return session_id
     except Exception as e:
         if conn: conn.rollback()
-        print(f"КРИТИЧЕСКАЯ ОШИБКА в assign_name_to_token: {e}")
-        return False
+        print(f"КРИТИЧЕСКАЯ ОШИБКА в create_work_session: {e}")
+        return None
     finally:
         if conn: conn.close()
 
@@ -184,7 +199,16 @@ def _check_code_validity(code: str) -> dict:
     
     return {'is_valid': True, 'reason': 'OK'}
 
-def get_aggregations_for_order(order_id: int) -> list:
+class AggregationResult(list):
+    """Кастомный класс для возврата результатов агрегации вместе со сводкой."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.summary = {
+            'total_sets': 0,
+            'error_sets': 0,
+        }
+
+def get_aggregations_for_order(order_id: int) -> AggregationResult:
     """
     Получает все записи об агрегации для указанного заказа,
     включая имя сотрудника и проверку валидности кодов.
@@ -201,9 +225,14 @@ def get_aggregations_for_order(order_id: int) -> list:
                     agg.parent_type,
                     agg.child_code,
                     agg.child_type,
-                    COALESCE(tok.employee_name, 'ID ' || agg.employee_token_id::text) as employee_name,
+                    COALESCE(
+                        ws.employee_name, -- 1. Имя из новой таблицы сессий (приоритет)
+                        tok.employee_name, -- 2. Имя из старой таблицы токенов (для обратной совместимости)
+                        'ID ' || agg.employee_token_id::text -- 3. Запасной вариант
+                    ) as employee_name,
                     agg.created_at
                 FROM ma_aggregations as agg
+                LEFT JOIN ma_work_sessions as ws ON agg.work_session_id = ws.id
                 LEFT JOIN ma_employee_tokens as tok ON agg.employee_token_id = tok.id
                 WHERE agg.order_id = %s
                 ORDER BY agg.id DESC;
@@ -212,17 +241,33 @@ def get_aggregations_for_order(order_id: int) -> list:
             )
             aggregations = cur.fetchall()
             if not aggregations:
-                return []
+                return AggregationResult()
 
             # Добавляем поля с результатами проверки валидности для каждого кода
             for agg in aggregations:
                 agg['child_validity'] = _check_code_validity(agg.get('child_code'))
                 agg['parent_validity'] = _check_code_validity(agg.get('parent_code'))
             
-            return aggregations
+            # --- NEW: Calculate summary for sets ---
+            sets_with_errors = set()
+            all_sets = set()
+
+            for agg in aggregations:
+                if agg.get('parent_type') == 'set':
+                    parent_code = agg['parent_code']
+                    all_sets.add(parent_code)
+                    # Если у любой записи для этого родителя есть ошибка, помечаем родителя как ошибочного
+                    if not agg['child_validity']['is_valid'] or not agg['parent_validity']['is_valid']:
+                        sets_with_errors.add(parent_code)
+
+            result = AggregationResult(aggregations)
+            result.summary['total_sets'] = len(all_sets)
+            result.summary['error_sets'] = len(sets_with_errors)
+            
+            return result
     except Exception as e:
         print(f"КРИТИЧЕСКАЯ ОШИБКА в get_aggregations_for_order: {e}")
-        return []
+        return AggregationResult()
     finally:
         if conn: conn.close()
 

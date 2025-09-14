@@ -16,7 +16,7 @@ from .services.order_service import (
     delete_order_completely,
     get_aggregations_for_order,
     delete_aggregations_by_ids,
-    assign_name_to_token
+    create_work_session
 )
 from .services.pdf_service import generate_tokens_pdf, generate_control_codes_pdf
 from .services.report_service import get_aggregation_report_for_order, generate_aggregation_excel_report
@@ -84,11 +84,15 @@ def login_employee():
                     message = f"Доступ запрещен: Заказ находится в статусе '{status}' и недоступен для работы."
                 flash(message, "danger")
                 return render_template('auth/login_employee.html', form=form)
-
-            # Сохраняем ФИО сотрудника в базу данных
-            assign_name_to_token(access_token, last_name)
             
-            # Сохраняем ФИО в сессию для отображения на странице задания
+            # Создаем новую рабочую сессию и получаем ее ID
+            work_session_id = create_work_session(access_token, last_name)
+            if not work_session_id:
+                flash("Не удалось создать рабочую сессию. Обратитесь к администратору.", "danger")
+                return render_template('auth/login_employee.html', form=form)
+
+            # Сохраняем ID рабочей сессии и имя в сессию Flask
+            session['work_session_id'] = work_session_id
             session['employee_name'] = last_name
             
             login_user(user)
