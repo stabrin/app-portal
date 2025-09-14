@@ -67,24 +67,36 @@
                     <table class="table table-striped table-bordered">
                         <thead class="table-light">
                             <tr>
-                                <th><input type="checkbox" id="select-all"></th>
+                                <th><input type="checkbox" id="select-all" class="form-check-input"></th>
                                 <th>ID</th>
                                 <th>Родитель (Код)</th>
                                 <th>Родитель (Тип)</th>
                                 <th>Потомок (Код)</th>
                                 <th>Потомок (Тип)</th>
                                 <th>Сотрудник</th>
-                                <th>Время</th>
+                                <th>Время (UTC)</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for agg in aggregations %}
-                            <tr>
-                                <td><input type="checkbox" name="aggregation_ids" value="{{ agg.id }}" class="agg-checkbox"></td>
+                            {# Добавляем класс 'table-danger', если хотя бы один код невалиден #}
+                            <tr class="{% if not agg.child_validity.is_valid or not agg.parent_validity.is_valid %}table-danger{% endif %}">
+                                <td><input type="checkbox" name="aggregation_ids" value="{{ agg.id }}" class="agg-checkbox form-check-input"></td>
                                 <td>{{ agg.id }}</td>
-                                <td>{{ agg.parent_code | gs_highlight }}</td>
+                                <td>
+                                    {{ agg.parent_code | gs_highlight }}
+                                    {# Показываем значок с причиной ошибки #}
+                                    {% if not agg.parent_validity.is_valid %}
+                                        <span class="badge bg-warning text-dark ms-2" title="{{ agg.parent_validity.reason }}">!</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ agg.parent_type }}</td>
-                                <td>{{ agg.child_code | gs_highlight }}</td>
+                                <td>
+                                    {{ agg.child_code | gs_highlight }}
+                                    {% if not agg.child_validity.is_valid %}
+                                        <span class="badge bg-warning text-dark ms-2" title="{{ agg.child_validity.reason }}">!</span>
+                                    {% endif %}
+                                </td>
                                 <td>{{ agg.child_type }}</td>
                                 <td>{{ agg.employee_name }}</td>
                                 <td>{{ agg.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
@@ -105,7 +117,7 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const selectAll = document.getElementById('select-all');
-    if (selectAll) {
+    if (selectAll) { 
         selectAll.addEventListener('change', function() {
             const checkboxes = document.querySelectorAll('.agg-checkbox');
             checkboxes.forEach(checkbox => {

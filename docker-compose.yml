@@ -8,6 +8,7 @@ services:
     volumes:
       - ./datamatrix-app/app/static:/app/datamatrix-static
       - ./portal/app/static:/app/portal-static
+      - ./manual-aggregation-app/app/static:/app/manual-aggregation-static:ro
     depends_on:
       - portal
       - datamatrix-app

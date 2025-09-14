@@ -22,7 +22,7 @@ from .services.pdf_service import generate_tokens_pdf, generate_control_codes_pd
 from .services.report_service import get_aggregation_report_for_order, generate_aggregation_excel_report
 
 # --- Основной Blueprint ---
-manual_aggregation_bp = Blueprint('manual_aggregation_app', __name__, template_folder='templates')
+manual_aggregation_bp = Blueprint('manual_aggregation_app', __name__, template_folder='templates', static_folder='static')
 
 # --- Декоратор для проверки роли администратора ---
 def admin_required(f):

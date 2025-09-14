@@ -5,6 +5,8 @@ from typing import Optional
 import redis
 from psycopg2.extras import RealDictCursor, execute_values
 
+import re
+
 from .state_service import state_manager
 
 # --- Управляющие команды ---
@@ -91,6 +93,25 @@ class ScanProcessor:
             # Если сессии нет, создаем начальное состояние и сохраняем его
             self.session = self._get_initial_state()
             self._save_state()
+
+    def _validate_data_code(self, code: str) -> tuple[bool, str]:
+        """
+        Проверяет код на валидность (отсутствие кириллицы, мусорных символов).
+        Возвращает (is_valid, error_message).
+        """
+        # 1. Проверка на кириллицу - самая частая ошибка из-за раскладки.
+        if re.search('[а-яА-Я]', code):
+            return False, "Ошибка: Код содержит кириллические символы. Проверьте раскладку клавиатуры."
+
+        # 2. Проверка на наличие "мусорных" непечатаемых символов.
+        # Разрешаем только сам GS (29), Tab (9), LF (10), CR (13).
+        for char in code:
+            char_code = ord(char)
+            if char_code < 32 and char_code not in [9, 10, 13, 29]:
+                return False, f"Ошибка: Код содержит недопустимый управляющий символ (код {char_code}). Возможно, произошел сбой сканера."
+
+        # Если все проверки пройдены
+        return True, ""
 
     def _get_initial_state(self):
         """Определяет начальное состояние на основе настроек заказа."""
@@ -245,6 +266,12 @@ class ScanProcessor:
 
     def _start_new_unit(self, first_code):
         """Начинает сборку новой единицы (набора или короба)."""
+        # --- НОВАЯ ПРОВЕРКА ВАЛИДНОСТИ КОДА ---
+        is_valid, error_message = self._validate_data_code(first_code)
+        if not is_valid:
+            # Эта ошибка заблокирует систему, требуя вмешательства старшего
+            return self._build_error_response(error_message)
+
         # ПРОВЕРКА: не был ли этот код уже использован как вложение
         if self._is_code_already_used_as_child(first_code):
             return self._build_error_response(f"Ошибка: Код уже числится как вложенный в другую упаковку.")
@@ -261,6 +288,12 @@ class ScanProcessor:
 
     def _add_to_unit(self, scanned_code):
         """Добавляет код в текущую единицу."""
+        # --- НОВАЯ ПРОВЕРКА ВАЛИДНОСТИ КОДА ---
+        is_valid, error_message = self._validate_data_code(scanned_code)
+        if not is_valid:
+            # Эта ошибка заблокирует систему, требуя вмешательства старшего
+            return self._build_error_response(error_message)
+
         unit_type = self.session['payload']['current_unit'].get('type')
 
         # --- НОВАЯ ЛОГИКА: Завершение короба по SSCC ---

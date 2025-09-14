@@ -2,6 +2,7 @@
 import os
 import json
 import psycopg2
+import re
 from typing import Optional
 from app.db import get_db_connection
 
@@ -167,8 +168,27 @@ def delete_order_completely(order_id: int) -> dict:
     finally:
         if conn: conn.close()
 
+def _check_code_validity(code: str) -> dict:
+    """Проверяет код из БД на валидность и возвращает статус."""
+    if not isinstance(code, str):
+        return {'is_valid': False, 'reason': 'Не является строкой'}
+
+    if re.search('[а-яА-Я]', code):
+        return {'is_valid': False, 'reason': 'Кириллица в коде'}
+
+    for char in code:
+        char_code = ord(char)
+        # Разрешаем только сам GS (29), Tab (9), LF (10), CR (13).
+        if char_code < 32 and char_code not in [9, 10, 13, 29]:
+            return {'is_valid': False, 'reason': f'Недопустимый символ (код {char_code})'}
+    
+    return {'is_valid': True, 'reason': 'OK'}
+
 def get_aggregations_for_order(order_id: int) -> list:
-    """Получает все записи об агрегации для указанного заказа, включая имя сотрудника."""
+    """
+    Получает все записи об агрегации для указанного заказа,
+    включая имя сотрудника и проверку валидности кодов.
+    """
     conn = None
     try:
         conn = get_db_connection()
@@ -190,7 +210,16 @@ def get_aggregations_for_order(order_id: int) -> list:
                 """,
                 (order_id,)
             )
-            return cur.fetchall()
+            aggregations = cur.fetchall()
+            if not aggregations:
+                return []
+
+            # Добавляем поля с результатами проверки валидности для каждого кода
+            for agg in aggregations:
+                agg['child_validity'] = _check_code_validity(agg.get('child_code'))
+                agg['parent_validity'] = _check_code_validity(agg.get('parent_code'))
+            
+            return aggregations
     except Exception as e:
         print(f"КРИТИЧЕСКАЯ ОШИБКА в get_aggregations_for_order: {e}")
         return []
