@@ -21,6 +21,8 @@ services:
     build: ./portal
     container_name: portal_main
     restart: unless-stopped
+    environment:
+    - APP_VERSION=1.1.0
     networks:
       - app-network
 
