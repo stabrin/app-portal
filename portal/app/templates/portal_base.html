@@ -25,6 +25,27 @@
             align-items: center;
             justify-content: center;
         }
+        /* Обновленные стили для центрирования шапки */
+        .main-header .container {
+            display: flex;
+            justify-content: center;
+            padding: 1rem 0;
+        }
+        .logo-container {
+            display: flex;
+            flex-direction: column; /* Располагаем элементы друг под другом */
+            align-items: center;     /* Центрируем их по горизонтали */
+            gap: 0.5rem;             /* Расстояние между лого и текстом */
+            text-decoration: none;
+            color: inherit;
+        }
+        .logo-container h1 {
+            margin: 0; /* Убираем стандартный отступ у заголовка */
+        }
+        /* Увеличиваем логотип в 3 раза */
+        .logo-container .logo {
+            height: 120px;
+        }
     </style>
 </head>
 <body>
@@ -38,18 +59,24 @@
             </div>
         </header>
 
-        <main class="main-content {% block main_class %}{% endblock %}">
-            <div class="container">
-                {% block content %}{% endblock %}
-            </div>
+        <main class="main-content container {% block main_class %}{% endblock %}">
+            {% block content %}{% endblock %}
         </main>
         
         <footer class="main-footer">
             <div class="container">
-                <p>&copy; 2025 ВЭД ЮГ ТЛТ. Все права защищены.</p>
+                <p>&copy; <span id="current-year"></span> ВЭД ЮГ ТЛТ. Все права защищены.</p>
                 <p>Контакты администратора: <a href="mailto:sergey@tabrin.ru">sergey@tabrin.ru</a></p>
+                <p style="color: #adb5bd; font-size: 0.85em; margin-top: 0.5rem;">
+                    Версия 1.0.0 | <span id="current-date"></span>
+                </p>
             </div>
         </footer>
     </div>
+    <script>
+        // Скрипт для динамического обновления года и даты в подвале
+        document.getElementById('current-year').textContent = new Date().getFullYear();
+        document.getElementById('current-date').textContent = new Date().toLocaleDateString('ru-RU');
+    </script>
 </body>
 </html>
