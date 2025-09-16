@@ -22,7 +22,7 @@ services:
     container_name: portal_main
     restart: unless-stopped
     environment:
-    - APP_VERSION=1.1.0
+    - APP_VERSION=1.2.1
     networks:
       - app-network
 
