@@ -4,7 +4,7 @@ import base64
 import io
 from flask import render_template
 from weasyprint import HTML
-from .scan_service import CMD_COMPLETE_UNIT, CMD_CANCEL_UNIT, CMD_LOGOUT
+from .scan_service import CMD_COMPLETE_UNIT, CMD_CANCEL_UNIT, CMD_LOGOUT, CMD_ENTER_CORRECTION_MODE, CMD_EXIT_CORRECTION_MODE
 
 def generate_tokens_pdf(order_data: dict, tokens: list) -> bytes:
     """
@@ -44,8 +44,8 @@ def generate_control_codes_pdf() -> bytes:
         {"code": CMD_COMPLETE_UNIT, "title": "ЗАВЕРШИТЬ ЮНИТ", "description": "Сохраняет собранный набор или короб. Сканировать ПОСЛЕ сканирования всех товаров и кода самого набора/короба."},
         {"code": CMD_CANCEL_UNIT, "title": "ОТМЕНИТЬ ЮНИТ", "description": "Отменяет текущую сборку набора или короба. Все отсканированные товары в рамках этой операции будут сброшены."},
         {"code": CMD_LOGOUT, "title": "ЗАВЕРШИТЬ СМЕНУ", "description": "Осуществляет выход из системы. Вся незавершенная работа (несохраненный набор/короб) будет потеряна."},
-        # Сюда можно будет добавлять коды для паллет, контейнеров и т.д.
-        # {"code": "CMD_JOIN_PALLET_01", "title": "РАБОТАТЬ НАД ПАЛЛЕТОМ 1", "description": "..."}
+        {"code": CMD_ENTER_CORRECTION_MODE, "title": "РЕЖИМ КОРРЕКЦИИ (ВХОД)", "description": "Активирует режим проверки ошибочных наборов. Требует последующего сканирования пропуска старшего смены."},
+        {"code": CMD_EXIT_CORRECTION_MODE, "title": "РЕЖИМ КОРРЕКЦИИ (ВЫХОД)", "description": "Деактивирует режим проверки. Требует последующего сканирования пропуска старшего смены."},
     ]
 
     labels_data = []

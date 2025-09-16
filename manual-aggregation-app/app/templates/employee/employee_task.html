@@ -30,6 +30,31 @@
         .unit-display {
             min-height: 100px;
         }
+        /* --- НОВЫЙ СТИЛЬ ДЛЯ ОБУЧЕНИЯ --- */
+        .training-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75);
+            z-index: 1050;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            color: white;
+        }
+        .training-message {
+            font-size: 2rem;
+            font-weight: bold;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.05); opacity: 0.7; }
+            100% { transform: scale(1); opacity: 1; }
+        }
     </style>
 </head>
 <body>
@@ -124,6 +149,13 @@
         </div>
     </main>
 
+    <!-- НОВЫЙ БЛОК ДЛЯ ОВЕРЛЕЯ ОБУЧЕНИЯ -->
+    <div id="training-overlay" class="training-overlay d-none">
+        <div id="training-message" class="training-message">
+            Обучение системы...
+        </div>
+    </div>
+
     <script>
         document.addEventListener('DOMContentLoaded', function() {
             const scanInput = document.getElementById('scan-input');
@@ -132,6 +164,8 @@
             const unitStatus = document.getElementById('unit-status');
             const unitItemsList = document.getElementById('unit-items');
             const csrfToken = document.querySelector('input[name="csrf_token"]').value;
+            const trainingOverlay = document.getElementById('training-overlay');
+            const trainingMessage = document.getElementById('training-message');
 
             // --- НАЧАЛО: НАДЕЖНАЯ ОБРАБОТКА ВВОДА СО СКАНЕРА ---
             // Этот код перенесен со страницы тестирования для обеспечения
@@ -210,7 +244,20 @@
                         return; // Прерываем дальнейшую обработку
                     }
 
-                    updateUI(data.session);
+                    // --- НОВАЯ ЛОГИКА ДЛЯ UI ОБУЧЕНИЯ ---
+                    if (data && data.order_status === 'NEEDS_TRAINING') {
+                        trainingOverlay.classList.remove('d-none');
+                        trainingMessage.textContent = "Обучение системы. Отсканируйте 3 образцовых набора.";
+                        // Скрываем основной интерфейс
+                        document.querySelector('main.container').style.display = 'none';
+                        return; // Прерываем, т.к. session может быть неактуальным
+                    } else {
+                        // Если мы вышли из режима обучения, показываем все обратно
+                        trainingOverlay.classList.add('d-none');
+                        document.querySelector('main.container').style.display = 'block';
+                    }
+
+                    updateUI(data.session, data.correction_stats);
                 })
                 .catch(error => {
                     // Теперь ошибка будет более информативной
@@ -245,11 +292,64 @@
                 logContainer.prepend(entry);
             }
 
-            function updateUI(session) {
-                if (!session) return;
+            function updateUI(session, correction_stats) {
+                if (!session && !correction_stats) return;
+
+                unitItemsList.innerHTML = '';
+
+                // --- НОВАЯ ЛОГИКА ДЛЯ ОТОБРАЖЕНИЯ ПРОЦЕССА ОБУЧЕНИЯ ---
+                if (session && session.status === 'TRAINING') {
+                    const payload = session.payload;
+                    const sampleNum = (payload.samples_collected || []).length + 1;
+                    const itemsCount = (payload.current_sample_items || []).length;
+                    
+                    unitStatus.innerHTML = `
+                        <strong class="text-primary">ИДЕТ ОБУЧЕНИЕ</strong>
+                        <div class="fs-6">Сборка образца ${sampleNum} из 3.</div>
+                    `;
+                    
+                    unitItemsList.innerHTML = '';
+                    (payload.current_sample_items || []).forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'list-group-item py-1';
+                        li.innerHTML = GStoHTML(item);
+                        unitItemsList.appendChild(li);
+                    });
+                    
+                    if (itemsCount > 0) {
+                         unitStatus.innerHTML += `<div class="fs-6 mt-2">Отсканировано товаров: ${itemsCount}</div>`;
+                    }
+                    return; // Выходим, чтобы не показывать другие состояния
+                }
+                // --- НОВАЯ ЛОГИКА ДЛЯ РЕЖИМА КОРРЕКЦИИ ---
+                if (correction_stats) {
+                    unitStatus.innerHTML = `
+                        <strong class="text-danger">РЕЖИМ КОРРЕКЦИИ АКТИВЕН</strong>
+                        <div class="fs-6">Сканируйте коды наборов для проверки.</div>
+                    `;
+                    
+                    const toCheck = correction_stats.to_check || 0;
+                    const scannedOk = correction_stats.scanned_ok || 0;
+                    const scannedError = correction_stats.scanned_error || 0;
+
+                    unitItemsList.innerHTML = `
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Осталось проверить ошибочных
+                            <span class="badge bg-warning rounded-pill">${toCheck}</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Проверено (исправлено)
+                            <span class="badge bg-danger rounded-pill">${scannedError}</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            Проверено (без ошибок)
+                            <span class="badge bg-success rounded-pill">${scannedOk}</span>
+                        </li>
+                    `;
+                    return; // Выходим, чтобы не показывать стандартный UI
+                }
 
                 const unit = session.payload.current_unit;
-                unitItemsList.innerHTML = '';
 
                 if (session.status === 'IDLE') {
                     unitStatus.textContent = 'Нет активной операции. Отсканируйте первый товар.';

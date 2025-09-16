@@ -8,11 +8,15 @@ from psycopg2.extras import RealDictCursor, execute_values
 import re
 
 from .state_service import state_manager
+from .order_service import get_trained_code_model, get_erroneous_sets, build_and_save_model_and_samples
 
 # --- Управляющие команды ---
 CMD_COMPLETE_UNIT = "CMD_COMPLETE_UNIT"  # Завершить текущую единицу (набор/короб)
 CMD_CANCEL_UNIT = "CMD_CANCEL_UNIT"      # Отменить сборку текущей единицы
 CMD_LOGOUT = "CMD_LOGOUT"                # Выйти из системы (дублирует бейдж)
+# --- НОВЫЕ КОМАНДЫ ---
+CMD_ENTER_CORRECTION_MODE = "CMD_ENTER_CORRECTION_MODE"
+CMD_EXIT_CORRECTION_MODE = "CMD_EXIT_CORRECTION_MODE"
 
 # Символ-разделитель групп в коде DataMatrix, непечатаемый (ASCII 29)
 GS_SEPARATOR = '\x1d'
@@ -21,20 +25,19 @@ def _is_sscc(code: str) -> bool:
     """Проверяет, является ли код кодом SSCC (18 цифр)."""
     return code.isdigit() and len(code) == 18
 
-def _get_senior_token(order_id: int) -> Optional[str]:
-    """Получает токен доступа старшего смены (первый созданный для заказа)."""
+def _get_senior_token_record(order_id: int) -> Optional[RealDictCursor]:
+    """Получает запись о токене старшего смены (первый созданный для заказа)."""
     conn = None
     try:
         conn = get_db_connection()
-        with conn.cursor() as cur:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT access_token FROM ma_employee_tokens WHERE order_id = %s ORDER BY id ASC LIMIT 1",
+                "SELECT id, access_token FROM ma_employee_tokens WHERE order_id = %s ORDER BY id ASC LIMIT 1",
                 (order_id,)
             )
-            result = cur.fetchone()
-            return str(result[0]) if result else None
+            return cur.fetchone()
     except Exception as e:
-        print(f"ОШИБКА в _get_senior_token: {e}")
+        print(f"ОШИБКА в _get_senior_token_record: {e}")
         return None
     finally:
         if conn:
@@ -47,7 +50,7 @@ def process_scan(work_session_id: int, order_info: dict, scanned_code: str) -> d
     """
     # --- Предварительная обработка кода ---
     # Определяем, является ли отсканированный код командой.
-    is_command = scanned_code in [CMD_COMPLETE_UNIT, CMD_CANCEL_UNIT, CMD_LOGOUT]
+    is_command = scanned_code in [CMD_COMPLETE_UNIT, CMD_CANCEL_UNIT, CMD_LOGOUT, CMD_ENTER_CORRECTION_MODE, CMD_EXIT_CORRECTION_MODE]
 
     # Если это не команда, то это код данных (DM, SSCC).
     # Некоторые сканеры заменяют непечатаемый символ GS (ASCII 29) на пробел.
@@ -85,7 +88,7 @@ class ScanProcessor:
     def __init__(self, work_session_id, order_info):
         self.work_session_id = work_session_id
         self.order = order_info
-        self.senior_token = None # Ленивая загрузка токена старшего
+        self.senior_token_record = None # Ленивая загрузка записи о токене старшего
         
         self.employee_token_id = self._get_token_id_from_session()
         if not self.employee_token_id:
@@ -200,14 +203,59 @@ class ScanProcessor:
 
     def process(self, scanned_code):
         """Главный метод обработки сканирования."""
+        
+        # --- НОВЫЙ БЛОК: ПРОВЕРКА И ПРОВЕДЕНИЕ ОБУЧЕНИЯ ---
+        is_trained = state_manager.is_order_trained(self.order['id'])
+        if not is_trained:
+            if not self._is_senior_by_token_id():
+                return {
+                    "status": "error",
+                    "message": "Система не обучена. Для начала работы старший смены должен отсканировать 3 образцовых набора.",
+                    "session": self.session,
+                    "order_status": "NEEDS_TRAINING" # Флаг для UI
+                }
+            # Текущий пользователь - старший смены, и система не обучена. Запускаем процесс обучения.
+            return self._handle_training_scan(scanned_code)
+
         status = self.session.get('status')
 
-        # --- Обработка состояния блокировки ---
+        # --- Обработка состояния блокировки (высший приоритет) ---
         if status == 'LOCKED':
-            result = self._handle_unlock(scanned_code)
+            return self._handle_unlock(scanned_code)
+
+        # --- Вход/выход из режима коррекции ---
+        if scanned_code == CMD_ENTER_CORRECTION_MODE:
+            self.session['status'] = 'AWAITING_SENIOR_FOR_CORRECTION'
+            self._save_state()
+            return self._build_success_response("Вход в режим коррекции: ожидание сканирования пропуска старшего смены.")
+        
+        if scanned_code == CMD_EXIT_CORRECTION_MODE:
+            # Проверяем, активен ли режим, чтобы не показывать это сообщение без надобности
+            order_mode, _ = state_manager.get_correction_mode_status(self.order['id'])
+            if order_mode == 'CORRECTION':
+                self.session['status'] = 'AWAITING_SENIOR_FOR_EXIT_CORRECTION'
+                self._save_state()
+                return self._build_success_response("Выход из режима коррекции: ожидание сканирования пропуска старшего смены.")
+            else:
+                # Не блокируем, просто информируем
+                return self._build_success_response("Режим коррекции не активен.")
+
+        # --- Обработка состояний, ожидающих скана старшего ---
+        if status == 'AWAITING_SENIOR_FOR_CORRECTION':
+            return self._activate_correction_mode(scanned_code) # scanned_code is the senior badge
+        
+        if status == 'AWAITING_SENIOR_FOR_EXIT_CORRECTION':
+            return self._deactivate_correction_mode(scanned_code) # scanned_code is the senior badge
+
+        # --- Проверка глобального режима коррекции для заказа ---
+        order_mode, correction_stats = state_manager.get_correction_mode_status(self.order['id'])
+        if order_mode == 'CORRECTION':
+            result = self._handle_correction_scan(scanned_code)
+            # Добавляем актуальную статистику к ответу для UI
+            _, result['correction_stats'] = state_manager.get_correction_mode_status(self.order['id'])
             return result
 
-        # --- Обработка команд ---
+        # --- Обработка команд (стандартный режим) ---
         if scanned_code == CMD_LOGOUT:
             # Команда на выход. Возвращаем специальный ответ,
             # который фронтенд обработает и выполнит редирект.
@@ -251,6 +299,166 @@ class ScanProcessor:
         self._save_state()
         return result
 
+    def _is_senior_by_token_id(self) -> bool:
+        """Проверяет, является ли текущий сотрудник старшим смены."""
+        if self.senior_token_record is None:
+            self.senior_token_record = _get_senior_token_record(self.order['id'])
+        
+        if not self.senior_token_record:
+            return False # Не удалось определить старшего
+        
+        return self.employee_token_id == self.senior_token_record['id']
+
+    def _is_senior(self, scanned_badge: str) -> bool:
+        """Проверяет, является ли отсканированный пропуск пропуском старшего."""
+        if self.senior_token_record is None:
+            self.senior_token_record = _get_senior_token_record(self.order['id'])
+        
+        if not self.senior_token_record:
+            return False
+
+        return scanned_badge == self.senior_token_record['access_token']
+
+    def _activate_correction_mode(self, senior_badge: str):
+        """Активирует режим коррекции после проверки пропуска старшего."""
+        if not self._is_senior(senior_badge):
+            # Сбрасываем состояние ожидания, но не блокируем систему
+            self.session['status'] = 'IDLE'
+            self._save_state()
+            return self._build_error_response("Ошибка: Только старший смены может активировать режим коррекции.")
+
+        erroneous_sets = get_erroneous_sets(self.order['id'])
+        state_manager.start_correction_mode(self.order['id'], erroneous_sets)
+        
+        # Сбрасываем состояние текущего пользователя в IDLE
+        self.session = self._get_initial_state()
+        self._save_state()
+
+        if not erroneous_sets:
+            return self._build_success_response("Режим коррекции активирован. Ошибочных наборов в заказе не найдено.")
+        else:
+            return self._build_success_response(f"Режим коррекции активирован. Найдено {len(erroneous_sets)} ошибочных наборов. Начинайте сканирование.")
+
+    def _deactivate_correction_mode(self, senior_badge: str):
+        """Деактивирует режим коррекции после проверки пропуска старшего."""
+        if not self._is_senior(senior_badge):
+            self.session['status'] = 'IDLE'
+            self._save_state()
+            return self._build_error_response("Ошибка: Только старший смены может деактивировать режим коррекции.")
+
+        state_manager.stop_correction_mode(self.order['id'])
+        self.session = self._get_initial_state()
+        self._save_state()
+        return self._build_success_response("Режим коррекции деактивирован. Система возвращена в штатный режим работы.")
+
+    def _process_completed_training_sample(self):
+        """Вызывается после завершения сбора одного образца."""
+        payload = self.session['payload']
+        samples_collected = payload['samples_collected']
+        num_samples_needed = 3
+        sample_num = len(samples_collected)
+
+        if sample_num < num_samples_needed:
+            self._save_state()
+            return self._build_success_response(f"Образец {sample_num} из {num_samples_needed} сохранен. Начинайте сборку следующего.")
+        else:
+            # Собрали все 3 образца, запускаем обучение
+            result = build_and_save_model_and_samples(
+                self.order['id'],
+                self.employee_token_id,
+                self.work_session_id,
+                samples_collected
+            )
+            if result['success']:
+                self.session = self._get_initial_state() # Сброс состояния после обучения
+                self._save_state()
+                model = result['model']
+                product_prefixes_str = ", ".join(model['product_prefixes'])
+                set_prefixes_str = ", ".join(model['set_prefixes'])
+                response = self._build_success_response(
+                    f"Обучение успешно завершено!\n"
+                    f"Префиксы товаров: {product_prefixes_str}\n"
+                    f"Префиксы наборов: {set_prefixes_str}\n"
+                    f"Система готова к работе."
+                )
+                # Убираем флаг для UI
+                response['order_status'] = 'OPERATIONAL'
+                return response
+            else:
+                # Обучение не удалось, сбрасываем прогресс
+                self.session['payload']['samples_collected'] = []
+                self.session['payload']['current_sample_items'] = []
+                self._save_state()
+                return self._build_error_response(result['message'])
+
+    def _handle_training_scan(self, scanned_code: str):
+        """Обрабатывает сканирование в режиме обучения системы."""
+        if self.session.get('status') != 'TRAINING':
+            # Инициализация режима обучения
+            self.session['status'] = 'TRAINING'
+            self.session['payload'] = {'samples_collected': [], 'current_sample_items': []}
+        
+        # --- НОВАЯ ЛОГИКА: Сброс обучения по команде ---
+        if scanned_code == CMD_CANCEL_UNIT:
+            self.session['payload'] = {'samples_collected': [], 'current_sample_items': []}
+            self._save_state()
+            return self._build_success_response("Обучение сброшено. Начните сборку образцов заново.")
+
+        payload = self.session['payload']
+        samples_collected = payload['samples_collected']
+        current_items = payload['current_sample_items']
+        num_samples_needed = 3
+        sample_num = len(samples_collected) + 1
+
+        is_valid, error_message = self._validate_data_code(scanned_code)
+        if not is_valid: return self._build_error_response(error_message)
+
+        if scanned_code == CMD_COMPLETE_UNIT:
+            if len(current_items) < 2: return self._build_error_response("Для завершения образца нужно отсканировать хотя бы один товар и код самого набора.")
+            parent_code = current_items.pop()
+            # Проверяем, что код набора не совпадает с одним из товаров
+            if parent_code in current_items:
+                current_items.append(parent_code) # Возвращаем состояние как было
+                return self._build_error_response("Логическая ошибка: Код набора не может совпадать с кодом одного из товаров в этом же наборе.")
+
+            samples_collected.append({'parent_code': parent_code, 'items': current_items})
+            payload['current_sample_items'] = []
+            return self._process_completed_training_sample()
+
+        set_capacity = self.order.get('set_capacity')
+        if set_capacity and len(current_items) == set_capacity:
+            parent_code = scanned_code
+            # Проверяем, что код набора не совпадает с одним из товаров
+            if parent_code in current_items:
+                return self._build_error_response("Логическая ошибка: Код набора не может совпадать с кодом одного из товаров в этом же наборе.")
+            samples_collected.append({'parent_code': parent_code, 'items': current_items})
+            payload['current_sample_items'] = []
+            return self._process_completed_training_sample()
+
+        if scanned_code in current_items: return self._build_error_response("Этот код уже был отсканирован в текущем образце.")
+        current_items.append(scanned_code)
+        self._save_state()
+        return self._build_success_response(f"Обучение (образец {sample_num}/{num_samples_needed}): отсканировано товаров: {len(current_items)}.")
+
+    def _handle_correction_scan(self, scanned_code: str):
+        """Обрабатывает сканирование в режиме коррекции."""
+        redis = state_manager.redis_client
+        order_id = self.order['id']
+        pending_key = f"correction:pending_confirm:{self.employee_token_id}"
+        sets_to_check_key = f"correction:sets_to_check:{order_id}"
+
+        pending_code = redis.get(pending_key)
+
+        if pending_code:
+            return self._handle_correction_confirmation(scanned_code, pending_code)
+        else:
+            is_in_error_list = redis.sismember(sets_to_check_key, scanned_code)
+            if is_in_error_list:
+                redis.set(pending_key, scanned_code, ex=60) # Ожидаем подтверждения 60 сек
+                return self._build_error_response(f"ВНИМАНИЕ: Набор '{scanned_code}' в списке ошибок. Отложите его и отсканируйте еще раз для подтверждения.")
+            else:
+                return self._handle_correction_ok_scan(scanned_code)
+
     def _lock_system(self):
         """Переводит систему в состояние блокировки."""
         if self.session.get('status') == 'LOCKED':
@@ -264,26 +472,37 @@ class ScanProcessor:
 
     def _handle_unlock(self, scanned_code: str):
         """Обрабатывает попытку разблокировки системы."""
-        if self.senior_token is None:
-            self.senior_token = _get_senior_token(self.order['id'])
-
-        if not self.senior_token:
+        if not self._is_senior(scanned_code):
             # Эта ошибка не должна блокировать систему повторно
-            return {
-                "status": "error",
-                "message": "Критическая ошибка: не удалось определить старшего смены для этого заказа. Обратитесь к администратору.",
-                "session": self.session
-            }
-
-        if scanned_code == self.senior_token:
-            # Восстанавливаем состояние до блокировки
-            self.session['status'] = self.session.pop('previous_status', 'IDLE')
-            self.session['payload'] = self.session.pop('previous_payload', self._get_initial_state()['payload'])
-            self._save_state()
-            return self._build_success_response("Система разблокирована старшим смены. Последняя операция отменена. Можно продолжать работу.")
-        else:
-            # Не сохраняем состояние, чтобы не сбросить previous_status
             return self._build_error_response("Неверный код. Сканируйте пропуск старшего смены для разблокировки.")
+
+        # Восстанавливаем состояние до блокировки
+        self.session['status'] = self.session.pop('previous_status', 'IDLE')
+        self.session['payload'] = self.session.pop('previous_payload', self._get_initial_state()['payload'])
+        self._save_state()
+        return self._build_success_response("Система разблокирована старшим смены. Последняя операция отменена. Можно продолжать работу.")
+
+    def _handle_correction_confirmation(self, scanned_code, pending_code):
+        """Обрабатывает второй скан в режиме коррекции (подтверждение)."""
+        redis = state_manager.redis_client
+        order_id = self.order['id']
+        pending_key = f"correction:pending_confirm:{self.employee_token_id}"
+
+        if scanned_code == pending_code:
+            pipe = redis.pipeline()
+            pipe.srem(f"correction:sets_to_check:{order_id}", scanned_code)
+            pipe.sadd(f"correction:scanned_error:{order_id}", scanned_code)
+            pipe.delete(pending_key)
+            pipe.execute()
+            return self._build_success_response(f"Подтверждено: набор '{scanned_code}' помечен как исправленный.")
+        else:
+            redis.delete(pending_key)
+            return self._build_error_response(f"Ошибка подтверждения. Ожидался повторный скан '{pending_code}', но получен '{scanned_code}'. Попробуйте снова.")
+
+    def _handle_correction_ok_scan(self, scanned_code):
+        """Обрабатывает скан корректного набора в режиме коррекции."""
+        state_manager.redis_client.sadd(f"correction:scanned_ok:{self.order['id']}", scanned_code)
+        return self._build_success_response(f"OK: Набор '{scanned_code}' не в списке ошибок.")
 
     def _start_new_unit(self, first_code):
         """Начинает сборку новой единицы (набора или короба)."""
@@ -309,36 +528,44 @@ class ScanProcessor:
 
     def _add_to_unit(self, scanned_code):
         """Добавляет код в текущую единицу."""
-        # --- НОВАЯ ПРОВЕРКА ВАЛИДНОСТИ КОДА ---
+        # --- 1. ПРОВЕРКА ВАЛИДНОСТИ КОДА ---
         is_valid, error_message = self._validate_data_code(scanned_code)
         if not is_valid:
-            # Эта ошибка заблокирует систему, требуя вмешательства старшего
             return self._build_error_response(error_message)
 
         unit_type = self.session['payload']['current_unit'].get('type')
-
-        # --- НОВАЯ ЛОГИКА: Завершение короба по SSCC ---
-        if unit_type == 'box' and _is_sscc(scanned_code):
-            return self._complete_unit(parent_code=scanned_code)
-
         current_items = self.session['payload']['current_unit']['items']
 
-        # --- НОВАЯ ЛОГИКА: Автозавершение набора по заданной вместимости ---
+        # --- 2. ПРОВЕРКА НА АВТОЗАВЕРШЕНИЕ (ПРИОРИТЕТ) ---
+        # Если сканируется SSCC для короба, это завершение.
+        if unit_type == 'box' and _is_sscc(scanned_code):
+            return self._complete_unit(parent_code=scanned_code)
+        
+        # Если достигнута вместимость набора, этот скан - завершение.
         if unit_type == 'set':
             set_capacity = self.order.get('set_capacity')
-            if set_capacity:
-                # Если количество отсканированных товаров равно вместимости набора,
-                # то текущий сканируемый код считается кодом самого набора и завершает операцию.
-                if len(current_items) == set_capacity:
-                    return self._complete_unit(parent_code=scanned_code)
+            if set_capacity and len(current_items) == set_capacity:
+                return self._complete_unit(parent_code=scanned_code)
 
-                # Защита от сканирования лишних товаров в набор.
-                if len(current_items) > set_capacity:
-                    return self._build_error_response(
-                        f"Ошибка: Превышена вместимость набора ({set_capacity} шт.). "
-                        f"Отсканируйте код самого набора для завершения или отмените операцию."
-                    )
+        # --- 3. ЛОГИЧЕСКИЕ ПРОВЕРКИ ДЛЯ ДОБАВЛЯЕМОГО ЭЛЕМЕНТА ---
+        # Теперь, когда мы знаем, что это не завершающий код, а вложение,
+        # проверяем его на логическую корректность.
+        if unit_type == 'set':
+            model = get_trained_code_model(self.order['id'])
+            if model.get('set_prefixes') and scanned_code and len(scanned_code) >= 16:
+                if scanned_code[:16] in model['set_prefixes']:
+                    return self._build_error_response("Логическая ошибка: Попытка вложить код набора в другой набор.")
 
+        # --- 4. ДРУГИЕ ПРОВЕРКИ ---
+        # Защита от сканирования лишних товаров в набор с фиксированной вместимостью.
+        if unit_type == 'set':
+            set_capacity = self.order.get('set_capacity')
+            if set_capacity and len(current_items) > set_capacity:
+                return self._build_error_response(
+                    f"Ошибка: Превышена вместимость набора ({set_capacity} шт.). "
+                    f"Отсканируйте код самого набора для завершения или отмените операцию."
+                )
+        
         # Проверка на дубликат в текущей операции
         if scanned_code in current_items:
             return self._build_error_response("Этот код уже был отсканирован в текущей операции.")
@@ -347,6 +574,7 @@ class ScanProcessor:
         if self._is_code_already_used_as_child(scanned_code):
             return self._build_error_response(f"Ошибка: Код уже числится как вложенный в другую упаковку.")
 
+        # --- 5. ДОБАВЛЕНИЕ ЭЛЕМЕНТА ---
         self.session['payload']['current_unit']['items'].append(scanned_code)
         count = len(self.session['payload']['current_unit']['items'])
         return self._build_success_response(f"Товар добавлен. Отсканировано товаров: {count}.")
@@ -371,6 +599,14 @@ class ScanProcessor:
 
         if not child_items:
             return self._build_error_response("Ошибка: Не отсканировано ни одного вложения для этой упаковки.")
+
+        # --- НОВАЯ ЛОГИЧЕСКАЯ ПРОВЕРКА: Набор нельзя закрывать кодом товара ---
+        unit_type = unit.get('type')
+        if unit_type == 'set':
+            model = get_trained_code_model(self.order['id'])
+            if model.get('product_prefixes') and parent_code and len(parent_code) >= 16:
+                if parent_code[:16] in model['product_prefixes']:
+                    return self._build_error_response("Логическая ошибка: Попытка закрыть набор кодом, определенным как товар.")
 
         # ПРОВЕРКА: не была ли эта упаковка уже зарегистрирована
         if self._is_code_already_used_as_parent(parent_code):

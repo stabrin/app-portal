@@ -16,10 +16,12 @@ from .services.order_service import (
     delete_order_completely,
     get_aggregations_for_order,
     delete_aggregations_by_ids,
-    create_work_session
+    create_work_session,
+    get_token_ids_for_order
 )
 from .services.pdf_service import generate_tokens_pdf, generate_control_codes_pdf
 from .services.report_service import get_aggregation_report_for_order, generate_aggregation_excel_report
+from .services.state_service import state_manager
 
 # --- Основной Blueprint ---
 manual_aggregation_bp = Blueprint('manual_aggregation_app', __name__, template_folder='templates', static_folder='static')
@@ -100,13 +102,30 @@ def login_employee():
             
         flash("Неверный или неактивный код доступа.", "danger")
     return render_template('auth/login_employee.html', form=form)
-    
+
+def _perform_logout():
+    """
+    Централизованная функция для выхода пользователя из системы.
+    Очищает состояние в Redis для сотрудников и сессию Flask.
+    """
+    if current_user.is_authenticated and getattr(current_user, 'role', None) == 'employee':
+        from .services.state_service import state_manager
+        try:
+            # ID пользователя имеет формат "employee:<token_id>"
+            token_id_str = current_user.id.split(':')[1]
+            token_id = int(token_id_str)
+            state_manager.clear_state(token_id)
+        except (IndexError, ValueError, TypeError) as e:
+            print(f"ПРЕДУПРЕЖДЕНИЕ: Не удалось очистить состояние для пользователя {current_user.id} при выходе: {e}")
+
+    session.pop('work_session_id', None)
+    session.pop('employee_name', None)
+    logout_user()
+
 @manual_aggregation_bp.route('/logout')
 @login_required
 def logout():
-    # Очищаем сессию при выходе
-    session.pop('employee_name', None)
-    logout_user()
+    _perform_logout()
     flash("Вы успешно вышли из системы.", "success")
     return redirect(url_for('.login_choice'))
 
@@ -297,6 +316,18 @@ def manage_data():
             result = delete_aggregations_by_ids(ids_to_delete)
             flash(result['message'], 'success' if result['success'] else 'danger')
             return redirect(url_for('.manage_data', order_id_to_show=order_id_of_aggregations))
+        
+        elif action == 'reset_order_state':
+            order_id_to_reset = request.form.get('order_id_to_reset')
+            if order_id_to_reset:
+                try:
+                    order_id = int(order_id_to_reset)
+                    token_ids = get_token_ids_for_order(order_id)
+                    state_manager.reset_order_state(order_id, token_ids)
+                    flash(f"Состояние заказа №{order_id} (обучение и сессии) было успешно сброшено.", 'success')
+                except (ValueError, TypeError) as e:
+                    flash(f"Ошибка при сбросе состояния заказа: {e}", 'danger')
+            return redirect(url_for('.manage_data'))
 
     order_id_to_show = request.args.get('order_id_to_show')
     if order_id_to_show:
@@ -331,8 +362,8 @@ def employee_task_page():
     
     if not order_data:
         flash("Ошибка: заказ, к которому привязан ваш пропуск, больше не существует.", "danger")
-        logout_user()
-        return redirect(url_for('.login_employee'))
+        _perform_logout()
+        return redirect(url_for('.login_choice'))
 
     # Получаем ФИО из сессии, которую мы установили при входе
     employee_name = session.get('employee_name', 'Не указано')

@@ -5,6 +5,36 @@
 {% block content %}
 <h1 class="mb-4">Администрирование данных</h1>
 
+<!-- Блок сброса состояния заказа -->
+<div class="card border-warning mb-4">
+    <div class="card-header bg-warning">
+        <h5 class="mb-0">Сброс состояния заказа</h5>
+    </div>
+    <div class="card-body">
+        <p class="card-text"><strong>Внимание:</strong> это действие сбросит состояние заказа в памяти сервера. Будут удалены:</p>
+        <ul>
+            <li>Результаты <strong>обучения системы</strong> для этого заказа (потребуется новое обучение).</li>
+            <li>Все <strong>активные сессии</strong> сотрудников (всех "выкинет" из системы).</li>
+        </ul>
+        <p>Это полезно, если система "зависла" или нужно начать работу с заказом заново, не удаляя уже собранные данные из базы.</p>
+        <form method="POST" action="{{ url_for('.manage_data') }}" onsubmit="return confirm('Вы уверены, что хотите сбросить обучение и все активные сессии для этого заказа?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="reset_order_state">
+            <div class="input-group">
+                <select class="form-select" name="order_id_to_reset" required>
+                    <option value="" disabled selected>--- Выберите заказ для сброса ---</option>
+                    {% for order in orders %}
+                        <option value="{{ order.id }}">
+                            Заказ №{{ order.id }} - {{ order.client_name }} (от {{ order.created_at.strftime('%d.%m.%Y') }})
+                        </option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-warning" type="submit">Сбросить состояние</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Блок полного удаления заказа -->
 <div class="card border-danger mb-4">
     <div class="card-header bg-danger text-white">
@@ -59,15 +89,23 @@
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h4>Записи по заказу №{{ selected_order_id }}</h4>
                 
-                {# Показываем сводку, если она есть и в заказе были наборы #}
-                {% if aggregations.summary and aggregations.summary.total_sets > 0 %}
-                <span class="fs-6 text-muted">
-                    Собрано наборов: <strong>{{ aggregations.summary.total_sets }}</strong>
-                    {% if aggregations.summary.error_sets > 0 %}
-                        , из них с ошибками: <strong class="text-danger">{{ aggregations.summary.error_sets }}</strong>
+                <div class="text-end">
+                    {# Показываем сводку, если она есть и в заказе были наборы #}
+                    {% if aggregations.summary and aggregations.summary.total_sets > 0 %}
+                    <span class="fs-6 text-muted d-block">
+                        Собрано наборов: <strong>{{ aggregations.summary.total_sets }}</strong>
+                        {% if aggregations.summary.error_sets > 0 %}
+                            , из них с ошибками: <strong class="text-danger">{{ aggregations.summary.error_sets }}</strong>
+                        {% endif %}
+                    </span>
                     {% endif %}
-                </span>
-                {% endif %}
+                    {# Показываем информацию о пагинации #}
+                    {% if aggregations.pagination and aggregations.pagination.total_items > 0 %}
+                    <span class="fs-6 text-muted d-block">
+                        Показаны {{ (aggregations.pagination.page - 1) * aggregations.pagination.per_page + 1 }}-{{ [aggregations.pagination.page * aggregations.pagination.per_page, aggregations.pagination.total_items]|min }} из {{ aggregations.pagination.total_items }} записей
+                    </span>
+                    {% endif %}
+                </div>
             </div>
             {% if aggregations %}
             <form method="POST" action="{{ url_for('.manage_data') }}" onsubmit="return confirm('Вы уверены, что хотите удалить выбранные записи?');">
@@ -83,7 +121,7 @@
                                 <th>ID</th>
                                 <th>Родитель (Код)</th>
                                 <th>Родитель (Тип)</th>
-                                <th>Потомок (Код)</th>
+                                <th style="width: 30%;">Потомок (Код)</th>
                                 <th>Потомок (Тип)</th>
                                 <th>Сотрудник</th>
                                 <th>Время (UTC)</th>
@@ -92,21 +130,21 @@
                         <tbody>
                             {% for agg in aggregations %}
                             {# Добавляем класс 'table-danger', если хотя бы один код невалиден #}
-                            <tr class="{% if not agg.child_validity.is_valid or not agg.parent_validity.is_valid %}table-danger{% endif %}">
+                            <tr class="{% if agg.has_error %}table-danger{% endif %}">
                                 <td><input type="checkbox" name="aggregation_ids" value="{{ agg.id }}" class="agg-checkbox form-check-input"></td>
                                 <td>{{ agg.id }}</td>
                                 <td>
                                     {{ agg.parent_code | gs_highlight }}
                                     {# Показываем значок с причиной ошибки #}
                                     {% if not agg.parent_validity.is_valid %}
-                                        <span class="badge bg-warning text-dark ms-2" title="{{ agg.parent_validity.reason }}">!</span>
+                                        <span class="badge bg-warning text-dark ms-2" data-bs-toggle="tooltip" title="{{ agg.parent_validity.reason }}">!</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ agg.parent_type }}</td>
                                 <td>
                                     {{ agg.child_code | gs_highlight }}
                                     {% if not agg.child_validity.is_valid %}
-                                        <span class="badge bg-warning text-dark ms-2" title="{{ agg.child_validity.reason }}">!</span>
+                                        <span class="badge bg-warning text-dark ms-2" data-bs-toggle="tooltip" title="{{ agg.child_validity.reason }}">!</span>
                                     {% endif %}
                                 </td>
                                 <td>{{ agg.child_type }}</td>
@@ -119,6 +157,39 @@
                 </div>
                 <button type="submit" class="btn btn-warning mt-2">Удалить выбранные записи</button>
             </form>
+
+            {% if aggregations.pagination and aggregations.pagination.total_pages > 1 %}
+            <nav aria-label="Page navigation" class="mt-4">
+                <ul class="pagination justify-content-center">
+                    <li class="page-item {% if aggregations.pagination.page <= 1 %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('.manage_data', order_id_to_show=selected_order_id, page=aggregations.pagination.page - 1) }}">Назад</a>
+                    </li>
+            
+                    {% set start_page = [1, aggregations.pagination.page - 3] | max %}
+                    {% set end_page = [aggregations.pagination.total_pages, aggregations.pagination.page + 3] | min %}
+            
+                    {% if start_page > 1 %}
+                        <li class="page-item"><a class="page-link" href="{{ url_for('.manage_data', order_id_to_show=selected_order_id, page=1) }}">1</a></li>
+                        {% if start_page > 2 %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}
+                    {% endif %}
+            
+                    {% for p in range(start_page, end_page + 1) %}
+                        <li class="page-item {% if p == aggregations.pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('.manage_data', order_id_to_show=selected_order_id, page=p) }}">{{ p }}</a>
+                        </li>
+                    {% endfor %}
+            
+                    {% if end_page < aggregations.pagination.total_pages %}
+                        {% if end_page < aggregations.pagination.total_pages - 1 %}<li class="page-item disabled"><span class="page-link">...</span></li>{% endif %}
+                        <li class="page-item"><a class="page-link" href="{{ url_for('.manage_data', order_id_to_show=selected_order_id, page=aggregations.pagination.total_pages) }}">{{ aggregations.pagination.total_pages }}</a></li>
+                    {% endif %}
+            
+                    <li class="page-item {% if aggregations.pagination.page >= aggregations.pagination.total_pages %}disabled{% endif %}">
+                        <a class="page-link" href="{{ url_for('.manage_data', order_id_to_show=selected_order_id, page=aggregations.pagination.page + 1) }}">Вперед</a>
+                    </li>
+                </ul>
+            </nav>
+            {% endif %}
             {% else %}
             <div class="alert alert-info">По этому заказу еще нет записей об агрегации.</div>
             {% endif %}
@@ -137,6 +208,12 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
     }
+
+    // Инициализация всплывающих подсказок Bootstrap для значков с ошибками
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+      return new bootstrap.Tooltip(tooltipTriggerEl)
+    });
 });
 </script>
 {% endblock %}
