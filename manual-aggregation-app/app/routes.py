@@ -93,6 +93,20 @@ def login_employee():
                 flash("Не удалось создать рабочую сессию. Обратитесь к администратору.", "danger")
                 return render_template('auth/login_employee.html', form=form)
 
+            # --- НОВОЕ: Создаем начальное состояние в Redis при входе ---
+            # Это гарантирует, что у активного пользователя всегда есть состояние.
+            # Если оно исчезнет, это будет означать таймаут.
+            try:
+                token_id = int(user.id.split(':')[1])
+                levels = order.get('aggregation_levels') or []
+                next_step = levels[0] if levels else None
+                initial_payload = {"current_unit": {"type": None, "items": []}, "next_step": next_step}
+                state_manager.set_state(token_id, 'IDLE', initial_payload)
+            except Exception as e:
+                print(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось создать начальное состояние для пользователя {user.id}: {e}")
+                flash("Критическая ошибка: не удалось инициализировать сессию. Обратитесь к администратору.", "danger")
+                return render_template('auth/login_employee.html', form=form)
+
             # Сохраняем ID рабочей сессии и имя в сессию Flask
             session['work_session_id'] = work_session_id
             session['employee_name'] = last_name

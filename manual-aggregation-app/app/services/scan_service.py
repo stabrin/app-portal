@@ -21,6 +21,10 @@ CMD_EXIT_CORRECTION_MODE = "CMD_EXIT_CORRECTION_MODE"
 # Символ-разделитель групп в коде DataMatrix, непечатаемый (ASCII 29)
 GS_SEPARATOR = '\x1d'
 
+class SessionTimeoutError(Exception):
+    """Исключение для обозначения истечения сессии по таймауту."""
+    pass
+
 def _is_sscc(code: str) -> bool:
     """Проверяет, является ли код кодом SSCC (18 цифр)."""
     return code.isdigit() and len(code) == 18
@@ -65,6 +69,14 @@ def process_scan(work_session_id: int, order_info: dict, scanned_code: str) -> d
         processor = ScanProcessor(work_session_id, order_info)
         result = processor.process(scanned_code)
         return result
+    except SessionTimeoutError as e:
+        # Сессия истекла, отправляем команду на выход
+        return {
+            "status": "command",
+            "command": "logout",
+            "message": str(e),
+            "session": None
+        }
     except redis.exceptions.ConnectionError as e:
         print(f"КРИТИЧЕСКАЯ ОШИБКА: Не удалось подключиться к Redis. {e}")
         # Возвращаем стандартизированный ответ об ошибке, который будет корректно обработан на фронтенде
@@ -96,10 +108,10 @@ class ScanProcessor:
 
         # Получаем сессию из Redis по ID пропуска (состояние привязано к пропуску)
         self.session = state_manager.get_state(self.employee_token_id)
+        # Если состояния нет, значит сессия истекла по таймауту, т.к.
+        # начальное состояние создается при логине.
         if not self.session:
-            # Если сессии нет, создаем начальное состояние и сохраняем его
-            self.session = self._get_initial_state()
-            self._save_state()
+            raise SessionTimeoutError("Сессия завершена из-за отсутствия активности. Пожалуйста, войдите снова.")
 
     def _get_token_id_from_session(self) -> Optional[int]:
         """Получает ID физического пропуска (employee_token_id) из рабочей сессии."""

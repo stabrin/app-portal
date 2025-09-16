@@ -45,10 +45,10 @@ class EmployeeStateManager:
             return json.loads(state_json)
         return None
 
-    def set_state(self, token_id: int, status: str, payload: Dict = None, ex_seconds: int = 43200):
+    def set_state(self, token_id: int, status: str, payload: Dict = None, ex_seconds: int = 1800):
         """
         Устанавливает новое состояние для сотрудника.
-        ex_seconds: время жизни ключа (12 часов), чтобы не хранить старые сессии вечно.
+        ex_seconds: время жизни ключа (30 минут), чтобы не хранить старые сессии вечно.
         """
         key = self._get_key(token_id)
         state = {
@@ -70,7 +70,7 @@ class EmployeeStateManager:
         lock_key = self._get_lock_key(token_id)
         self.redis_client.delete(state_key, lock_key)
 
-    def acquire_session_lock(self, token_id: int, ex_seconds: int = 43200) -> bool:
+    def acquire_session_lock(self, token_id: int, ex_seconds: int = 1800) -> bool:
         """
         Пытается установить блокировку для сессии сотрудника.
         Возвращает True, если блокировка установлена, и False, если она уже существует.
