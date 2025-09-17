@@ -4,14 +4,18 @@ from psycopg2 import sql
 from dotenv import load_dotenv
 
 def get_db_connection():
-    """Устанавливает соединение с БД."""
+    """Устанавливает соединение с БД для локальных скриптов."""
     load_dotenv()
     try:
+        # Для локальных скриптов, подключающихся к контейнеру Docker,
+        # мы используем 'localhost' из-за проброса портов.
+        # Мы игнорируем DB_HOST из .env, который может быть 'postgres'
+        # для межконтейнерного взаимодействия.
         conn = psycopg2.connect(
             dbname=os.getenv("DB_NAME"),
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
-            host=os.getenv("DB_HOST"),
+            host='localhost',
             port=os.getenv("DB_PORT")
         )
         return conn

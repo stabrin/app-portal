@@ -355,7 +355,10 @@ def create_app():
     load_dotenv()
     
     app = Flask(__name__)
-    app.secret_key = os.getenv('SECRET_KEY')
+    # Используем правильное имя переменной из .env файла,
+    # чтобы Flask мог шифровать сессии.
+    # Это исправляет ошибку "no secret key was set".
+    app.secret_key = os.getenv('DATAMATRIX_SECRET_KEY')
 
     login_manager.init_app(app)
 

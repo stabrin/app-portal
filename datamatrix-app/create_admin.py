@@ -27,9 +27,16 @@ def create_admin_user():
     
     conn = None
     try:
+        # Для локальных скриптов, подключающихся к контейнеру Docker,
+        # мы используем 'localhost' из-за проброса портов.
+        # Мы игнорируем DB_HOST из .env, который может быть 'postgres'
+        # для межконтейнерного взаимодействия.
         conn = psycopg2.connect(
-            host=os.getenv('DB_HOST'), database=os.getenv('DB_NAME'),
-            user=os.getenv('DB_USER'), password=os.getenv('DB_PASSWORD')
+            host='localhost',
+            database=os.getenv('DB_NAME'),
+            user=os.getenv('DB_USER'),
+            password=os.getenv('DB_PASSWORD'),
+            port=os.getenv('DB_PORT', '5432')
         )
         with conn.cursor() as cur:
             # Вставляем нового пользователя

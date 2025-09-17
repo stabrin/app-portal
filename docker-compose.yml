@@ -1,81 +1,102 @@
 services:
-  nginx:
-    build: ./nginx
-    container_name: portal_nginx
-    restart: unless-stopped
-    ports:
-      - "8080:80"
-    volumes:
-      - ./datamatrix-app/app/static:/app/datamatrix-static
-      - ./portal/app/static:/app/portal-static
-      - ./manual-aggregation-app/app/static:/app/manual-aggregation-static:ro
-    depends_on:
-      - portal
-      - datamatrix-app
-      - manual-aggregation-app
-      - dmkod-integration-app
-    networks:
-      - app-network
-
-  portal:
-    build: ./portal
-    container_name: portal_main
-    restart: unless-stopped
+  # --- 1. База данных PostgreSQL ---
+  postgres:
+    image: postgres:14-alpine
+    container_name: portal_postgres_db
+    restart: always
     environment:
-    - APP_VERSION=1.2.1
-    networks:
-      - app-network
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    # Healthcheck проверяет, готова ли БД принимать подключения,
+    # прежде чем разрешить запуск зависимых сервисов.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  datamatrix-app:
+  # --- 2. Redis с дополнительными модулями ---
+  # Судя по логам, вы используете модули (JSON, Search и т.д.).
+  # Стандартный образ redis их не содержит. redis/redis-stack-server - то, что нужно.
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: portal_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- 3. Главный портал (точка входа) ---
+  portal_main:
+    build: ./portal # Убедитесь, что путь к Dockerfile верный
+    container_name: portal_main
+    restart: always
+    env_file: ./.env
+    # Этот сервис не зависит от БД, но может зависеть от Redis
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # --- 4. Приложение Datamatrix ---
+  datamatrix_app:
     build: ./datamatrix-app
     container_name: datamatrix_app
-    restart: unless-stopped
-    volumes:
-      # Монтируем всю папку проекта в /app
-      - ./datamatrix-app:/app
-    environment:
-      # Передаем только нужные переменные
-      - DATABASE_URL=${DATABASE_URL}
-      - SECRET_KEY=${DATAMATRIX_SECRET_KEY}
-      - TABLE_PRODUCTS=${TABLE_PRODUCTS}
-      - TABLE_PACKAGES=${TABLE_PACKAGES}
-      - TABLE_ITEMS=${TABLE_ITEMS}
-      - TABLE_ORDERS=${TABLE_ORDERS}
-      - TABLE_AGGREGATION_TASKS=${TABLE_AGGREGATION_TASKS}
-      - PYTHONPATH=/app
-    networks:
-      - app-network
+    restart: always
+    env_file: ./.env
+    # Запускается только после того, как postgres и redis станут "healthy"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-  manual-aggregation-app:
+  # --- 5. Приложение Ручной Агрегации ---
+  manual_aggregation_app:
     build: ./manual-aggregation-app
     container_name: manual_aggregation_app
-    restart: unless-stopped
-    networks:
-      - app-network
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-      - MANUAL_AGGREGATION_SECRET_KEY=${MANUAL_AGGREGATION_SECRET_KEY}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
+    restart: always
+    env_file: ./.env
     depends_on:
-      - redis
-  redis:
-    image: "redis:alpine"
-    container_name: portal_redis
-    restart: unless-stopped
-    networks:
-      - app-network
-  
-  dmkod-integration-app:
-    build: ./dmkod-integration-app
-    container_name: dmkod-integration-app
-    restart: unless-stopped
-    networks:
-      - app-network
-    environment:
-      - API_BASE_URL=${API_BASE_URL}
-    
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-networks:
-  app-network:
-    driver: bridge
+  # --- 6. Приложение Интеграции с ДМкод ---
+  dmkod-integration-app:
+    build: ./dmkod-integration-app # Убедитесь, что путь к Dockerfile верный
+    container_name: dmkod-integration-app
+    restart: always
+    env_file: ./.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # --- 7. Nginx (единая точка входа) ---
+  nginx:
+    image: nginx:1.29-alpine # Используем версию из ваших логов
+    container_name: portal_nginx
+    restart: always
+    ports:
+      # Судя по логам, вы заходите на порт 8080
+      - "8080:80"
+    volumes:
+      # Пробрасываем конфигурационный файл для Nginx
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    # Nginx должен стартовать после всех приложений, на которые он ссылается
+    depends_on:
+      - portal_main
+      - datamatrix_app
+      - manual_aggregation_app
+      - dmkod-integration-app
