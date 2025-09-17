@@ -110,7 +110,7 @@ def get_tokens_for_order(order_id: int) -> list:
     conn = get_db_connection()
     with conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT access_token FROM ma_employee_tokens WHERE order_id = %s;", (order_id,))
+            cur.execute("SELECT access_token FROM ma_employee_tokens WHERE order_id = %s ORDER BY id ASC;", (order_id,))
             return cur.fetchall()
     return []
 
@@ -120,7 +120,7 @@ def get_token_ids_for_order(order_id: int) -> list[int]:
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM ma_employee_tokens WHERE order_id = %s;", (order_id,))
+            cur.execute("SELECT id FROM ma_employee_tokens WHERE order_id = %s ORDER BY id ASC;", (order_id,))
             # fetchall returns a list of tuples, e.g., [(1,), (2,)]
             return [row[0] for row in cur.fetchall()]
     except Exception as e:

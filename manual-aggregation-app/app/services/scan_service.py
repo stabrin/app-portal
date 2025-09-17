@@ -216,26 +216,14 @@ class ScanProcessor:
     def process(self, scanned_code):
         """Главный метод обработки сканирования."""
         
-        # --- НОВЫЙ БЛОК: ПРОВЕРКА И ПРОВЕДЕНИЕ ОБУЧЕНИЯ ---
-        is_trained = state_manager.is_order_trained(self.order['id'])
-        if not is_trained:
-            if not self._is_senior_by_token_id():
-                return {
-                    "status": "error",
-                    "message": "Система не обучена. Для начала работы старший смены должен отсканировать 3 образцовых набора.",
-                    "session": self.session,
-                    "order_status": "NEEDS_TRAINING" # Флаг для UI
-                }
-            # Текущий пользователь - старший смены, и система не обучена. Запускаем процесс обучения.
-            return self._handle_training_scan(scanned_code)
-
         status = self.session.get('status')
 
         # --- Обработка состояния блокировки (высший приоритет) ---
         if status == 'LOCKED':
             return self._handle_unlock(scanned_code)
 
-        # --- Вход/выход из режима коррекции ---
+        # --- Вход/выход из режима коррекции (приоритет 2) ---
+        # Эти команды и последующие состояния должны работать независимо от статуса обучения.
         if scanned_code == CMD_ENTER_CORRECTION_MODE:
             self.session['status'] = 'AWAITING_SENIOR_FOR_CORRECTION'
             self._save_state()
@@ -260,12 +248,27 @@ class ScanProcessor:
             return self._deactivate_correction_mode(scanned_code) # scanned_code is the senior badge
 
         # --- Проверка глобального режима коррекции для заказа ---
+        # Если мы уже в режиме коррекции, обучение не требуется.
         order_mode, correction_stats = state_manager.get_correction_mode_status(self.order['id'], self.employee_token_id)
         if order_mode == 'CORRECTION':
             result = self._handle_correction_scan(scanned_code)
             # Добавляем актуальную статистику к ответу для UI
             _, result['correction_stats'] = state_manager.get_correction_mode_status(self.order['id'], self.employee_token_id)
             return result
+
+        # --- НОВЫЙ БЛОК: ПРОВЕРКА И ПРОВЕДЕНИЕ ОБУЧЕНИЯ ---
+        # Все операции ниже (кроме выхода) требуют, чтобы система была обучена.
+        is_trained = state_manager.is_order_trained(self.order['id'])
+        if not is_trained:
+            if not self._is_senior_by_token_id():
+                return {
+                    "status": "error",
+                    "message": "Система не обучена. Для начала работы старший смены должен отсканировать 3 образцовых набора.",
+                    "session": self.session,
+                    "order_status": "NEEDS_TRAINING" # Флаг для UI
+                }
+            # Текущий пользователь - старший смены, и система не обучена. Запускаем процесс обучения.
+            return self._handle_training_scan(scanned_code)
 
         # --- Обработка команд (стандартный режим) ---
         if scanned_code == CMD_LOGOUT:
