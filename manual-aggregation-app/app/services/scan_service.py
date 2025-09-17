@@ -260,11 +260,11 @@ class ScanProcessor:
             return self._deactivate_correction_mode(scanned_code) # scanned_code is the senior badge
 
         # --- Проверка глобального режима коррекции для заказа ---
-        order_mode, correction_stats = state_manager.get_correction_mode_status(self.order['id'])
+        order_mode, correction_stats = state_manager.get_correction_mode_status(self.order['id'], self.employee_token_id)
         if order_mode == 'CORRECTION':
             result = self._handle_correction_scan(scanned_code)
             # Добавляем актуальную статистику к ответу для UI
-            _, result['correction_stats'] = state_manager.get_correction_mode_status(self.order['id'])
+            _, result['correction_stats'] = state_manager.get_correction_mode_status(self.order['id'], self.employee_token_id)
             return result
 
         # --- Обработка команд (стандартный режим) ---
@@ -453,23 +453,31 @@ class ScanProcessor:
         return self._build_success_response(f"Обучение (образец {sample_num}/{num_samples_needed}): отсканировано товаров: {len(current_items)}.")
 
     def _handle_correction_scan(self, scanned_code: str):
-        """Обрабатывает сканирование в режиме коррекции."""
+        """
+        Обрабатывает сканирование в режиме коррекции по новому сценарию:
+        1. Сначала сканируются все наборы. Ошибочные запоминаются.
+        2. При повторном сканировании ошибочного набора он подтверждается и удаляется.
+        """
         redis = state_manager.redis_client
         order_id = self.order['id']
-        pending_key = f"correction:pending_confirm:{self.employee_token_id}"
+        pending_removal_key = f"correction:pending_removal:{self.employee_token_id}"
         sets_to_check_key = f"correction:sets_to_check:{order_id}"
 
-        pending_code = redis.get(pending_key)
+        # 1. Проверяем, не является ли этот скан подтверждением для ранее найденной ошибки
+        is_pending_confirmation = redis.sismember(pending_removal_key, scanned_code)
+        if is_pending_confirmation:
+            return self._confirm_and_remove_erroneous_set(scanned_code)
 
-        if pending_code:
-            return self._handle_correction_confirmation(scanned_code, pending_code)
+        # 2. Если это не подтверждение, проверяем, есть ли код в общем списке ошибок
+        is_in_error_list = redis.sismember(sets_to_check_key, scanned_code)
+        if is_in_error_list:
+            # Добавляем в список "ожидающих подтверждения" для этого оператора
+            redis.sadd(pending_removal_key, scanned_code)
+            # Возвращаем информационное сообщение, не прерывая работу
+            return self._build_success_response(f"Обнаружен ошибочный набор '{scanned_code}'. Отложен для подтверждения удаления.")
         else:
-            is_in_error_list = redis.sismember(sets_to_check_key, scanned_code)
-            if is_in_error_list:
-                redis.set(pending_key, scanned_code, ex=60) # Ожидаем подтверждения 60 сек
-                return self._build_error_response(f"ВНИМАНИЕ: Набор '{scanned_code}' в списке ошибок. Отложите его и отсканируйте еще раз для подтверждения.")
-            else:
-                return self._handle_correction_ok_scan(scanned_code)
+            # 3. Если код не в списке ошибок, обрабатываем как обычный корректный скан
+            return self._handle_correction_ok_scan(scanned_code)
 
     def _lock_system(self):
         """Переводит систему в состояние блокировки."""
@@ -494,22 +502,49 @@ class ScanProcessor:
         self._save_state()
         return self._build_success_response("Система разблокирована старшим смены. Последняя операция отменена. Можно продолжать работу.")
 
-    def _handle_correction_confirmation(self, scanned_code, pending_code):
-        """Обрабатывает второй скан в режиме коррекции (подтверждение)."""
-        redis = state_manager.redis_client
+    def _confirm_and_remove_erroneous_set(self, code_to_remove: str):
+        """
+        Подтверждает удаление ошибочного набора, удаляет его из БД и обновляет статистику в Redis.
+        """
         order_id = self.order['id']
-        pending_key = f"correction:pending_confirm:{self.employee_token_id}"
+        
+        # 1. Удаление из базы данных
+        conn = None
+        deleted_db_count = 0
+        try:
+            conn = get_db_connection()
+            with conn.cursor() as cur:
+                # Удаляем все записи, где этот код является родителем
+                cur.execute(
+                    "DELETE FROM ma_aggregations WHERE parent_code = %s AND order_id = %s;",
+                    (code_to_remove, order_id)
+                )
+                deleted_db_count = cur.rowcount
+            conn.commit()
+        except Exception as e:
+            if conn: conn.rollback()
+            print(f"КРИТИЧЕСКАЯ ОШИБКА при удалении ошибочного набора из БД: {e}")
+            # Если БД упала, не меняем состояние в Redis, чтобы избежать рассинхрона
+            return self._build_error_response(f"Ошибка БД при удалении набора '{code_to_remove}'. Операция отменена.")
+        finally:
+            if conn: conn.close()
 
-        if scanned_code == pending_code:
-            pipe = redis.pipeline()
-            pipe.srem(f"correction:sets_to_check:{order_id}", scanned_code)
-            pipe.sadd(f"correction:scanned_error:{order_id}", scanned_code)
-            pipe.delete(pending_key)
-            pipe.execute()
-            return self._build_success_response(f"Подтверждено: набор '{scanned_code}' помечен как исправленный.")
-        else:
-            redis.delete(pending_key)
-            return self._build_error_response(f"Ошибка подтверждения. Ожидался повторный скан '{pending_code}', но получен '{scanned_code}'. Попробуйте снова.")
+        # 2. Обновление состояния в Redis
+        redis = state_manager.redis_client
+        pending_removal_key = f"correction:pending_removal:{self.employee_token_id}"
+        
+        pipe = redis.pipeline()
+        # Убираем из общего списка на проверку
+        pipe.srem(f"correction:sets_to_check:{order_id}", code_to_remove)
+        # Убираем из списка ожидания подтверждения для этого юзера
+        pipe.srem(pending_removal_key, code_to_remove)
+        # Добавляем в статистику исправленных ошибок
+        pipe.sadd(f"correction:scanned_error:{order_id}", code_to_remove)
+        pipe.execute()
+
+        response = self._build_success_response(f"Подтверждено: ошибочный набор '{code_to_remove}' ({deleted_db_count} вложений) удален. Отложите его.")
+        response['status'] = 'confirmation' # Специальный статус для выделения в UI
+        return response
 
     def _handle_correction_ok_scan(self, scanned_code):
         """Обрабатывает скан корректного набора в режиме коррекции."""

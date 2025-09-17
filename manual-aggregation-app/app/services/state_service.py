@@ -137,9 +137,10 @@ class EmployeeStateManager:
         
         self.redis_client.set(model_key, json.dumps(model_to_cache))
 
-    def get_correction_mode_status(self, order_id: int) -> tuple[Optional[str], Optional[dict]]:
+    def get_correction_mode_status(self, order_id: int, employee_token_id: Optional[int] = None) -> tuple[Optional[str], Optional[dict]]:
         """
         Проверяет, активен ли режим коррекции для заказа, и возвращает его статус и статистику.
+        Если передан employee_token_id, также возвращает список наборов, ожидающих подтверждения удаления.
         """
         mode_key = f"order_mode:{order_id}"
         mode = self.redis_client.get(mode_key)
@@ -152,12 +153,18 @@ class EmployeeStateManager:
         pipe.scard(f"correction:sets_to_check:{order_id}")
         pipe.scard(f"correction:scanned_ok:{order_id}")
         pipe.scard(f"correction:scanned_error:{order_id}")
+        if employee_token_id:
+            # Новый ключ для хранения кодов, ожидающих подтверждения удаления
+            pending_removal_key = f"correction:pending_removal:{employee_token_id}"
+            pipe.smembers(pending_removal_key)
+
         results = pipe.execute()
         
         stats = {
             "to_check": results[0],
             "scanned_ok": results[1],
-            "scanned_error": results[2]
+            "scanned_error": results[2],
+            "pending_removal": sorted(list(results[3])) if employee_token_id and len(results) > 3 else []
         }
         return 'CORRECTION', stats
 
@@ -165,6 +172,7 @@ class EmployeeStateManager:
         """Активирует режим коррекции для заказа."""
         mode_key = f"order_mode:{order_id}"
         sets_to_check_key = f"correction:sets_to_check:{order_id}"
+        # Ключи pending_removal создаются и удаляются динамически для каждого юзера
         scanned_ok_key = f"correction:scanned_ok:{order_id}"
         scanned_error_key = f"correction:scanned_error:{order_id}"
 
@@ -178,10 +186,19 @@ class EmployeeStateManager:
 
     def stop_correction_mode(self, order_id: int):
         """Деактивирует режим коррекции и очищает все связанные данные."""
+        from .order_service import get_token_ids_for_order # Локальный импорт для избежания циклической зависимости
+
+        # 1. Собираем все ключи, связанные напрямую с заказом
         keys_to_delete = self.redis_client.keys(f"correction:*:{order_id}")
         keys_to_delete.append(f"order_mode:{order_id}")
+
+        # 2. Собираем все персональные ключи сотрудников, работавших с этим заказом
+        token_ids = get_token_ids_for_order(order_id)
+        for token_id in token_ids:
+            keys_to_delete.append(f"correction:pending_removal:{token_id}")
+
         if keys_to_delete:
-            self.redis_client.delete(*keys_to_delete)
+            self.redis_client.delete(*keys_to_delete) # Удаляем все одним запросом
 
 # Создаем один экземпляр, который будет использоваться во всем приложении
 state_manager = EmployeeStateManager()
