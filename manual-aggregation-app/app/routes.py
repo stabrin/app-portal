@@ -17,7 +17,8 @@ from .services.order_service import (
     get_aggregations_for_order,
     delete_aggregations_by_ids,
     create_work_session,
-    get_token_ids_for_order
+    get_token_ids_for_order,
+    end_work_session
 )
 from .services.pdf_service import generate_tokens_pdf, generate_control_codes_pdf
 from .services.report_service import get_aggregation_report_for_order, generate_aggregation_excel_report
@@ -65,6 +66,7 @@ def login_employee():
     if form.validate_on_submit():
         last_name = form.last_name.data
         access_token = form.access_token.data
+        workstation_id = form.workstation_id.data # Получаем ID рабочей станции из формы
         
         user = verify_employee_token(access_token)
         
@@ -88,9 +90,14 @@ def login_employee():
                 return render_template('auth/login_employee.html', form=form)
             
             # Создаем новую рабочую сессию и получаем ее ID
-            work_session_id = create_work_session(access_token, last_name)
+            work_session_id = create_work_session(
+                access_token=access_token,
+                employee_name=last_name,
+                order_id=order.get('id'),
+                workstation_id=workstation_id
+            )
             if not work_session_id:
-                flash("Не удалось создать рабочую сессию. Обратитесь к администратору.", "danger")
+                flash("Не удалось создать рабочую сессию. Возможно, пропуск недействителен или сессия уже активна.", "danger")
                 return render_template('auth/login_employee.html', form=form)
 
             # --- НОВОЕ: Создаем начальное состояние в Redis при входе ---
@@ -122,6 +129,11 @@ def _perform_logout():
     Централизованная функция для выхода пользователя из системы.
     Очищает состояние в Redis для сотрудников и сессию Flask.
     """
+    # --- НОВОЕ: Завершаем рабочую сессию в БД, устанавливая end_time ---
+    work_session_id = session.get('work_session_id')
+    if work_session_id:
+        end_work_session(work_session_id)
+
     if current_user.is_authenticated and getattr(current_user, 'role', None) == 'employee':
         from .services.state_service import state_manager
         try:

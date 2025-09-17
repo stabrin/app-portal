@@ -44,6 +44,14 @@
                     </div>
                 </div>
 
+                <div class="mb-3">
+                    {{ form.workstation_id.label(class="form-label") }}
+                    {{ form.workstation_id(class="form-control", id="workstation_id_input", autocomplete="off") }}
+                    {% for error in form.workstation_id.errors %}
+                        <span class="text-danger">{{ error }}</span>
+                    {% endfor %}
+                </div>
+
                 <div class="d-grid">
                     {{ form.submit(class="btn btn-primary", id="submit-button", disabled=true) }}
                 </div>
@@ -59,6 +67,7 @@
         const form = document.getElementById('login-form');
         const lastNameInput = document.getElementById('last_name_input');
         const tokenInput = document.getElementById('access_token_input');
+        const workstationInput = document.getElementById('workstation_id_input');
         const submitButton = document.getElementById('submit-button');
         const validationHint = document.getElementById('validation-hint');
         const flashMessage = document.getElementById('flash-message');
@@ -116,11 +125,13 @@
         function checkFormCompletion() {
             const isLastNameValid = validPattern.test(lastNameInput.value) && lastNameInput.value.length > 2;
             const isTokenEntered = tokenInput.value.length > 0;
-            submitButton.disabled = !(isLastNameValid && isTokenEntered);
+            const isWorkstationEntered = workstationInput.value.length > 0;
+            submitButton.disabled = !(isLastNameValid && isTokenEntered && isWorkstationEntered);
         }
 
         lastNameInput.addEventListener('input', checkFormCompletion);
         tokenInput.addEventListener('input', checkFormCompletion);
+        workstationInput.addEventListener('input', checkFormCompletion);
 
         // 4. По умолчанию фокус на поле с фамилией
         lastNameInput.focus();

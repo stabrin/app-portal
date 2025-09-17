@@ -129,7 +129,7 @@ def get_token_ids_for_order(order_id: int) -> list[int]:
     finally:
         if conn: conn.close()
 
-def create_work_session(access_token: str, employee_name: str) -> Optional[int]:
+def create_work_session(access_token: str, employee_name: str, order_id: int, workstation_id: str) -> Optional[int]:
     """
     Создает новую рабочую сессию для сотрудника и возвращает ее ID.
     Проверяет, что для данного пропуска нет другой активной сессии.
@@ -157,8 +157,8 @@ def create_work_session(access_token: str, employee_name: str) -> Optional[int]:
 
             # 3. Создать новую запись в ma_work_sessions
             cur.execute(
-                "INSERT INTO ma_work_sessions (employee_token_id, employee_name) VALUES (%s, %s) RETURNING id;",
-                (employee_token_id, employee_name)
+                "INSERT INTO ma_work_sessions (employee_token_id, employee_name, order_id, workstation_id) VALUES (%s, %s, %s, %s) RETURNING id;",
+                (employee_token_id, employee_name, order_id, workstation_id)
             )
             session_id = cur.fetchone()[0]
 
@@ -171,6 +171,39 @@ def create_work_session(access_token: str, employee_name: str) -> Optional[int]:
         if conn: conn.rollback()
         print(f"КРИТИЧЕСКАЯ ОШИБКА в create_work_session: {e}")
         return None
+    finally:
+        if conn: conn.close()
+
+def end_work_session(work_session_id: int) -> dict:
+    """Завершает рабочую сессию, устанавливая время окончания и освобождая блокировку."""
+    from .state_service import state_manager
+    conn = None
+    employee_token_id = None
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cur:
+            # Получаем employee_token_id для освобождения блокировки сессии
+            cur.execute("SELECT employee_token_id FROM ma_work_sessions WHERE id = %s;", (work_session_id,))
+            result = cur.fetchone()
+            if result:
+                employee_token_id = result[0]
+
+            # Устанавливаем время окончания
+            cur.execute(
+                "UPDATE ma_work_sessions SET end_time = CURRENT_TIMESTAMP WHERE id = %s AND end_time IS NULL;",
+                (work_session_id,)
+            )
+        conn.commit()
+
+        # Освобождаем блокировку сессии в Redis
+        if employee_token_id:
+            state_manager.release_session_lock(employee_token_id)
+        
+        return {"success": True, "message": "Сессия успешно завершена."}
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"КРИТИЧЕСКАЯ ОШИБКА в end_work_session: {e}")
+        return {"success": False, "message": "Ошибка при завершении сессии."}
     finally:
         if conn: conn.close()
 

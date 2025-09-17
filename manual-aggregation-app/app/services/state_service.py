@@ -80,6 +80,11 @@ class EmployeeStateManager:
         # Мы просто храним '1' как значение, важен сам факт наличия ключа.
         return self.redis_client.set(lock_key, "1", ex=ex_seconds, nx=True)
 
+    def release_session_lock(self, token_id: int):
+        """Снимает блокировку сессии сотрудника."""
+        lock_key = self._get_lock_key(token_id)
+        self.redis_client.delete(lock_key)
+
     def reset_order_state(self, order_id: int, token_ids: list[int]):
         """
         Полностью сбрасывает состояние заказа в Redis:

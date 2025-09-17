@@ -52,6 +52,11 @@ class EmployeeTokenForm(FlaskForm):
         'Ваш код доступа (из QR)', 
         validators=[DataRequired(message="Код доступа не может быть пустым.")]
     )
+    workstation_id = StringField(
+        'ID Рабочей станции',
+        validators=[DataRequired(message="Укажите ID рабочей станции.")],
+        default='WS-01'
+    )
     submit = SubmitField('Войти')
 
 class OrderForm(FlaskForm):
