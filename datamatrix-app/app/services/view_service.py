@@ -197,7 +197,11 @@ def generate_declarator_report(order_id: int):
                 SUBSTRING(b.datamatrix for 31) AS dm_part_31,
                 s.sscc_level_1,
                 s.sscc_level_2,
-                s.sscc_level_3
+                s.sscc_level_3,
+                product_name,
+                description_1,
+                description_2,
+                description_3                                                
             FROM {base_view} b
             LEFT JOIN {sscc_view} s ON b.package_id = s.id_level_1
             ORDER BY b.datamatrix;
