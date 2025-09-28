@@ -11,9 +11,6 @@ from psycopg2.extras import RealDictCursor
 from bcrypt import checkpw
 from io import BytesIO
 
-# Настраиваем логирование
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
 from .db import get_db_connection
 from .forms import LoginForm, IntegrationForm, ProductGroupForm
 from .auth import User
@@ -21,17 +18,19 @@ from .auth import User
 # 1. Определяем Blueprint
 dmkod_bp = Blueprint(
     'dmkod_integration_app', __name__,
-    template_folder='templates',
     static_folder='static'
 )
 
 # 2. Роуты аутентификации
 @dmkod_bp.route('/login', methods=['GET', 'POST'])
 def login():
+    logging.debug(f"Entering login route. Method: {request.method}")
     if current_user.is_authenticated:
-        return redirect(url_for('.index'))
+        logging.debug("User is already authenticated. Redirecting to dashboard.")
+        return redirect(url_for('.dashboard'))
     form = LoginForm()
     if form.validate_on_submit():
+        logging.debug("Login form validated successfully.")
         conn = get_db_connection()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT * FROM users WHERE username = %s", (form.username.data,))
@@ -40,6 +39,7 @@ def login():
 
         # 1. Проверяем локального пользователя
         if not (user_data and user_data.get('password_hash') and checkpw(form.password.data.encode('utf-8'), user_data['password_hash'].encode('utf-8'))):
+            logging.warning(f"Failed login attempt for user: {form.username.data}")
             flash('Неверное имя пользователя или пароль.', 'danger')
             return render_template('login.html', title='Вход', form=form)
 
@@ -62,17 +62,20 @@ def login():
             session['api_refresh_token'] = tokens.get('refresh')
 
         except requests.exceptions.RequestException as e:
+            logging.error(f"API authentication failed: {e}")
             flash(f'Ошибка аутентификации в API: {e}', 'danger')
             return render_template('login.html', title='Вход', form=form)
 
         # 3. Если все успешно, логиним пользователя в сессию Flask
         user = User(user_data)
         login_user(user, remember=form.remember.data)
+        logging.info(f"User {user.username} logged in successfully.")
         next_page = request.args.get('next')
         flash('Вы успешно вошли в систему.', 'success')
-        return redirect(next_page or url_for('.index'))
+        return redirect(next_page or url_for('.dashboard'))
 
-    return render_template('login.html', title='Вход', form=form)
+    logging.debug("Rendering login page.")
+    return render_template('dmkod_login.html', title='Вход', form=form)
 
 @dmkod_bp.route('/logout')
 @login_required
@@ -81,10 +84,22 @@ def logout():
     flash('Вы успешно вышли из системы.', 'success')
     return redirect(url_for('.login'))
 
-# 3. Основной роут приложения
-@dmkod_bp.route('/', methods=['GET', 'POST'])
-@login_required
+# 3. Основные роуты приложения
+@dmkod_bp.route('/')
 def index():
+    """
+    Главная страница, которая перенаправляет либо на вход, либо на панель управления.
+    """
+    logging.debug("Entering index route '/'.")
+    if current_user.is_authenticated:
+        logging.debug("User is authenticated, redirecting to dashboard.")
+        return redirect(url_for('.dashboard'))
+    logging.debug("User is not authenticated, redirecting to login.")
+    return redirect(url_for('.login'))
+
+@dmkod_bp.route('/dashboard')
+@login_required
+def dashboard():
     conn = get_db_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         # Используем JOIN для получения названия товарной группы
@@ -312,7 +327,7 @@ def create_integration():
 
             conn.commit()
             flash(f'Интеграция #{order_id} для клиента "{client_name}" успешно создана.', 'success')
-            return redirect(url_for('.index'))
+            return redirect(url_for('.dashboard'))
         except Exception as e:
             conn.rollback()
             flash(f'Произошла ошибка при создании интеграции: {e}', 'danger')
@@ -423,12 +438,12 @@ def edit_integration(order_id):
 
             if not order:
                 flash(f'Заказ с ID {order_id} не найден.', 'danger')
-                return redirect(url_for('.index'))
+                return redirect(url_for('.dashboard'))
 
             # Проверяем, можно ли редактировать этот заказ
             if order['status'] != 'dmkod':
                 flash(f'Заказ №{order_id} имеет статус "{order["status"]}" и не может быть отредактирован.', 'warning')
-                return redirect(url_for('.index'))
+                return redirect(url_for('.dashboard'))
 
             # 2. Информация об оригинальном файле
             cur.execute("SELECT id, filename FROM dmkod_order_files WHERE order_id = %s LIMIT 1", (order_id,))
@@ -450,7 +465,7 @@ def edit_integration(order_id):
         conn.rollback()
         logging.error(f"--- [DIAGNOSTIC LOG] --- Exception in edit_integration for order_id={order_id}", exc_info=True)
         flash(f'Произошла ошибка: {e}', 'danger')
-        return redirect(url_for('.index'))
+        return redirect(url_for('.dashboard'))
     finally:
         conn.close()
 
@@ -465,7 +480,7 @@ def download_original_file(file_id):
 
         if not file_data:
             flash('Файл не найден.', 'danger')
-            return redirect(request.referrer or url_for('.index'))
+            return redirect(request.referrer or url_for('.dashboard'))
 
         return send_file(
             BytesIO(file_data['file_data']),
@@ -475,7 +490,7 @@ def download_original_file(file_id):
         )
     except Exception as e:
         flash(f'Ошибка при скачивании файла: {e}', 'danger')
-        return redirect(request.referrer or url_for('.index'))
+        return redirect(request.referrer or url_for('.dashboard'))
     finally:
         conn.close()
 
@@ -559,8 +574,8 @@ def delete_product_group(group_id):
 @login_required
 def integration_panel():
     """Страница 'Интеграция' с выбором заказа."""
-    # Получаем ID заказа из формы (POST) или из параметров URL (GET)
     api_response = None
+    selected_order = None
     selected_order_id = request.form.get('order_id', type=int) if request.method == 'POST' else request.args.get('order_id', type=int)
 
     conn = get_db_connection()
@@ -568,6 +583,12 @@ def integration_panel():
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT id, client_name, created_at FROM orders WHERE status = 'dmkod' ORDER BY id DESC")
             orders = cur.fetchall()
+
+            # Если заказ выбран, загружаем его полную информацию
+            if selected_order_id:
+                cur.execute("SELECT * FROM orders WHERE id = %s", (selected_order_id,))
+                selected_order = cur.fetchone()
+
     except Exception as e:
         flash(f'Ошибка при загрузке заказов: {e}', 'danger')
         orders = []
@@ -581,20 +602,106 @@ def integration_panel():
             return redirect(url_for('.integration_panel'))
 
         if action:
-            # Здесь будет логика для кнопок. Пока это заглушки.
-            # Вместо flash-сообщения формируем ответ для отображения
-            api_response = {
-                'status_code': 200,
-                'body': json.dumps({
-                    "message": f"Запрос '{action}' для заказа #{selected_order_id} получен.",
-                    "details": "Это заглушка. Реальная логика вызова API еще не реализована."
-                }, indent=2, ensure_ascii=False)
-            }
+            if action == 'create_order':
+                access_token = session.get('api_access_token')
+                if not access_token:
+                    flash('Токен API не найден. Пожалуйста, войдите заново.', 'warning')
+                    return redirect(url_for('.login'))
+
+                try:
+                    conn_local = get_db_connection()
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                        # 1. Получаем основную информацию о заказе и товарной группе
+                        cur.execute("""
+                            SELECT o.participant_id, o.notes, pg.dm_template
+                            FROM orders o
+                            JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
+                            WHERE o.id = %s
+                        """, (selected_order_id,))
+                        order_info = cur.fetchone()
+
+                        if not order_info:
+                            raise Exception("Не найдена информация о заказе или товарной группе.")
+
+                        # 2. Агрегируем данные по продуктам
+                        cur.execute("""
+                            SELECT gtin, SUM(dm_quantity) as total_qty
+                            FROM dmkod_aggregation_details
+                            WHERE order_id = %s AND gtin IS NOT NULL AND gtin != ''
+                            GROUP BY gtin
+                        """, (selected_order_id,))
+                        products_data = cur.fetchall()
+
+                        if not products_data:
+                            raise Exception("В заказе нет детализации по продуктам (GTIN) для отправки.")
+
+                    # 3. Формируем тело запроса к API
+                    products_payload = [
+                        {
+                            "gtin": p['gtin'],
+                            "code_template": order_info['dm_template'],
+                            "qty": int(p['total_qty']),
+                            "unit_type": "UNIT",
+                            "release_method": "IMPORT",
+                            "payment_type": 2
+                        } for p in products_data
+                    ]
+                    
+                    api_payload = {
+                        "participant_id": order_info['participant_id'],
+                        "production_order_id": order_info['notes'] or "",
+                        "contact_person": current_user.username,
+                        "products": products_payload
+                    }
+
+                    # 4. Отправляем запрос к API
+                    api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                    full_url = f"{api_base_url}/psp/order/create"
+                    headers = {'Authorization': f'Bearer {access_token}'}
+                    
+                    response = requests.post(full_url, headers=headers, json=api_payload, timeout=30)
+                    response.raise_for_status()
+                    
+                    response_data = response.json()
+                    api_order_id = response_data.get('order_id')
+
+                    # 5. Обновляем наш заказ, записывая ID из API
+                    if api_order_id:
+                        with conn_local.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, selected_order_id))
+                        conn_local.commit()
+                        flash(f'Заказ в API успешно создан с ID: {api_order_id}.', 'success')
+
+                    api_response = {
+                        'status_code': response.status_code,
+                        'body': json.dumps(response_data, indent=2, ensure_ascii=False)
+                    }
+
+                except Exception as e:
+                    if 'conn_local' in locals() and conn_local: conn_local.rollback()
+                    error_body = ""
+                    if 'response' in locals() and hasattr(response, 'text'):
+                        error_body = response.text
+                    api_response = {
+                        'status_code': response.status_code if 'response' in locals() else 500,
+                        'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
+                    }
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
+            else:
+                # Заглушка для других кнопок
+                api_response = {
+                    'status_code': 200,
+                    'body': json.dumps({
+                        "message": f"Запрос '{action}' для заказа #{selected_order_id} получен.",
+                        "details": "Это заглушка. Реальная логика вызова API еще не реализована."
+                    }, indent=2, ensure_ascii=False)
+                }
         elif not action and selected_order_id:
              # Если просто выбрали заказ из списка, перенаправляем, чтобы URL был чистым
              return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
-    return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, api_response=api_response, title="Интеграция")
+    return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
 
 
 @dmkod_bp.route('/admin', methods=['GET', 'POST'])

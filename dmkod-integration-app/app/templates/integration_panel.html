@@ -35,7 +35,7 @@
             <div id="actions-panel">
                 <label class="form-label"><strong>Шаг 2: Выполните действие для заказа №{{ selected_order_id }}</strong></label>
                 <div class="d-grid gap-2 d-md-flex justify-content-md-start">
-                    <button type="submit" name="action" value="create_order" class="btn btn-primary">
+                    <button type="submit" name="action" value="create_order" class="btn btn-primary" {% if selected_order.api_order_id %}disabled{% endif %}>
                         <i class="bi bi-plus-circle"></i> Создать заказ
                     </button>
                     <button type="submit" name="action" value="split_runs" class="btn btn-secondary">

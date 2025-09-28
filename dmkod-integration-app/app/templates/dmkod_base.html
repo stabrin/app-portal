@@ -10,11 +10,11 @@
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <div class="container">
-            <a class="navbar-brand" href="{{ url_for('dmkod_integration_app.index') }}"><i class="bi bi-hdd-stack"></i> ДМкод Интеграция</a>
+            <a class="navbar-brand" href="{{ url_for('dmkod_integration_app.dashboard') }}"><i class="bi bi-hdd-stack"></i> ДМкод Интеграция</a>
             <div class="collapse navbar-collapse">
                 <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                     {% if current_user.is_authenticated %}
-                    <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.index') }}">Панель управления</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.dashboard') }}">Панель управления</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.participants') }}">Справочники</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.integration_panel') }}">Интеграция</a></li>
                     {% if current_user.is_admin %}
