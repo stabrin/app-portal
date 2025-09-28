@@ -554,3 +554,96 @@ def delete_product_group(group_id):
     conn.close()
     flash('Товарная группа удалена.', 'success')
     return redirect(url_for('.participants'))
+
+@dmkod_bp.route('/integration_panel', methods=['GET', 'POST'])
+@login_required
+def integration_panel():
+    """Страница 'Интеграция' с выбором заказа."""
+    # Получаем ID заказа из формы (POST) или из параметров URL (GET)
+    api_response = None
+    selected_order_id = request.form.get('order_id', type=int) if request.method == 'POST' else request.args.get('order_id', type=int)
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id, client_name, created_at FROM orders WHERE status = 'dmkod' ORDER BY id DESC")
+            orders = cur.fetchall()
+    except Exception as e:
+        flash(f'Ошибка при загрузке заказов: {e}', 'danger')
+        orders = []
+    finally:
+        conn.close()
+
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if not selected_order_id:
+            flash('Пожалуйста, сначала выберите заказ.', 'warning')
+            return redirect(url_for('.integration_panel'))
+
+        if action:
+            # Здесь будет логика для кнопок. Пока это заглушки.
+            # Вместо flash-сообщения формируем ответ для отображения
+            api_response = {
+                'status_code': 200,
+                'body': json.dumps({
+                    "message": f"Запрос '{action}' для заказа #{selected_order_id} получен.",
+                    "details": "Это заглушка. Реальная логика вызова API еще не реализована."
+                }, indent=2, ensure_ascii=False)
+            }
+        elif not action and selected_order_id:
+             # Если просто выбрали заказ из списка, перенаправляем, чтобы URL был чистым
+             return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+    return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, api_response=api_response, title="Интеграция")
+
+
+@dmkod_bp.route('/admin', methods=['GET', 'POST'])
+@login_required
+def admin():
+    """Страница администрирования для удаления заказов."""
+    # Проверяем, является ли пользователь администратором
+    if not current_user.is_admin:
+        from flask import abort
+        abort(403) # Доступ запрещен
+
+    conn = get_db_connection()
+
+    if request.method == 'POST':
+        order_ids_to_delete = request.form.getlist('order_ids')
+        if not order_ids_to_delete:
+            flash('Не выбрано ни одного заказа для удаления.', 'warning')
+        else:
+            try:
+                with conn.cursor() as cur:
+                    # ВАЖНО: Каскадное удаление связанных данных
+                    cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = ANY(%s)", (order_ids_to_delete,))
+                    cur.execute("DELETE FROM dmkod_order_files WHERE order_id = ANY(%s)", (order_ids_to_delete,))
+                    cur.execute("DELETE FROM orders WHERE id = ANY(%s)", (order_ids_to_delete,))
+                conn.commit()
+                flash(f'Успешно удалено заказов: {len(order_ids_to_delete)}.', 'success')
+            except Exception as e:
+                conn.rollback()
+                flash(f'Ошибка при удалении заказов: {e}', 'danger')
+        
+        conn.close()
+        return redirect(url_for('.admin'))
+
+    # Логика для GET-запроса
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT 
+                    o.id, o.client_name, o.created_at, o.notes,
+                    pg.display_name as product_group_name
+                FROM orders o
+                LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
+                WHERE o.status = 'dmkod' ORDER BY o.id DESC
+            """)
+            orders = cur.fetchall()
+    except Exception as e:
+        flash(f'Ошибка при загрузке заказов: {e}', 'danger')
+        orders = []
+    finally:
+        conn.close()
+
+    return render_template('admin.html', orders=orders, title="Администрирование")

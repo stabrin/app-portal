@@ -16,10 +16,11 @@
                     {% if current_user.is_authenticated %}
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.index') }}">Панель управления</a></li>
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.participants') }}">Справочники</a></li>
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.integration_panel') }}">Интеграция</a></li>
+                    {% if current_user.is_admin %}
+                    <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.admin') }}">Администрирование</a></li>
+                    {% endif %}
                     <li class="nav-item"><a class="nav-link" href="{{ url_for('dmkod_integration_app.api_tester') }}">Тестировщик API</a></li>
-                    {# {% if current_user.is_admin %}
-                    <li class="nav-item"><a class="nav-link" href="#">Администрирование</a></li>
-                    {% endif %} #}
                     {% endif %}
                 </ul>
                 <div class="d-flex">

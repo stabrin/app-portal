@@ -1,0 +1,78 @@
+{% extends "dmkod_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0">Панель интеграции</h1>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Выбор заказа для операций</h5>
+    </div>
+    <div class="card-body">
+        <p>Выберите заказ со статусом 'dmkod', чтобы активировать кнопки управления.</p>
+
+        <!-- Форма для выбора заказа и выполнения действий -->
+        <form method="POST" action="{{ url_for('dmkod_integration_app.integration_panel') }}">
+            {{ form.hidden_tag() if form }} <!-- Для CSRF, если форма будет передана -->
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <!-- Шаг 1: Выбор заказа -->
+            <div class="mb-4">
+                <label for="order_id" class="form-label"><strong>Шаг 1: Выберите заказ</strong></label>
+                <select class="form-select" name="order_id" id="order_id" onchange="this.form.submit()">
+                    <option value="" {% if not selected_order_id %}selected{% endif %} disabled>--- Список заказов ---</option>
+                    {% for order in orders %}
+                        <option value="{{ order.id }}" {% if order.id == selected_order_id %}selected{% endif %}>
+                            Заказ №{{ order.id }} - {{ order.client_name }} (от {{ order.created_at.strftime('%d.%m.%Y') }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Шаг 2: Кнопки действий (активны, если заказ выбран) -->
+            {% if selected_order_id %}
+            <div id="actions-panel">
+                <label class="form-label"><strong>Шаг 2: Выполните действие для заказа №{{ selected_order_id }}</strong></label>
+                <div class="d-grid gap-2 d-md-flex justify-content-md-start">
+                    <button type="submit" name="action" value="create_order" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> Создать заказ
+                    </button>
+                    <button type="submit" name="action" value="split_runs" class="btn btn-secondary">
+                        <i class="bi bi-layout-split"></i> Разбить на тиражи
+                    </button>
+                    <button type="submit" name="action" value="download_codes" class="btn btn-success">
+                        <i class="bi bi-download"></i> Скачать коды
+                    </button>
+                </div>
+                <hr>
+                <div class="d-grid gap-2 d-md-flex justify-content-md-start">
+                     <button type="submit" name="action" value="prepare_report_data" class="btn btn-info text-white">
+                        <i class="bi bi-card-list"></i> Подготовить сведения
+                    </button>
+                    <button type="submit" name="action" value="prepare_report" class="btn btn-warning">
+                        <i class="bi bi-file-earmark-text"></i> Подготовить отчет
+                    </button>
+                </div>
+            </div>
+            {% endif %}
+        </form>
+    </div>
+
+    <!-- Блок для вывода ответа от API -->
+    {% if api_response %}
+    <div class="card-footer">
+        <h5 class="mb-3">Ответ API</h5>
+        <div>
+            <p><strong>Статус ответа:</strong> 
+                <span class="badge {% if api_response.status_code >= 200 and api_response.status_code < 300 %}bg-success{% else %}bg-danger{% endif %}">
+                    {{ api_response.status_code }}
+                </span>
+            </p>
+            <h6>Тело ответа:</h6>
+            <pre><code class="text-break" style="font-size: 0.85rem;">{{ api_response.body }}</code></pre>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

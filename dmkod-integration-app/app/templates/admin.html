@@ -24,6 +24,8 @@
                             <th style="width: 5%;"><input type="checkbox" id="select-all" class="form-check-input"></th>
                             <th>ID Заказа</th>
                             <th>Клиент</th>
+                            <th>Товарная группа</th>
+                            <th>Примечание</th>
                             <th>Дата создания</th>
                         </tr>
                     </thead>
@@ -33,6 +35,8 @@
                             <td><input type="checkbox" name="order_ids" value="{{ order.id }}" class="form-check-input order-checkbox"></td>
                             <td>{{ order.id }}</td>
                             <td>{{ order.client_name }}</td>
+                            <td>{{ order.product_group_name or 'Не указана' }}</td>
+                            <td>{{ order.notes|truncate(40) }}</td>
                             <td>{{ order.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
                         </tr>
                         {% endfor %}
