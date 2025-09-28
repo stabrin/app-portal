@@ -1,0 +1,88 @@
+{% extends "dmkod_base.html" %}
+
+{% block content %}
+<h1 class="mb-4">Создание новой интеграции</h1>
+
+<div class="card">
+    <div class="card-body">
+        <form method="POST" enctype="multipart/form-data" novalidate>
+            {{ form.hidden_tag() }}
+
+            <div class="row">
+                <!-- Левая колонка -->
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label for="{{ form.client_id.id }}" class="form-label">{{ form.client_id.label }}</label>
+                        {{ form.client_id(class="form-select" + (" is-invalid" if form.client_id.errors else "")) }}
+                        {% if form.client_id.errors %}
+                            <div class="invalid-feedback">{{ form.client_id.errors[0] }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="{{ form.product_group_id.id }}" class="form-label">{{ form.product_group_id.label }}</label>
+                        {{ form.product_group_id(class="form-select" + (" is-invalid" if form.product_group_id.errors else ""), id="product_group_select") }}
+                        {% if form.product_group_id.errors %}
+                            <div class="invalid-feedback">{{ form.product_group_id.errors[0] }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3" id="fias_code_container" style="display: none;">
+                        <label for="{{ form.fias_code.id }}" class="form-label">{{ form.fias_code.label }}</label>
+                        {{ form.fias_code(class="form-control" + (" is-invalid" if form.fias_code.errors else "")) }}
+                        {% if form.fias_code.errors %}
+                            <div class="invalid-feedback">{{ form.fias_code.errors[0] }}</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="{{ form.notes.id }}" class="form-label">{{ form.notes.label }}</label>
+                        {{ form.notes(class="form-control", rows=3) }}
+                    </div>
+                </div>
+
+                <!-- Правая колонка -->
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label for="{{ form.xls_file.id }}" class="form-label">{{ form.xls_file.label }}</label>
+                        {{ form.xls_file(class="form-control" + (" is-invalid" if form.xls_file.errors else "")) }}
+                        {% if form.xls_file.errors %}
+                            <div class="invalid-feedback">{{ form.xls_file.errors[0] }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="mb-3">
+                        <label for="{{ form.details_file.id }}" class="form-label">{{ form.details_file.label }}</label>
+                        {{ form.details_file(class="form-control" + (" is-invalid" if form.details_file.errors else "")) }}
+                        {% if form.details_file.errors %}
+                            <div class="invalid-feedback">{{ form.details_file.errors[0] }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <hr>
+            <div class="d-flex justify-content-end">
+                <a href="{{ url_for('dmkod_integration_app.index') }}" class="btn btn-secondary me-2">Отмена</a>
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const productGroupsData = {{ product_groups_data|tojson }};
+    const select = document.getElementById('product_group_select');
+    const fiasContainer = document.getElementById('fias_code_container');
+
+    function toggleFiasField() {
+        const selectedId = parseInt(select.value, 10);
+        const selectedGroup = productGroupsData.find(pg => pg.id === selectedId);
+        fiasContainer.style.display = (selectedGroup && selectedGroup.fias_required) ? 'block' : 'none';
+    }
+
+    select.addEventListener('change', toggleFiasField);
+    document.addEventListener('DOMContentLoaded', toggleFiasField); // Проверяем при загрузке страницы
+</script>
+{% endblock %}

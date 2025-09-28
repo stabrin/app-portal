@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<div class="row mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.client_id.label(class="form-label") }}
+                        {{ form.client_id(class="form-select") }}
+                        {% for error in form.client_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.product_group_id.label(class="form-label") }}
+                        {{ form.product_group_id(class="form-select") }}
+                        {% for error in form.product_group_id.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+                    
+                    <div class="mb-3" id="fias-field-container" style="display: none;">
+                        {{ form.fias_code.label(class="form-label") }} <span class="text-danger">*</span>
+                        {{ form.fias_code(class="form-control") }}
+                        {% for error in form.fias_code.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.xls_file.label(class="form-label") }}
+                        {{ form.xls_file(class="form-control") }}
+                        {% for error in form.xls_file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                        <div class="form-text">Основной файл с заказом.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.details_file.label(class="form-label") }}
+                        {{ form.details_file(class="form-control") }}
+                        {% for error in form.details_file.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                        <div class="form-text">Опциональный файл с детализацией по GTIN, датам и уровням агрегации.</div>
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.notes.label(class="form-label") }}
+                        {{ form.notes(class="form-control", rows=3) }}
+                        {% for error in form.notes.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    {{ form.submit(class="btn btn-primary") }}
+                    <a href="{{ url_for('.index') }}" class="btn btn-secondary">Отмена</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Получаем данные о товарных группах, переданные из Flask
+    const productGroups = {{ product_groups_data | tojson }};
+    
+    const productGroupSelect = document.getElementById('product_group_id');
+    const fiasContainer = document.getElementById('fias-field-container');
+    const fiasInput = document.getElementById('fias_code');
+
+    function checkFiasRequirement() {
+        const selectedId = parseInt(productGroupSelect.value, 10);
+        if (isNaN(selectedId)) {
+            fiasContainer.style.display = 'none';
+            fiasInput.required = false;
+            return;
+        }
+
+        const selectedGroup = productGroups.find(pg => pg.id === selectedId);
+
+        if (selectedGroup && selectedGroup.fias_required) {
+            fiasContainer.style.display = 'block';
+            fiasInput.required = true;
+        } else {
+            fiasContainer.style.display = 'none';
+            fiasInput.required = false;
+        }
+    }
+
+    // Проверяем при загрузке страницы (на случай, если форма была отправлена с ошибкой)
+    checkFiasRequirement();
+
+    // Проверяем при каждом изменении выбора
+    productGroupSelect.addEventListener('change', checkFiasRequirement);
+});
+</script>
+{% endblock %}

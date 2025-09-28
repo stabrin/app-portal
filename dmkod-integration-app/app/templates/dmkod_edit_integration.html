@@ -1,0 +1,134 @@
+{% extends "dmkod_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0">{{ title }}</h1>
+    <a href="{{ url_for('dmkod_integration_app.index') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> К списку заказов
+    </a>
+</div>
+
+<!-- Карточка с основной информацией -->
+<div class="card mb-4">
+    <div class="card-header">
+        Основная информация
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-6">
+                <p><strong>Клиент:</strong> {{ order.client_name }}</p>
+                <p><strong>Товарная группа:</strong> {{ order.product_group_name or 'Не указана' }}</p>
+                <p><strong>Код ФИАС:</strong> {{ order.fias_code or 'Не указан' }}</p>
+            </div>
+            <div class="col-md-6">
+                <p><strong>Статус:</strong> <span class="badge bg-secondary">{{ order.status }}</span></p>
+                <p><strong>Дата создания:</strong> {{ order.created_at.strftime('%d.%m.%Y %H:%M') }}</p>
+                <p><strong>Примечания:</strong> {{ order.notes or 'Нет' }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Карточка с файлами и детализацией -->
+<div class="card">
+    <div class="card-header">
+        Детализация заказа и файлы
+    </div>
+    <div class="card-body">
+        <!-- Оригинальный файл -->
+        {% if original_file %}
+        <div class="mb-4">
+            <h5>Оригинальный файл заказа</h5>
+            <p>
+                <i class="bi bi-file-earmark-excel"></i> {{ original_file.filename }}
+                <a href="{{ url_for('dmkod_integration_app.download_original_file', file_id=original_file.id) }}" class="btn btn-sm btn-outline-success ms-2">
+                    <i class="bi bi-download"></i> Скачать
+                </a>
+            </p>
+        </div>
+        <hr>
+        {% endif %}
+
+        <!-- Таблица с детализацией -->
+        <div class="mb-4">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Детализация агрегации</h5>
+                <div>
+                    <!-- Кнопка для замены файла -->
+                    <button type="button" class="btn btn-sm btn-outline-warning" data-bs-toggle="modal" data-bs-target="#replaceDetailsModal">
+                        <i class="bi bi-arrow-repeat"></i> Заменить файл детализации
+                    </button>
+                    <!-- Кнопка для удаления -->
+                    <form method="POST" action="{{ url_for('dmkod_integration_app.edit_integration', order_id=order.id) }}" class="d-inline" onsubmit="return confirm('Вы уверены, что хотите удалить все записи детализации для этого заказа?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" name="action" value="delete_details" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash"></i> Удалить все
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            {% if details %}
+            <form method="POST" action="{{ url_for('dmkod_integration_app.edit_integration', order_id=order.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="table-responsive">
+                    <table class="table table-bordered table-sm">
+                        <thead class="table-light">
+                            <tr>
+                                <th>GTIN</th>
+                                <th>Кол-во</th>
+                                <th>Агрегация</th>
+                                <th>Дата произв.</th>
+                                <th>Срок годности</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for detail in details %}
+                            <tr>
+                                <td><input type="text" name="gtin-{{ detail.id }}" value="{{ detail.gtin or '' }}" class="form-control form-control-sm"></td>
+                                <td><input type="number" name="dm_quantity-{{ detail.id }}" value="{{ detail.dm_quantity or '' }}" class="form-control form-control-sm"></td>
+                                <td><input type="number" name="aggregation_level-{{ detail.id }}" value="{{ detail.aggregation_level or '' }}" class="form-control form-control-sm"></td>
+                                <td><input type="date" name="production_date-{{ detail.id }}" value="{{ detail.production_date.strftime('%Y-%m-%d') if detail.production_date else '' }}" class="form-control form-control-sm"></td>
+                                <td><input type="date" name="expiry_date-{{ detail.id }}" value="{{ detail.expiry_date.strftime('%Y-%m-%d') if detail.expiry_date else '' }}" class="form-control form-control-sm"></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <button type="submit" name="action" value="save_table_changes" class="btn btn-primary mt-3">
+                    <i class="bi bi-save"></i> Сохранить изменения в таблице
+                </button>
+            </form>
+            {% else %}
+            <div class="alert alert-info">Детализация для этого заказа еще не загружена или была удалена.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для замены файла детализации -->
+<div class="modal fade" id="replaceDetailsModal" tabindex="-1" aria-labelledby="replaceDetailsModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="replaceDetailsModalLabel">Заменить файл детализации</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form method="POST" action="{{ url_for('dmkod_integration_app.edit_integration', order_id=order.id) }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="modal-body">
+            <p><strong>Внимание:</strong> старые данные детализации будут полностью удалены и заменены данными из нового файла.</p>
+            <div class="mb-3">
+                <label for="details_file_replace" class="form-label">Выберите новый файл (XLS/XLSX)</label>
+                <input class="form-control" type="file" name="details_file" id="details_file_replace" required>
+            </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="submit" name="action" value="replace_details" class="btn btn-warning">Заменить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

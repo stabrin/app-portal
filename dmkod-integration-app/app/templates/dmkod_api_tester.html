@@ -1,0 +1,68 @@
+{% extends "dmkod_base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="text-muted">Этот раздел позволяет отправлять прямые запросы к API ДМкод и просматривать "сырые" ответы. Используйте его для отладки и исследования.</p>
+
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                Форма запроса
+            </div>
+            <div class="card-body">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label for="endpoint" class="form-label">Эндпоинт API</label>
+                        <div class="input-group">
+                            <span class="input-group-text">{{ base_url }}</span>
+                            <input type="text" class="form-control" id="endpoint" name="endpoint" value="{{ request.form.endpoint or '/psp/orders' }}" required>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="method" class="form-label">Метод</label>
+                        <select class="form-select" id="method" name="method">
+                            <option value="GET" {% if request.form.method == 'GET' %}selected{% endif %}>GET</option>
+                            <option value="POST" {% if request.form.method == 'POST' %}selected{% endif %}>POST</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="body" class="form-label">Тело запроса (JSON)</label>
+                        <textarea class="form-control" id="body" name="body" rows="8" placeholder='{&#10;  "key": "value"&#10;}'
+                        >{{ request.form.body }}</textarea>
+                        <div class="form-text">Используется для методов POST, PUT, а также для GET (если API это требует).</div>
+                    </div>
+
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-send"></i> Отправить запрос
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                Ответ от API
+            </div>
+            <div class="card-body">
+                {% if api_response %}
+                    <p><strong>Статус:</strong> <span class="badge bg-{{ 'success' if 200 <= api_response.status_code < 300 else 'warning' }}">{{ api_response.status_code }}</span></p>
+                    
+                    <h6>Заголовки:</h6>
+                    <pre class="bg-light p-2 rounded small"><code>{{ api_response.headers | safe }}</code></pre>
+
+                    <h6>Тело ответа:</h6>
+                    <pre class="bg-light p-2 rounded"><code>{{ api_response.body | safe }}</code></pre>
+                {% else %}
+                    <p class="text-muted">Здесь будет отображен ответ после отправки запроса.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

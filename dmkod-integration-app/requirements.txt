@@ -1,7 +1,10 @@
-Flask
-Flask-Login
-Flask-WTF
+flask
 psycopg2-binary
 python-dotenv
-Werkzeug
+pandas
+openpyxl
+requests
 gunicorn
+Flask-Login
+Flask-WTF
+bcrypt

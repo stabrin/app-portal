@@ -1,0 +1,53 @@
+{% extends "dmkod_base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<div class="row mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-body">
+                <form method="POST">
+                    {{ form.hidden_tag() }}
+
+                    <div class="mb-3">
+                        {{ form.group_name.label(class="form-label") }}
+                        {{ form.group_name(class="form-control") }}
+                        {% for error in form.group_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.display_name.label(class="form-label") }}
+                        {{ form.display_name(class="form-control") }}
+                        {% for error in form.display_name.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.code_template.label(class="form-label") }}
+                        {{ form.code_template(class="form-control", rows=4) }}
+                        {% for error in form.code_template.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    <div class="mb-3">
+                        {{ form.dm_template.label(class="form-label") }}
+                        {{ form.dm_template(class="form-control", rows=4) }}
+                        {% for error in form.dm_template.errors %}<div class="invalid-feedback d-block">{{ error }}</div>{% endfor %}
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        {{ form.fias_required(class="form-check-input") }}
+                        {{ form.fias_required.label(class="form-check-label") }}
+                    </div>
+
+                    {{ form.submit(class="btn btn-primary") }}
+                    <a href="{{ url_for('.participants') }}" class="btn btn-secondary">
+                        <i class="bi bi-x-circle"></i> Отмена
+                    </a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

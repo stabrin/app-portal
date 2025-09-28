@@ -1,0 +1,55 @@
+{% extends "dmkod_base.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0">Администрирование</h1>
+</div>
+
+<div class="card border-danger">
+    <div class="card-header bg-danger text-white">
+        <h5 class="mb-0">Удаление заказов со статусом "dmkod"</h5>
+    </div>
+    <div class="card-body">
+        <p class="card-text">
+            <strong>Внимание:</strong> Это действие необратимо удалит выбранные заказы из системы.
+            Выберите один или несколько заказов для удаления.
+        </p>
+        {% if orders %}
+        <form method="POST" action="{{ url_for('dmkod_integration_app.admin') }}" onsubmit="return confirm('Вы уверены, что хотите ПОЛНОСТЬЮ удалить выбранные заказы?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="table-responsive">
+                <table class="table table-striped table-bordered">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 5%;"><input type="checkbox" id="select-all" class="form-check-input"></th>
+                            <th>ID Заказа</th>
+                            <th>Клиент</th>
+                            <th>Дата создания</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for order in orders %}
+                        <tr>
+                            <td><input type="checkbox" name="order_ids" value="{{ order.id }}" class="form-check-input order-checkbox"></td>
+                            <td>{{ order.id }}</td>
+                            <td>{{ order.client_name }}</td>
+                            <td>{{ order.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <button type="submit" class="btn btn-danger mt-3">Удалить выбранные заказы</button>
+        </form>
+        {% else %}
+        <div class="alert alert-info">Нет заказов со статусом 'dmkod' для отображения.</div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+document.getElementById('select-all').addEventListener('change', function(e) {
+    document.querySelectorAll('.order-checkbox').forEach(checkbox => checkbox.checked = e.target.checked);
+});
+</script>
+{% endblock %}
