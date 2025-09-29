@@ -58,6 +58,9 @@ def update_schema(conn):
         # Используем ALTER TABLE ... ADD COLUMN IF NOT EXISTS для безопасности
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS fias_code VARCHAR(36);").format(orders=sql.Identifier(orders_table)),
         sql.SQL("COMMENT ON COLUMN {orders}.fias_code IS 'Код адреса по ФИАС (GUID)';").format(orders=sql.Identifier(orders_table)),
+
+        sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS api_status VARCHAR(36);").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("COMMENT ON COLUMN {orders}.api_status IS 'Статус интеграйии';").format(orders=sql.Identifier(orders_table)),
         
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS api_order_id INTEGER;").format(orders=sql.Identifier(orders_table)),
         sql.SQL("COMMENT ON COLUMN {orders}.api_order_id IS 'ID заказа из внешнего API ДМкод';").format(orders=sql.Identifier(orders_table)),
@@ -74,6 +77,7 @@ def update_schema(conn):
             id SERIAL PRIMARY KEY,
             order_id INTEGER NOT NULL REFERENCES {orders}(id) ON DELETE CASCADE,
             gtin VARCHAR(14) NOT NULL,
+            api_id INTEGER,   
             dm_quantity INTEGER NOT NULL,
             aggregation_level SMALLINT NOT NULL DEFAULT 0,
             production_date DATE,

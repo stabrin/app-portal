@@ -3,12 +3,13 @@ import requests
 import json
 import logging
 import pandas as pd
+import re
 from dateutil.relativedelta import relativedelta
 from flask import Blueprint, render_template, redirect, url_for, flash, request, session, Response, send_file
 from flask_login import login_user, logout_user, login_required, current_user
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
-from bcrypt import checkpw
+from bcrypt import checkpw # Removed unused import of upsert_data_to_db
 from io import BytesIO
 
 from .db import get_db_connection
@@ -16,10 +17,26 @@ from .forms import LoginForm, IntegrationForm, ProductGroupForm
 from .auth import User
 
 # 1. Определяем Blueprint
+import zipfile # Добавляем импорт для работы с ZIP-архивами
 dmkod_bp = Blueprint(
     'dmkod_integration_app', __name__,
     static_folder='static'
 )
+
+def _sanitize_filename_part(text):
+    """
+    Sanitizes a string to be safe for use as part of a filename.
+    Removes invalid characters, replaces spaces with underscores, and strips leading/trailing underscores/dots.
+    """
+    if not isinstance(text, str):
+        text = str(text)
+    # Remove characters that are not alphanumeric, space, hyphen, or dot
+    sanitized = re.sub(r'[^\w\s.-]', '', text)
+    # Replace spaces with underscores
+    sanitized = sanitized.replace(' ', '_')
+    # Remove leading/trailing underscores or dots
+    sanitized = sanitized.strip('_.')
+    return sanitized
 
 # 2. Роуты аутентификации
 @dmkod_bp.route('/login', methods=['GET', 'POST'])
@@ -581,7 +598,7 @@ def integration_panel():
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT id, client_name, created_at FROM orders WHERE status = 'dmkod' ORDER BY id DESC")
+            cur.execute("SELECT id, client_name, created_at, api_order_id, api_status FROM orders WHERE status = 'dmkod' ORDER BY id DESC")
             orders = cur.fetchall()
 
             # Если заказ выбран, загружаем его полную информацию
@@ -688,15 +705,492 @@ def integration_panel():
                     }
                 finally:
                     if 'conn_local' in locals() and conn_local: conn_local.close()
-            else:
-                # Заглушка для других кнопок
-                api_response = {
-                    'status_code': 200,
-                    'body': json.dumps({
-                        "message": f"Запрос '{action}' для заказа #{selected_order_id} получен.",
-                        "details": "Это заглушка. Реальная логика вызова API еще не реализована."
-                    }, indent=2, ensure_ascii=False)
-                }
+            elif action == 'create_suborder_request':
+                access_token = session.get('api_access_token')
+                if not access_token:
+                    flash('Токен API не найден. Пожалуйста, войдите заново.', 'warning')
+                    return redirect(url_for('.login'))
+                
+                if not selected_order or not selected_order.get('api_order_id'):
+                    flash('Сначала необходимо создать заказ в API (кнопка "Создать заказ").', 'danger')
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+                try:
+                    conn_local = get_db_connection()
+                    
+                    api_payload = { "order_id": selected_order['api_order_id'] }
+
+                    # Отправляем запрос к API
+                    api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                    full_url = f"{api_base_url}/psp/suborders/create"
+                    headers = {'Authorization': f'Bearer {access_token}'}
+                    
+                    response = requests.post(full_url, headers=headers, json=api_payload, timeout=30)
+                    response.raise_for_status()
+                    
+                    response_data = response.json()
+
+                    # Обновляем наш заказ, записывая статус
+                    if response_data.get('code') == 'get_request':
+                        with conn_local.cursor() as cur:
+                            cur.execute("UPDATE orders SET status = 'Запрос создан' WHERE id = %s", (selected_order_id,))
+                        conn_local.commit()
+                        flash('Подпишите запрос на получение кодов. после получения кодов можно будет продолжить работу', 'success')
+
+                    api_response = {
+                        'status_code': response.status_code,
+                        'body': json.dumps(response_data, indent=2, ensure_ascii=False)
+                    }
+
+                except Exception as e:
+                    if 'conn_local' in locals() and conn_local: conn_local.rollback()
+                    error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
+                    api_response = {
+                        'status_code': response.status_code if 'response' in locals() else 500,
+                        'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
+                    }
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
+            elif action == 'split_runs': # Полностью переписанная логика
+                access_token = session.get('api_access_token')
+                if not access_token:
+                    flash('Токен API не найден. Пожалуйста, войдите заново.', 'warning')
+                    return redirect(url_for('.login'))
+    
+                if not selected_order or not selected_order.get('api_order_id'):
+                    flash('Сначала необходимо создать заказ в API.', 'danger')
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
+    
+                try:
+                    conn_local = get_db_connection()
+                    api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                    headers = {'Authorization': f'Bearer {access_token}'}
+    
+                    # --- Шаг 1: Собираем данные из нашей БД в DataFrame ---
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute(
+                            "SELECT id, gtin, dm_quantity FROM dmkod_aggregation_details WHERE order_id = %s",
+                            (selected_order_id,)
+                        )
+                        details_data = cur.fetchall()
+                        if not details_data:
+                            raise Exception("В заказе нет детализации для создания тиражей.")
+                    details_df = pd.DataFrame(details_data)
+    
+                    # --- Шаг 2: Получение деталей заказа из API и обогащение DataFrame ---
+                    get_order_url = f"{api_base_url}/psp/orders"
+                    get_order_payload = {"order_id": selected_order['api_order_id']}
+                    response_get = requests.get(get_order_url, headers=headers, json=get_order_payload, timeout=30)
+                    response_get.raise_for_status()
+                    order_details_from_api = response_get.json()
+    
+                    if not order_details_from_api.get('orders'):
+                        raise Exception("API не вернуло информацию о заказе.")
+    
+                    api_order_data = order_details_from_api['orders'][0]
+                    api_products = api_order_data.get('products', [])
+                    if not api_products:
+                        raise Exception("API не вернуло список продуктов в заказе.")
+    
+                    # Создаем словарь для быстрого поиска api_product_id по gtin
+                    gtin_to_api_product_id = {p['gtin']: p['id'] for p in api_products}
+                    details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
+    
+                    # --- Шаг 3: Обновление/добавление названий товаров ---
+                    products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name')]
+                    if products_to_upsert:
+                        with conn_local.cursor() as cur:
+                            from .utils import upsert_data_to_db
+                            upsert_df = pd.DataFrame(products_to_upsert)
+                            upsert_data_to_db(cur, 'TABLE_PRODUCTS', upsert_df, 'gtin')
+                        conn_local.commit()
+    
+                    # --- Шаг 4: Цикл создания тиражей и обновления api_id ---
+                    create_tirage_url = f"{api_base_url}/psp/printrun/create"
+                    get_tirages_url = f"{api_base_url}/psp/printruns"
+                    user_logs = [f"В заказе {len(details_df)} позиций для создания тиражей."]
+                    import time
+
+                    for i, row in details_df.iterrows():
+                        api_product_id = row.get('api_product_id')
+                        if pd.isna(api_product_id):
+                            log_msg = f"Пропуск строки {i+1}/{len(details_df)} (gtin: {row['gtin']}), т.к. не найден api_product_id."
+                            logging.warning(log_msg)
+                            user_logs.append(log_msg)
+                            continue
+    
+                        user_logs.append(f"--- Создаю тираж {i+1}/{len(details_df)} ---")
+                        tirage_payload = {
+                            "order_product_id": int(api_product_id),
+                            "qty": int(row['dm_quantity'])
+                        }
+                        user_logs.append(f"  GTIN: {row['gtin']}, Кол-во: {row['dm_quantity']}")
+                        
+                        # Отправляем POST на создание тиража
+                        response_post = requests.post(create_tirage_url, headers=headers, json=tirage_payload, timeout=30)
+                        response_post.raise_for_status()
+                        user_logs.append(f"  Запрос на создание тиража отправлен. Ответ: {response_post.status_code}")
+    
+                        # Пауза
+                        user_logs.append("  Пауза 5 секунд...")
+                        time.sleep(5)
+    
+                        # Отправляем GET для получения списка тиражей
+                        get_tirages_payload = {"order_id": selected_order['api_order_id']}
+                        response_get_tirages = requests.get(get_tirages_url, headers=headers, json=get_tirages_payload, timeout=30)
+                        response_get_tirages.raise_for_status()
+                        tirages_data = response_get_tirages.json()
+    
+                        # Находим максимальный ID тиража
+                        max_printrun_id = None
+                        printrun_ids = []
+                        if tirages_data.get('orders') and tirages_data['orders'][0].get('printruns'):
+                            printrun_ids = [p['id'] for p in tirages_data['orders'][0]['printruns']]
+                        
+                        if printrun_ids:
+                            max_printrun_id = max(printrun_ids)
+                            user_logs.append(f"  Получен список тиражей. Максимальный ID: {max_printrun_id}")
+                        else:
+                            log_msg = f"  Не удалось получить ID тиражей для заказа {selected_order['api_order_id']}."
+                            logging.warning(log_msg)
+                            user_logs.append(log_msg)
+                            continue
+                        
+                        # Обновляем поле api_id в нашей БД
+                        with conn_local.cursor() as cur:
+                            cur.execute(
+                                "UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s",
+                                (max_printrun_id, row['id'])
+                            )
+                        conn_local.commit()
+                        user_logs.append(f"  ID тиража {max_printrun_id} присвоен позиции заказа (ID: {row['id']}) в базе данных.")
+    
+                    # --- Шаг 5: Обновление статуса заказа ---
+                    with conn_local.cursor() as cur:
+                        cur.execute("UPDATE orders SET api_status = 'Тиражи созданы' WHERE id = %s", (selected_order_id,))
+                    conn_local.commit()
+                    flash('Тиражи успешно созданы в API.', 'success')
+    
+                    api_response = {
+                        'status_code': 200,
+                        'body': "\n".join(user_logs)
+                    }
+    
+                except Exception as e:
+                    if 'conn_local' in locals() and conn_local: conn_local.rollback()
+                    error_body = ""
+                    if 'response_post' in locals() and hasattr(response_post, 'text'):
+                        error_body = response_post.text
+                    elif 'response_get' in locals() and hasattr(response_get, 'text'):
+                        error_body = response_get.text
+                    
+                    api_response = {
+                        'status_code': 500,
+                        'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
+                    }
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
+            
+            elif action == 'prepare_json':
+                access_token = session.get('api_access_token')
+                if not access_token:
+                    flash('Токен API не найден. Пожалуйста, войдите заново.', 'warning')
+                    return redirect(url_for('.login'))
+
+                if not selected_order or not selected_order.get('api_order_id'):
+                    flash('Сначала необходимо создать заказ и разбить его на тиражи.', 'danger')
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+                user_logs = []
+                try:
+                    conn_local = get_db_connection()
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute(
+                            "SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL ORDER BY id",
+                            (selected_order_id,)
+                        )
+                        details_to_process = cur.fetchall()
+
+                    if not details_to_process:
+                        raise Exception("Не найдено позиций с ID тиража (api_id) для обработки.")
+
+                    api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                    full_url = f"{api_base_url}/psp/printrun/json/create"
+                    headers = {'Authorization': f'Bearer {access_token}'}
+                    
+                    user_logs.append(f"Найдено {len(details_to_process)} позиций для обработки.")
+
+                    for i, detail in enumerate(details_to_process):
+                        payload = {"printrun_id": detail['api_id']}
+                        user_logs.append(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+                        
+                        response = requests.post(full_url, headers=headers, json=payload, timeout=30)
+                        
+                        user_logs.append(f"  URL: {full_url}")
+                        user_logs.append(f"  Тело: {json.dumps(payload)}")
+                        user_logs.append(f"  Статус ответа: {response.status_code}")
+                        
+                        response.raise_for_status() # Прервет выполнение, если статус не 2xx
+
+                    # Обновляем статус заказа в нашей БД
+                    with conn_local.cursor() as cur:
+                        cur.execute(
+                            "UPDATE orders SET api_status = 'JSON заказан' WHERE id = %s",
+                            (selected_order_id,)
+                        )
+                    conn_local.commit()
+
+                    flash('Операция "Подготовить JSON" успешно выполнена. Статус заказа обновлен на "JSON заказан".', 'success')
+                    api_response = {
+                        'status_code': 200, # Используем 200, т.к. операция прошла успешно
+                        'body': "\n".join(user_logs)
+                    }
+
+                except Exception as e:
+                    error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
+                    user_logs.append(f"\n!!! ОШИБКА: {e}\nОтвет сервера (если был):\n{error_body}")
+                    api_response = {'status_code': 500, 'body': "\n".join(user_logs)}
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
+
+            elif action == 'download_codes':
+                access_token = session.get('api_access_token')
+                if not access_token:
+                    flash('Токен API не найден. Пожалуйста, войдите заново.', 'warning')
+                    return redirect(url_for('.login'))
+
+                if not selected_order or not selected_order.get('api_order_id'):
+                    flash('Сначала необходимо создать заказ в API и разбить его на тиражи.', 'danger')
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+                user_logs = []
+                zip_buffer = BytesIO()
+                
+                try:
+                    conn_local = get_db_connection()
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                        # Получаем имя клиента для формирования имени файла
+                        cur.execute("SELECT client_name FROM orders WHERE id = %s", (selected_order_id,))
+                        client_name_row = cur.fetchone()
+                        if not client_name_row:
+                            raise Exception(f"Не удалось найти клиента для заказа ID {selected_order_id}.")
+                        client_name = client_name_row['client_name'] # Получаем оригинальное имя клиента
+
+                        # Получаем детализацию заказа с api_id
+                        cur.execute(
+                            "SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL ORDER BY id",
+                            (selected_order_id,)
+                        )
+                        details_to_process = cur.fetchall()
+
+                    if not details_to_process:
+                        raise Exception("Не найдено позиций с ID тиража (api_id) для скачивания кодов.")
+
+                    api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                    full_url = f"{api_base_url}/psp/printrun/json/download"
+                    headers = {'Authorization': f'Bearer {access_token}'}
+                    
+                    user_logs.append(f"Найдено {len(details_to_process)} позиций для скачивания кодов.")
+
+                    # Санитизируем имя клиента для использования в именах файлов
+                    sanitized_client_name = _sanitize_filename_part(client_name)
+
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                        for i, detail in enumerate(details_to_process):
+                            payload = {"printrun_id": detail['api_id']}
+                            user_logs.append(f"--- {i+1}/{len(details_to_process)}: Запрос кодов для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+                            
+                            # Отправляем GET-запрос к API
+                            response = requests.get(full_url, headers=headers, json=payload, timeout=60) # Увеличиваем таймаут
+                            
+                            user_logs.append(f"  URL: {full_url}")
+                            user_logs.append(f"  Тело запроса: {json.dumps(payload)}")
+                            user_logs.append(f"  Статус ответа: {response.status_code}")
+                            
+                            response.raise_for_status() # Прервет выполнение, если статус не 2xx
+                            
+                            response_data = response.json()
+                            codes = response_data.get('codes', [])
+
+                            if not codes:
+                                user_logs.append(f"  В ответе для тиража {detail['api_id']} не найдено кодов.")
+                                continue
+
+                            # Формируем CSV-содержимое (один код на строку)
+                            csv_content = "\n".join(codes)
+                            
+                            # Формируем имя файла: порядковый номер файла + _ + номер заказа + _ + Название клиента + _ + количество полученных кодов
+                            csv_filename_parts = [f"{i+1}", f"{selected_order_id}"]
+                            if sanitized_client_name:
+                                csv_filename_parts.append(sanitized_client_name)
+                            csv_filename_parts.append(f"{len(codes)}")
+                            filename = "_".join(csv_filename_parts) + ".csv"
+                            
+                            zf.writestr(filename, csv_content)
+                            user_logs.append(f"  Создан файл '{filename}' с {len(codes)} кодами.")
+                    
+                    zip_buffer.seek(0) # Перематываем буфер в начало
+
+                    # Обновляем статус заказа в нашей БД
+                    with conn_local.cursor() as cur:
+                        cur.execute(
+                            "UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s",
+                            (selected_order_id,)
+                        )
+                    conn_local.commit()
+
+                    # Формируем имя ZIP-файла, избегая лишнего подчеркивания
+                    zip_download_name_parts = [f"codes_order_{selected_order_id}"]
+                    if sanitized_client_name:
+                        zip_download_name_parts.append(sanitized_client_name)
+                    final_zip_download_name = "_".join(zip_download_name_parts) + ".zip"
+                    flash('Коды успешно скачаны и упакованы в ZIP-архив.', 'success')
+                    # Отправляем ZIP-файл пользователю
+                    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=final_zip_download_name)
+
+                except Exception as e:
+                    if 'conn_local' in locals() and conn_local: conn_local.rollback() # Откатываем транзакцию при ошибке
+                    error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
+                    user_logs.append(f"\n!!! ОШИБКА: {e}\nОтвет сервера (если был):\n{error_body}")
+                    api_response = {'status_code': 500, 'body': "\n".join(user_logs)}
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
+
+            elif action == 'prepare_report_data':
+                access_token = session.get('api_access_token')
+                if not access_token:
+                    flash('Токен API не найден. Пожалуйста, войдите заново.', 'warning')
+                    return redirect(url_for('.login'))
+
+                if not selected_order or not selected_order.get('api_order_id'):
+                    flash('Сначала необходимо создать заказ в API и разбить его на тиражи.', 'danger')
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+                user_logs = []
+                try:
+                    conn_local = get_db_connection()
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                        # Получаем все необходимые данные одним запросом, объединяя таблицы
+                        cur.execute(
+                            """
+                            SELECT 
+                                d.api_id, d.gtin, d.production_date, d.expiry_date,
+                                o.fias_code
+                            FROM dmkod_aggregation_details d
+                            JOIN orders o ON d.order_id = o.id
+                            WHERE d.order_id = %s AND d.api_id IS NOT NULL 
+                            ORDER BY d.id
+                            """,
+                            (selected_order_id,)
+                        )
+                        details_to_process = cur.fetchall()
+
+                    if not details_to_process:
+                        raise Exception("Не найдено позиций с ID тиража (api_id) для обработки.")
+
+                    api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                    full_url = f"{api_base_url}/psp/utilisation/upload"
+                    headers = {'Authorization': f'Bearer {access_token}'}
+                    
+                    user_logs.append(f"Найдено {len(details_to_process)} позиций для подготовки сведений.")
+
+                    for i, detail in enumerate(details_to_process):
+                        attributes = {}
+                        if detail.get('production_date'):
+                            attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
+                        if detail.get('expiry_date'):
+                            attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
+                        if detail.get('fias_code'):
+                            attributes['fias_id'] = detail['fias_code']
+
+                        payload = {"all_from_printrun": detail['api_id']}
+                        if attributes:
+                            payload['attributes'] = attributes
+
+                        user_logs.append(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+                        
+                        response = requests.post(full_url, headers=headers, json=payload, timeout=30)
+                        
+                        user_logs.append(f"  URL: {full_url}")
+                        user_logs.append(f"  Тело: {json.dumps(payload)}")
+                        user_logs.append(f"  Статус ответа: {response.status_code}")
+                        
+                        response.raise_for_status()
+
+                    # Обновляем статус заказа в нашей БД
+                    with conn_local.cursor() as cur:
+                        cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (selected_order_id,))
+                    conn_local.commit()
+
+                    flash('Операция "Подготовить сведения" успешно выполнена. Статус заказа обновлен.', 'success')
+                    api_response = {'status_code': 200, 'body': "\n".join(user_logs)}
+
+                except Exception as e:
+                    error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
+                    user_logs.append(f"\n!!! ОШИБКА: {e}\nОтвет сервера (если был):\n{error_body}")
+                    api_response = {'status_code': 500, 'body': "\n".join(user_logs)}
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
+
+            elif action == 'prepare_report':
+                access_token = session.get('api_access_token')
+                if not access_token:
+                    flash('Токен API не найден. Пожалуйста, войдите заново.', 'warning')
+                    return redirect(url_for('.login'))
+
+                if not selected_order or not selected_order.get('api_order_id'):
+                    flash('Сначала необходимо создать заказ в API и разбить его на тиражи.', 'danger')
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+                user_logs = []
+                try:
+                    conn_local = get_db_connection()
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute(
+                            "SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL ORDER BY id",
+                            (selected_order_id,)
+                        )
+                        details_to_process = cur.fetchall()
+
+                    if not details_to_process:
+                        raise Exception("Не найдено позиций с ID тиража (api_id) для подготовки отчета.")
+
+                    api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                    full_url = f"{api_base_url}/psp/utilisation/report/create"
+                    headers = {'Authorization': f'Bearer {access_token}'}
+                    
+                    user_logs.append(f"Найдено {len(details_to_process)} позиций для подготовки отчета.")
+
+                    for i, detail in enumerate(details_to_process):
+                        payload = {"printrun_id": detail['api_id']}
+                        user_logs.append(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+                        
+                        response = requests.post(full_url, headers=headers, json=payload, timeout=30)
+                        
+                        user_logs.append(f"  URL: {full_url}")
+                        user_logs.append(f"  Тело: {json.dumps(payload)}")
+                        user_logs.append(f"  Статус ответа: {response.status_code}")
+                        
+                        response.raise_for_status()
+
+                    # Обновляем статус заказа в нашей БД
+                    with conn_local.cursor() as cur:
+                        cur.execute(
+                            "UPDATE orders SET api_status = 'Отчет подготовлен' WHERE id = %s",
+                            (selected_order_id,)
+                        )
+                    conn_local.commit()
+
+                    flash('Операция "Подготовить отчет" успешно выполнена. Статус заказа обновлен.', 'success')
+                    api_response = {'status_code': 200, 'body': "\n".join(user_logs)}
+
+                except Exception as e:
+                    error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
+                    user_logs.append(f"\n!!! ОШИБКА: {e}\nОтвет сервера (если был):\n{error_body}")
+                    api_response = {'status_code': 500, 'body': "\n".join(user_logs)}
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
+
         elif not action and selected_order_id:
              # Если просто выбрали заказ из списка, перенаправляем, чтобы URL был чистым
              return redirect(url_for('.integration_panel', order_id=selected_order_id))
