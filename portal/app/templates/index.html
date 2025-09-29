@@ -11,9 +11,16 @@
     </div>
  
     <nav class="app-links">
-        <a href="/datamatrix/" class="app-link-button"><span class="icon-datamatrix"></span>Обработка DataMatrix</a>
-        <a href="/manual-aggregation/" class="app-link-button"><span class="icon-manual"></span>Ручная агрегация</a>
-        <a href="/dmkod/" class="app-link-button"><span class="icon-integration"></span>ДМкод интеграция</a>
+        {# Ссылка будет показана, только если 'datamatrix-app' есть в списке видимых #}
+        {% if 'datamatrix-app' in visible_apps %}
+            <a href="/datamatrix/" class="app-link-button"><span class="icon-datamatrix"></span>Обработка DataMatrix</a>
+        {% endif %}
+        {% if 'manual-aggregation-app' in visible_apps %}
+            <a href="/manual-aggregation/" class="app-link-button"><span class="icon-manual"></span>Ручная агрегация</a>
+        {% endif %}
+        {% if 'dmkod-integration-app' in visible_apps %}
+            <a href="/dmkod/" class="app-link-button"><span class="icon-integration"></span>ДМкод интеграция</a>
+        {% endif %}
     </nav>
 </div>
 {% endblock %}
