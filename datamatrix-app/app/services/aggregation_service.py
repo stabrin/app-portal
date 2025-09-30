@@ -227,6 +227,16 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
+            # --- НОВОЕ: Получаем начальный статус заказа ---
+            orders_table_for_status = os.getenv('TABLE_ORDERS')
+            cur.execute(f"SELECT status FROM {orders_table_for_status} WHERE id = %s", (order_id,))
+            status_result = cur.fetchone()
+            if not status_result:
+                logs.append(f"КРИТИЧЕСКАЯ ОШИБКА: Заказ с ID {order_id} не найден.")
+                if conn: conn.close()
+                return logs
+            initial_order_status = status_result[0]
+
             # Проверка на существование кодов
             dm_to_check = tuple(items_df['datamatrix'].unique())
             if dm_to_check:
@@ -326,8 +336,13 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
             logs.append(f"Загружаю {len(items_df)} товаров в 'TABLE_ITEMS'...")
             upsert_data_to_db(cur, 'TABLE_ITEMS', items_df, 'datamatrix')
             
-            orders_table = os.getenv('TABLE_ORDERS')
-            cur.execute(f"UPDATE {orders_table} SET status = 'completed' WHERE id = %s", (order_id,))
+            # --- ИЗМЕНЕННАЯ ЛОГИКА: Обновляем статус, только если он не 'dmkod' ---
+            if initial_order_status != 'dmkod':
+                logs.append("\nОбновляю статус заказа на 'completed'...")
+                orders_table = os.getenv('TABLE_ORDERS')
+                cur.execute(f"UPDATE {orders_table} SET status = 'completed' WHERE id = %s", (order_id,))
+            else:
+                logs.append("\nСтатус заказа 'dmkod' не изменен, так как обработка идет из модуля интеграции.")
 
             conn.commit()
             logs.append("\nПроцесс успешно завершен! Данные и счетчик в БД обновлены.")
