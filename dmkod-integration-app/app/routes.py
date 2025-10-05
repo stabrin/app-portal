@@ -301,7 +301,8 @@ def create_integration():
                 details_file = form.details_file.data
                 if details_file:
                     try:
-                        df = pd.read_excel(details_file)
+                        # Указываем dtype={'GTIN': str}, чтобы pandas не обрезал ведущие нули
+                        df = pd.read_excel(details_file, dtype={'GTIN': str})
                         # Переименовываем колонки для удобства
                         df.rename(columns={
                             'GTIN': 'gtin',
@@ -376,7 +377,8 @@ def edit_integration(order_id):
                         cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
                         
                         # 2. Затем загружаем новые (логика скопирована из create_integration)
-                        df = pd.read_excel(details_file)
+                        # Указываем dtype={'GTIN': str}, чтобы pandas не обрезал ведущие нули
+                        df = pd.read_excel(details_file, dtype={'GTIN': str})
                         df.rename(columns={
                             'GTIN': 'gtin', 'Кол-во': 'dm_quantity', 'Агрегация': 'aggregation_level',
                             'Дата производства': 'production_date', 'Срок годности': 'shelf_life_years',
@@ -413,18 +415,22 @@ def edit_integration(order_id):
                     for key, value in request.form.items():
                         # Ищем ключи вида "gtin-123", "dm_quantity-123" и т.д.
                         if '-' in key:
-                            field, detail_id_str = key.split('-', 1)
+                            try:
+                                field, detail_id_str = key.split('-', 1)
+                            except ValueError:
+                                continue # Пропускаем ключи, которые не соответствуют формату
+
                             if detail_id_str.isdigit():
                                 detail_id = int(detail_id_str)
                                 # Собираем все изменения для одной строки
                                 found = False
                                 for u in updates:
                                     if u['id'] == detail_id:
-                                        u[field] = value if value else None
+                                        u[field] = value # Сохраняем как есть, пустая строка будет обработана ниже
                                         found = True
                                         break
                                 if not found:
-                                    updates.append({'id': detail_id, field: value if value else None})
+                                    updates.append({'id': detail_id, field: value})
                     
                     # Применяем изменения к базе данных
                     for update_data in updates:
@@ -432,10 +438,13 @@ def edit_integration(order_id):
                         # Формируем SQL-запрос динамически
                         set_clauses = [sql.SQL("{} = %s").format(sql.Identifier(key)) for key in update_data.keys()]
                         values = list(update_data.values())
-                        values.append(detail_id)
+                        # Заменяем пустые строки на None, чтобы в БД не попадали пустые значения
+                        # для числовых или датовых полей.
+                        processed_values = [v if v != '' else None for v in values]
+                        processed_values.append(detail_id)
                         
                         query = sql.SQL("UPDATE dmkod_aggregation_details SET {} WHERE id = %s").format(sql.SQL(', ').join(set_clauses))
-                        cur.execute(query, values)
+                        cur.execute(query, processed_values)
                     
                     flash(f'Изменения в {len(updates)} строках успешно сохранены.', 'success')
 
