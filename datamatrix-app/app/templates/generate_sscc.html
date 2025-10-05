@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+
+{% block title %}Генерация SSCC{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0">Генерация SSCC кодов по запросу</h1>
+    <a href="{{ url_for('datamatrix_app.products_list') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Вернуться к справочнику
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Параметры генерации</h5>
+    </div>
+    <div class="card-body">
+        <form method="POST" action="{{ url_for('datamatrix_app.generate_sscc_standalone') }}">
+            {{ form.csrf_token }}
+            <div class="row g-3 align-items-end">
+                <div class="col-md-5">
+                    {{ form.owner.label(class="form-label") }}
+                    {{ form.owner(class="form-control" + (" is-invalid" if form.owner.errors else "")) }}
+                    {% if form.owner.errors %}<div class="invalid-feedback">{{ form.owner.errors[0] }}</div>{% endif %}
+                </div>
+                <div class="col-md-4">
+                    {{ form.quantity.label(class="form-label") }}
+                    {{ form.quantity(class="form-control" + (" is-invalid" if form.quantity.errors else ""), value=10) }}
+                    {% if form.quantity.errors %}<div class="invalid-feedback">{{ form.quantity.errors[0] }}</div>{% endif %}
+                </div>
+                <div class="col-md-3">
+                    {{ form.submit(class="btn btn-primary w-100") }}
+                </div>
+            </div>
+        </form>
+    </div>
+
+    {% if logs %}
+    <div class="card-footer">
+        <h5 class="mb-3">Результат генерации</h5>
+        <h6>Лог выполнения:</h6>
+        <pre class="bg-light p-2 rounded" style="max-height: 200px; overflow-y: auto;"><code>{{ logs|join('\n') }}</code></pre>
+        
+        {% if generated_data %}
+        <h6>Сгенерированные данные:</h6>
+        <pre class="bg-light p-2 rounded"><code>{% for item in generated_data %}{{ item.sscc }} (Owner: {{ item.owner }})
+{% endfor %}</code></pre>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -14,12 +14,13 @@ from wtforms import StringField, PasswordField, BooleanField, SubmitField
 from wtforms.validators import DataRequired
 
 # --- Абсолютные импорты от корня пакета 'app' ---
-from app.services.aggregation_service import run_aggregation_process
+from app.services.aggregation_service import run_aggregation_process, generate_standalone_sscc, run_import_from_dmkod
 from app.services.product_service import get_all_products, add_product as add_product_service, generate_excel_template, process_excel_upload
 from app.services.view_service import create_bartender_views, generate_declarator_report
 from app.services.admin_service import delete_order_completely, get_tirages_for_order, delete_tirages_from_order
 from app.services.task_service import process_aggregation_task_file
 from app.db import get_db_connection
+from app.forms import GenerateSsccForm
 
 # --- СОЗДАНИЕ ЧЕРТЕЖА (BLUEPRINT) ---
 datamatrix_bp = Blueprint(
@@ -180,6 +181,34 @@ def order_details(order_id):
             logs = run_aggregation_process(order_id, files, dm_type, mode, level1_qty, level2_qty, level3_qty)
             return render_template('results.html', logs=logs, title=f"Результат обработки заказа №{order_id}")
 
+        elif action == 'import_from_dmkod':
+            # Получаем параметры агрегации из новой формы на странице dmkod_import.html
+            mode = request.form.get('aggregation_mode')
+            level1_qty, level2_qty, level3_qty = 0, 0, 0
+
+            try:
+                if mode in ['level1', 'level2', 'level3']:
+                    level1_qty = int(request.form.get('level1_qty', 0))
+                    if level1_qty <= 0:
+                        raise ValueError('Количество в коробе должно быть > 0.')
+                if mode in ['level2', 'level3']:
+                    level2_qty = int(request.form.get('level2_qty', 0))
+                    if level2_qty <= 0:
+                        raise ValueError('Количество коробов на паллете должно быть > 0.')
+                if mode == 'level3':
+                    level3_qty = int(request.form.get('level3_qty', 0))
+                    if level3_qty <= 0:
+                        raise ValueError('Количество паллет в контейнере должно быть > 0.')
+            except (ValueError, TypeError) as e:
+                flash(f'Ошибка в параметрах агрегации: {e}', 'danger')
+                # Возвращаемся на страницу импорта, чтобы пользователь мог исправить ошибку
+                return redirect(url_for('.order_details', order_id=order_id))
+            
+            logs = run_import_from_dmkod(
+                order_id, mode, level1_qty, level2_qty, level3_qty
+            )
+            return render_template('results.html', logs=logs, title=f"Результат обработки заказа №{order_id}")
+
         elif action == 'upload_foreign_sscc':
             if 'task_file' not in request.files:
                 flash('Файл не был найден в запросе.', 'danger')
@@ -209,10 +238,24 @@ def order_details(order_id):
         orders_table = os.getenv('TABLE_ORDERS', 'orders')
         cur.execute(f"SELECT * FROM {orders_table} WHERE id = %s", (order_id,))
         order = cur.fetchone()
-    conn.close()
     
     if not order:
         return "Заказ не найден!", 404
+
+    # --- НОВАЯ ЛОГИКА: Проверяем статус заказа ---
+    if order['status'] == 'dmkod':
+        # Если статус dmkod, получаем детализацию и проверяем наличие кодов
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT gtin, dm_quantity, aggregation_level, api_codes_json FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
+                (order_id,)
+            )
+            details_with_codes = cur.fetchall()
+        conn.close()
+        # Рендерим новую страницу для импорта
+        return render_template('dmkod_import.html', order=order, details_with_codes=details_with_codes)
+    
+    conn.close() # Закрываем соединение для обычных заказов
         
     return render_template('order_details.html', order=order, title=f"Заказ №{order_id}")
 
@@ -348,6 +391,25 @@ def edit_order_page(order_id):
     
     tirages = get_tirages_for_order(order_id)
     return render_template('edit_order.html', order=order, tirages=tirages, title=f"Редактирование заказа №{order_id}")
+
+@datamatrix_bp.route('/generate-sscc', methods=['GET', 'POST'])
+@login_required
+def generate_sscc_standalone():
+    """Страница для генерации SSCC кодов по запросу."""
+    form = GenerateSsccForm()
+    logs = None
+    generated_data = None
+
+    if form.validate_on_submit():
+        owner = form.owner.data
+        quantity = form.quantity.data
+        logs, generated_data = generate_standalone_sscc(quantity, owner)
+        if "ОШИБКА" in logs[0]:
+            flash(logs[0], 'danger')
+        else:
+            flash(f"Успешно сгенерировано {len(generated_data)} SSCC кодов.", 'success')
+
+    return render_template('generate_sscc.html', form=form, logs=logs, generated_data=generated_data)
 
 
 # --- ФАБРИКА ПРИЛОЖЕНИЯ ---

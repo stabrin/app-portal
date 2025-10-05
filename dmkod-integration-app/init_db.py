@@ -70,7 +70,7 @@ def update_schema(conn):
 
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS product_group_id INTEGER REFERENCES {pg_table}(id);").format(orders=sql.Identifier(orders_table), pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("COMMENT ON COLUMN {orders}.product_group_id IS 'ID товарной группы из справочника dmkod_product_groups';").format(orders=sql.Identifier(orders_table)),
-
+        
         # 3. Создание новой таблицы 'dmkod_aggregation_details'
         sql.SQL("""
         CREATE TABLE IF NOT EXISTS {agg_details} (
@@ -89,6 +89,9 @@ def update_schema(conn):
             orders=sql.Identifier(orders_table)
         ),
         sql.SQL("COMMENT ON TABLE {agg_details} IS 'Детализация задания на агрегацию для ДМкод';").format(agg_details=sql.Identifier(aggregation_details_table)),
+        # Безопасное добавление колонки для JSON с кодами
+        sql.SQL("ALTER TABLE {agg_details} ADD COLUMN IF NOT EXISTS api_codes_json JSONB;").format(agg_details=sql.Identifier(aggregation_details_table)),
+        sql.SQL("COMMENT ON COLUMN {agg_details}.api_codes_json IS 'JSON с кодами маркировки, полученными от API для этого тиража';").format(agg_details=sql.Identifier(aggregation_details_table)),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_agg_details_order_id ON {agg_details}(order_id);").format(agg_details=sql.Identifier(aggregation_details_table)),
 
         # 4. Создание таблицы для хранения оригинальных файлов заказа
@@ -105,6 +108,11 @@ def update_schema(conn):
             orders=sql.Identifier(orders_table)
         ),
         sql.SQL("COMMENT ON TABLE {order_files} IS 'Оригинальные файлы заказов от клиентов для ДМкод';").format(order_files=sql.Identifier(order_files_table)),
+
+        # 5. Сброс счетчика SSCC для перехода на новую логику GCP.
+        # Устанавливаем начальное значение 1.
+        #sql.SQL("UPDATE system_counters SET current_value = 1 WHERE counter_name = 'sscc_id';"),
+        #sql.SQL("COMMENT ON TABLE system_counters IS 'Сброс счетчика sscc_id до 1 для новой логики GCP от 2025-09-29';"),
     ]
 
     try:

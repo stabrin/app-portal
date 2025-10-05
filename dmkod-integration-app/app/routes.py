@@ -995,49 +995,54 @@ def integration_panel():
                     # Санитизируем имя клиента для использования в именах файлов
                     sanitized_client_name = _sanitize_filename_part(client_name)
 
-                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                        for i, detail in enumerate(details_to_process):
-                            payload = {"printrun_id": detail['api_id']}
-                            user_logs.append(f"--- {i+1}/{len(details_to_process)}: Запрос кодов для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
-                            
-                            # Отправляем GET-запрос к API
-                            response = requests.get(full_url, headers=headers, json=payload, timeout=60) # Увеличиваем таймаут
-                            
-                            user_logs.append(f"  URL: {full_url}")
-                            user_logs.append(f"  Тело запроса: {json.dumps(payload)}")
-                            user_logs.append(f"  Статус ответа: {response.status_code}")
-                            
-                            response.raise_for_status() # Прервет выполнение, если статус не 2xx
-                            
-                            response_data = response.json()
-                            codes = response_data.get('codes', [])
-
-                            if not codes:
-                                user_logs.append(f"  В ответе для тиража {detail['api_id']} не найдено кодов.")
-                                continue
-
-                            # Формируем CSV-содержимое (один код на строку)
-                            csv_content = "\n".join(codes)
-                            
-                            # Формируем имя файла: порядковый номер файла + _ + номер заказа + _ + Название клиента + _ + количество полученных кодов
-                            csv_filename_parts = [f"{i+1}", f"{selected_order_id}"]
-                            if sanitized_client_name:
-                                csv_filename_parts.append(sanitized_client_name)
-                            csv_filename_parts.append(f"{len(codes)}")
-                            filename = "_".join(csv_filename_parts) + ".csv"
-                            
-                            zf.writestr(filename, csv_content)
-                            user_logs.append(f"  Создан файл '{filename}' с {len(codes)} кодами.")
-                    
-                    zip_buffer.seek(0) # Перематываем буфер в начало
-
-                    # Обновляем статус заказа в нашей БД
                     with conn_local.cursor() as cur:
+                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                            for i, detail in enumerate(details_to_process):
+                                payload = {"printrun_id": detail['api_id']}
+                                user_logs.append(f"--- {i+1}/{len(details_to_process)}: Запрос кодов для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+                                
+                                # Отправляем GET-запрос к API
+                                response = requests.get(full_url, headers=headers, json=payload, timeout=60)
+                                
+                                user_logs.append(f"  URL: {full_url}")
+                                user_logs.append(f"  Тело запроса: {json.dumps(payload)}")
+                                user_logs.append(f"  Статус ответа: {response.status_code}")
+                                
+                                response.raise_for_status()
+                                
+                                response_data = response.json()
+                                codes = response_data.get('codes', [])
+
+                                if not codes:
+                                    user_logs.append(f"  В ответе для тиража {detail['api_id']} не найдено кодов.")
+                                    continue
+                                
+                                # Сохраняем JSON с кодами в dmkod_aggregation_details для текущей строки
+                                cur.execute(
+                                    "UPDATE dmkod_aggregation_details SET api_codes_json = %s WHERE id = %s",
+                                    (json.dumps({'codes': codes}), detail['id'])
+                                )
+                                user_logs.append(f"  Сохранено {len(codes)} кодов в базу данных для строки ID {detail['id']}.")
+
+                                # Формируем CSV-содержимое для ZIP-архива
+                                csv_content = "\n".join(codes)
+                                
+                                csv_filename_parts = [f"{i+1}", f"{selected_order_id}"]
+                                if sanitized_client_name:
+                                    csv_filename_parts.append(sanitized_client_name)
+                                csv_filename_parts.append(f"{len(codes)}")
+                                filename = "_".join(csv_filename_parts) + ".csv"
+                                
+                                zf.writestr(filename, csv_content)
+                                user_logs.append(f"  Создан файл '{filename}' с {len(codes)} кодами.")
+                        
+                        # Обновляем статус заказа в нашей БД
                         cur.execute(
                             "UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s",
                             (selected_order_id,)
                         )
                     conn_local.commit()
+                    zip_buffer.seek(0) # Перематываем буфер в начало
 
                     # Формируем имя ZIP-файла, избегая лишнего подчеркивания
                     zip_download_name_parts = [f"codes_order_{selected_order_id}"]

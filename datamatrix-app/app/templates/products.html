@@ -3,6 +3,9 @@
     <div class="d-flex justify-content-between align-items-center mb-3">
         <h2>Справочник товаров (Номенклатура)</h2>
         <div>
+            <a href="{{ url_for('datamatrix_app.generate_sscc_standalone') }}" class="btn btn-info text-white">
+                <i class="bi bi-upc-scan"></i> Сгенерировать SSCC
+            </a>
             <a href="{{ url_for('.add_product') }}" class="btn btn-success"><i class="bi bi-plus-lg"></i> Добавить товар</a>
         </div>
     </div>

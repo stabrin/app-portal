@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Импорт кодов из ДМкод для заказа №{{ order.id }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="mb-0">Импорт кодов из ДМкод</h1>
+    <a href="{{ url_for('datamatrix_app.index') }}" class="btn btn-secondary">
+        <i class="bi bi-arrow-left"></i> Вернуться к списку заказов
+    </a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5 class="mb-0">Заказ №{{ order.id }} - {{ order.client_name }}</h5>
+    </div>
+    <div class="card-body">
+        {% if order.notes %}
+            <p><strong>Комментарий к заказу:</strong> {{ order.notes }}</p>
+        {% endif %}
+
+        {% if not details_with_codes %}
+            <div class="alert alert-warning" role="alert">
+                <h4 class="alert-heading">Ожидание кодов</h4>
+                <p>По данному заказу коды еще не получены из API ДМкод.</p>
+                <hr>
+                <p class="mb-0">Пожалуйста, вернитесь в приложение "ДМкод интеграция", выберите этот заказ и выполните действие "Скачать коды".</p>
+            </div>
+        {% else %}
+            <p>Для этого заказа были получены коды маркировки. Вы можете загрузить их в систему для дальнейшей агрегации.</p>
+            
+            <table class="table table-bordered table-striped">
+                <thead class="table-dark">
+                    <tr>
+                        <th>GTIN</th>
+                        <th>Количество кодов</th>
+                        <th>Уровень агрегации</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for detail in details_with_codes %}
+                    <tr>
+                        <td><code>{{ detail.gtin }}</code></td>
+                        <td>{{ detail.api_codes_json.codes|length }}</td>
+                        <td>{{ detail.aggregation_level }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+
+            <form method="POST" action="{{ url_for('datamatrix_app.order_details', order_id=order.id) }}" id="aggregation-form">
+                <input type="hidden" name="action" value="import_from_dmkod">
+
+                <hr class="my-4">
+                <h5>Параметры агрегации</h5>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label for="aggregation_mode" class="form-label">Режим агрегации</label>
+                        <select class="form-select" name="aggregation_mode" id="aggregation_mode">
+                            <option value="none" selected>Без агрегации</option>
+                            <option value="level1">Агрегация 1-го уровня (короба)</option>
+                            <option value="level2">Агрегация 2-го уровня (паллеты)</option>
+                            <option value="level3">Агрегация 3-го уровня (контейнеры)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="row" id="aggregation-fields" style="display: none;">
+                    <div class="col-md-4 mb-3" id="level1-group" style="display: none;">
+                        <label for="level1_qty" class="form-label">Кол-во в коробе</label>
+                        <input type="number" class="form-control" name="level1_qty" id="level1_qty" min="1" value="10">
+                    </div>
+                    <div class="col-md-4 mb-3" id="level2-group" style="display: none;">
+                        <label for="level2_qty" class="form-label">Коробов на паллете</label>
+                        <input type="number" class="form-control" name="level2_qty" id="level2_qty" min="1">
+                    </div>
+                    <div class="col-md-4 mb-3" id="level3-group" style="display: none;">
+                        <label for="level3_qty" class="form-label">Паллет в контейнере</label>
+                        <input type="number" class="form-control" name="level3_qty" id="level3_qty" min="1">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary btn-lg"><i class="bi bi-database-down"></i> Загрузить из БД и агрегировать</button>
+            </form>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    // Скрипт для динамического отображения полей агрегации
+    document.getElementById('aggregation_mode').addEventListener('change', function() {
+        const mode = this.value;
+        const fieldsDiv = document.getElementById('aggregation-fields');
+        const level1 = document.getElementById('level1-group');
+        const level2 = document.getElementById('level2-group');
+        const level3 = document.getElementById('level3-group');
+
+        // Показываем/скрываем весь блок с полями
+        fieldsDiv.style.display = mode !== 'none' ? 'flex' : 'none';
+
+        // --- НОВАЯ ЛОГИКА ---
+        // Поле "Кол-во в коробе" для dmkod-заказов всегда берется из БД,
+        // поэтому мы его не показываем пользователю, даже если выбрана агрегация.
+        // Оно нужно только для агрегации 2-го и 3-го уровня.
+        level1.style.display = 'none'; // Всегда скрыто
+        level2.style.display = ['level2', 'level3'].includes(mode) ? 'block' : 'none';
+        level3.style.display = mode === 'level3' ? 'block' : 'none';
+    });
+</script>
+{% endblock %}
