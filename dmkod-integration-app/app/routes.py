@@ -697,6 +697,8 @@ def integration_panel():
                             cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, selected_order_id))
                         conn_local.commit()
                         flash(f'Заказ в API успешно создан с ID: {api_order_id}.', 'success')
+                        # Перенаправляем, чтобы обновить состояние кнопок
+                        return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
                     api_response = {
                         'status_code': response.status_code,
@@ -742,9 +744,11 @@ def integration_panel():
                     # Обновляем наш заказ, записывая статус
                     if response_data.get('code') == 'get_request':
                         with conn_local.cursor() as cur:
-                            cur.execute("UPDATE orders SET status = 'Запрос создан' WHERE id = %s", (selected_order_id,))
+                            cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,))
                         conn_local.commit()
                         flash('Подпишите запрос на получение кодов. после получения кодов можно будет продолжить работу', 'success')
+                        # Перенаправляем, чтобы обновить состояние кнопок
+                        return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
                     api_response = {
                         'status_code': response.status_code,
@@ -879,6 +883,8 @@ def integration_panel():
                         cur.execute("UPDATE orders SET api_status = 'Тиражи созданы' WHERE id = %s", (selected_order_id,))
                     conn_local.commit()
                     flash('Тиражи успешно созданы в API.', 'success')
+                    # Перенаправляем, чтобы обновить состояние кнопок
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
     
                     api_response = {
                         'status_code': 200,
@@ -950,6 +956,8 @@ def integration_panel():
                     conn_local.commit()
 
                     flash('Операция "Подготовить JSON" успешно выполнена. Статус заказа обновлен на "JSON заказан".', 'success')
+                    # Перенаправляем, чтобы обновить состояние кнопок
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
                     api_response = {
                         'status_code': 200, # Используем 200, т.к. операция прошла успешно
                         'body': "\n".join(user_logs)
@@ -1137,6 +1145,8 @@ def integration_panel():
                     conn_local.commit()
 
                     flash('Операция "Подготовить сведения" успешно выполнена. Статус заказа обновлен.', 'success')
+                    # Перенаправляем, чтобы обновить состояние кнопок
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
                     api_response = {'status_code': 200, 'body': "\n".join(user_logs)}
 
                 except Exception as e:
@@ -1196,6 +1206,8 @@ def integration_panel():
                     conn_local.commit()
 
                     flash('Операция "Подготовить отчет" успешно выполнена. Статус заказа обновлен.', 'success')
+                    # Перенаправляем, чтобы обновить состояние кнопок
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
                     api_response = {'status_code': 200, 'body': "\n".join(user_logs)}
 
                 except Exception as e:
