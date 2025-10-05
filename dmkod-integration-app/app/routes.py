@@ -1,6 +1,7 @@
 import os
 import requests
 import json
+from functools import wraps
 import logging
 import pandas as pd
 import re
@@ -37,6 +38,25 @@ def _sanitize_filename_part(text):
     # Remove leading/trailing underscores or dots
     sanitized = sanitized.strip('_.')
     return sanitized
+
+def api_token_required(f):
+    """
+    Кастомный декоратор, который проверяет наличие 'api_access_token' в сессии.
+    Если токена нет, перенаправляет на страницу входа приложения.
+    Используется после @login_required.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'api_access_token' not in session:
+            flash('Для доступа к этому приложению необходима авторизация в API ДМкод.', 'warning')
+            # Принудительно выходим из локальной сессии, чтобы пользователь попал на нужную страницу входа
+            logout_user()
+            return redirect(url_for('.login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+
 
 # 2. Роуты аутентификации
 @dmkod_bp.route('/login', methods=['GET', 'POST'])
@@ -116,6 +136,7 @@ def index():
 
 @dmkod_bp.route('/dashboard')
 @login_required
+@api_token_required
 def dashboard():
     conn = get_db_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -137,6 +158,7 @@ def dashboard():
 # 4. Новый роут для справочника
 @dmkod_bp.route('/participants')
 @login_required
+@api_token_required
 def participants():
     """Страница для отображения списка клиентов из API."""
     participants_list = []
@@ -176,6 +198,7 @@ def participants():
 
 @dmkod_bp.route('/api_tester', methods=['GET', 'POST'])
 @login_required
+@api_token_required
 def api_tester():
     """Страница для тестирования запросов к API ДМкод."""
     api_response = None
@@ -226,6 +249,7 @@ def api_tester():
 
 @dmkod_bp.route('/integration/new', methods=['GET', 'POST'])
 @login_required
+@api_token_required
 def create_integration():
     """Страница создания новой интеграции."""
     form = IntegrationForm()
@@ -357,6 +381,7 @@ def create_integration():
 
 @dmkod_bp.route('/integration/<int:order_id>/edit', methods=['GET', 'POST'])
 @login_required
+@api_token_required
 def edit_integration(order_id):
     conn = get_db_connection()
     try:
@@ -497,6 +522,7 @@ def edit_integration(order_id):
 
 @dmkod_bp.route('/integration/download_original/<int:file_id>')
 @login_required
+@api_token_required
 def download_original_file(file_id):
     conn = get_db_connection()
     try:
@@ -524,6 +550,7 @@ def download_original_file(file_id):
 
 @dmkod_bp.route('/product_group/new', methods=['GET', 'POST'])
 @login_required
+@api_token_required
 def create_product_group():
     form = ProductGroupForm()
     if form.validate_on_submit():
@@ -549,6 +576,7 @@ def create_product_group():
 
 @dmkod_bp.route('/product_group/<int:group_id>/edit', methods=['GET', 'POST'])
 @login_required
+@api_token_required
 def edit_product_group(group_id):
     conn = get_db_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -587,6 +615,7 @@ def edit_product_group(group_id):
 
 @dmkod_bp.route('/product_group/<int:group_id>/delete', methods=['POST'])
 @login_required
+@api_token_required
 def delete_product_group(group_id):
     conn = get_db_connection()
     with conn.cursor() as cur:
@@ -598,6 +627,7 @@ def delete_product_group(group_id):
 
 @dmkod_bp.route('/integration_panel', methods=['GET', 'POST'])
 @login_required
+@api_token_required
 def integration_panel():
     """Страница 'Интеграция' с выбором заказа."""
     api_response = None
@@ -1231,6 +1261,7 @@ def integration_panel():
 
 @dmkod_bp.route('/admin', methods=['GET', 'POST'])
 @login_required
+@api_token_required
 def admin():
     """Страница администрирования для удаления заказов."""
     # Проверяем, является ли пользователь администратором
