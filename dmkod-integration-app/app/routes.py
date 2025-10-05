@@ -844,25 +844,28 @@ def integration_panel():
                         response_post.raise_for_status()
                         user_logs.append(f"  Запрос на создание тиража отправлен. Ответ: {response_post.status_code}")
     
-                        # Пауза
-                        user_logs.append("  Пауза 5 секунд...")
-                        time.sleep(5)
-    
                         # Отправляем GET для получения списка тиражей
                         get_tirages_payload = {"order_id": selected_order['api_order_id']}
                         response_get_tirages = requests.get(get_tirages_url, headers=headers, json=get_tirages_payload, timeout=30)
                         response_get_tirages.raise_for_status()
                         tirages_data = response_get_tirages.json()
     
-                        # Находим максимальный ID тиража
-                        max_printrun_id = None
-                        printrun_ids = []
+                        # Находим ID только что созданного тиража.
+                        # Логика: ищем тираж для нашего order_product_id, у которого еще нет api_id в нашей базе.
+                        new_printrun_id = None
                         if tirages_data.get('orders') and tirages_data['orders'][0].get('printruns'):
-                            printrun_ids = [p['id'] for p in tirages_data['orders'][0]['printruns']]
+                            all_api_printruns = tirages_data['orders'][0]['printruns']
+                            # Получаем ID тиражей, которые уже есть в нашей БД для этого заказа
+                            existing_api_ids = set(details_df['api_id'].dropna().astype(int))
+                            
+                            # Ищем первый тираж из API, которого еще нет в нашей базе
+                            for pr in reversed(all_api_printruns): # Идем с конца, т.к. новые обычно там
+                                if pr['id'] not in existing_api_ids:
+                                    new_printrun_id = pr['id']
+                                    break
                         
-                        if printrun_ids:
-                            max_printrun_id = max(printrun_ids)
-                            user_logs.append(f"  Получен список тиражей. Максимальный ID: {max_printrun_id}")
+                        if new_printrun_id:
+                            user_logs.append(f"  Найден новый ID тиража: {new_printrun_id}")
                         else:
                             log_msg = f"  Не удалось получить ID тиражей для заказа {selected_order['api_order_id']}."
                             logging.warning(log_msg)
@@ -873,10 +876,12 @@ def integration_panel():
                         with conn_local.cursor() as cur:
                             cur.execute(
                                 "UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s",
-                                (max_printrun_id, row['id'])
+                                (new_printrun_id, row['id'])
                             )
+                        # Обновляем DataFrame, чтобы на следующей итерации этот ID считался существующим
+                        details_df.loc[i, 'api_id'] = new_printrun_id
                         conn_local.commit()
-                        user_logs.append(f"  ID тиража {max_printrun_id} присвоен позиции заказа (ID: {row['id']}) в базе данных.")
+                        user_logs.append(f"  ID тиража {new_printrun_id} присвоен позиции заказа (ID: {row['id']}) в базе данных.")
     
                     # --- Шаг 5: Обновление статуса заказа ---
                     with conn_local.cursor() as cur:
