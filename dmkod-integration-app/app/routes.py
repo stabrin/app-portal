@@ -9,9 +9,10 @@ from dateutil.relativedelta import relativedelta
 from flask import Blueprint, render_template, redirect, url_for, flash, request, session, Response, send_file
 from flask_login import login_user, logout_user, login_required, current_user
 from psycopg2 import sql
+from dateutil.relativedelta import relativedelta
 from psycopg2.extras import RealDictCursor
 from bcrypt import checkpw # Removed unused import of upsert_data_to_db
-from io import BytesIO
+from io import BytesIO, StringIO
 
 from .db import get_db_connection
 from .forms import LoginForm, IntegrationForm, ProductGroupForm
@@ -1251,6 +1252,79 @@ def integration_panel():
                     api_response = {'status_code': 500, 'body': "\n".join(user_logs)}
                 finally:
                     if 'conn_local' in locals() and conn_local: conn_local.close()
+
+            elif action == 'export_delta':
+                user_logs = []
+                try:
+                    conn_local = get_db_connection()
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                        # Получаем все детали заказа с кодами и датами
+                        cur.execute(
+                            """
+                            SELECT 
+                                api_codes_json,
+                                production_date,
+                                expiry_date
+                            FROM dmkod_aggregation_details
+                            WHERE order_id = %s AND api_codes_json IS NOT NULL
+                            """,
+                            (selected_order_id,)
+                        )
+                        details_to_process = cur.fetchall()
+
+                    if not details_to_process:
+                        raise Exception("В заказе нет скачанных кодов для выгрузки.")
+
+                    # Используем StringIO для сборки CSV в памяти
+                    output = StringIO()
+                    # Используем pandas для удобной работы с данными и CSV
+                    all_rows = []
+
+                    for detail in details_to_process:
+                        codes = detail['api_codes_json'].get('codes', [])
+                        prod_date = detail.get('production_date')
+                        exp_date = detail.get('expiry_date')
+
+                        life_time_months = ''
+                        if prod_date and exp_date:
+                            # Считаем разницу в месяцах
+                            delta = relativedelta(exp_date, prod_date)
+                            life_time_months = delta.years * 12 + delta.months
+
+                        for code in codes:
+                            if not code or len(code) < 16:
+                                continue # Пропускаем некорректные коды
+                            
+                            all_rows.append({
+                                'DataMatrix': code,
+                                'DataMatrixCode': '',
+                                'Barcode': code[3:16], # Извлекаем EAN-13 (символы с 4 по 16)
+                                'LifeTime': life_time_months
+                            })
+                    
+                    if not all_rows:
+                        raise Exception("Не найдено корректных кодов для выгрузки.")
+
+                    df = pd.DataFrame(all_rows)
+
+                    # Используем StringIO для сборки CSV в памяти,
+                    # так как старая версия pandas не поддерживает line_terminator.
+                    # Мы сделаем замену вручную.
+                    buffer = StringIO()
+                    import csv
+                    df.to_csv(buffer, sep='\t', index=False, encoding='utf-8', quoting=csv.QUOTE_NONE)
+                    
+                    # Получаем содержимое как строку и заменяем окончания строк на CRLF для Windows
+                    csv_content_windows = buffer.getvalue().replace('\n', '\r\n')
+                    
+                    # Отправляем итоговый файл
+                    return send_file(BytesIO(csv_content_windows.encode('utf-8')),
+                                     mimetype='text/csv',
+                                     as_attachment=True,
+                                     download_name=f'delta_export_order_{selected_order_id}.csv')
+                except Exception as e:
+                    flash(f'Ошибка при формировании отчета "Дельта": {e}', 'danger')
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
         elif not action and selected_order_id:
              # Если просто выбрали заказ из списка, перенаправляем, чтобы URL был чистым
