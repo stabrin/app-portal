@@ -857,7 +857,7 @@ def integration_panel():
                     create_tirage_url = f"{api_base_url}/psp/printrun/create"
                     get_tirages_url = f"{api_base_url}/psp/printruns"
                     user_logs = [f"Начинаю создание тиражей для {len(details_df)} позиций заказа."]
-
+ 
                     for i, row in details_df.iterrows():
                         api_product_id = row.get('api_product_id')
                         if pd.isna(api_product_id):
@@ -871,7 +871,7 @@ def integration_panel():
                             log_msg = f"Пропуск строки {i+1}/{len(details_df)} (gtin: {row['gtin']}), так как тираж (api_id: {row['api_id']}) уже существует."
                             user_logs.append(log_msg)
                             continue
-
+ 
                         user_logs.append(f"--- Создаю тираж {i+1}/{len(details_df)} ---")
                         tirage_payload = {
                             "order_product_id": int(api_product_id),
@@ -884,7 +884,7 @@ def integration_panel():
                         response_post.raise_for_status()
                         response_data = response_post.json()
                         user_logs.append(f"  Запрос на создание тиража отправлен. Ответ: {response_post.status_code}, Тело: {json.dumps(response_data)}")
-
+ 
                         # --- НОВАЯ ЛОГИКА: Получаем ID тиража напрямую из ответа ---
                         new_printrun_id = response_data.get('printrun_id')
                         
