@@ -853,6 +853,7 @@ def integration_panel():
                     create_tirage_url = f"{api_base_url}/psp/printrun/create"
                     get_tirages_url = f"{api_base_url}/psp/printruns"
                     user_logs = [f"В заказе {len(details_df)} позиций для создания тиражей."]
+                    import time
 
                     for i, row in details_df.iterrows():
                         api_product_id = row.get('api_product_id')
@@ -890,13 +891,16 @@ def integration_panel():
                         # Логика: ищем тираж для нашего order_product_id, у которого еще нет api_id в нашей базе.
                         new_printrun_id = None
                         if tirages_data.get('orders') and tirages_data['orders'][0].get('printruns'):
-                            all_api_printruns = tirages_data['orders'][0]['printruns']                            
-                            # Получаем ID тиражей, которые уже есть в нашей БД для этого заказа (из обновленного DataFrame)
-                            existing_api_ids = set(details_df['api_id'].dropna().astype(int))
+                            all_api_printruns = tirages_data['orders'][0]['printruns']
+                            # Получаем ID тиражей, которые уже есть в нашей БД для этого заказа
+                            # Проверяем, есть ли колонка 'api_id' и не пустая ли она
+                            existing_api_ids = set()
+                            if 'api_id' in details_df.columns and not details_df['api_id'].isnull().all():
+                                existing_api_ids = set(details_df['api_id'].dropna().astype(int))
                             
                             # Ищем первый тираж из API, которого еще нет в нашей базе
                             for pr in reversed(all_api_printruns): # Идем с конца, т.к. новые обычно там
-                                if pr['order_product_id'] == int(api_product_id) and pr['id'] not in existing_api_ids:
+                                if pr['id'] not in existing_api_ids:
                                     new_printrun_id = pr['id']
                                     break
                         
