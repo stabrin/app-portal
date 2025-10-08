@@ -776,7 +776,7 @@ def integration_panel():
                     if response_data.get('code') == 'get_request':
                         with conn_local.cursor() as cur:
                             cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,))
-                        conn_local.commit()
+                        conn_local.commit() # <-- Эта строка была пропущена
                         flash('Подпишите запрос на получение кодов. после получения кодов можно будет продолжить работу', 'success')
                         # Перенаправляем, чтобы обновить состояние кнопок
                         return redirect(url_for('.integration_panel', order_id=selected_order_id))
