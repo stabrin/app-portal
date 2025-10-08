@@ -959,6 +959,7 @@ def integration_panel():
                     full_url = f"{api_base_url}/psp/printrun/json/create"
                     headers = {'Authorization': f'Bearer {access_token}'}
                     
+                    import time # Импортируем модуль для задержки
                     user_logs.append(f"Найдено {len(details_to_process)} позиций для обработки.")
 
                     for i, detail in enumerate(details_to_process):
@@ -972,6 +973,9 @@ def integration_panel():
                         user_logs.append(f"  Статус ответа: {response.status_code}")
                         
                         response.raise_for_status() # Прервет выполнение, если статус не 2xx
+                        
+                        # Добавляем небольшую паузу, чтобы API успело обработать запрос
+                        time.sleep(0.5) # Пауза в 0.5 секунды
 
                     # Обновляем статус заказа в нашей БД
                     with conn_local.cursor() as cur:
