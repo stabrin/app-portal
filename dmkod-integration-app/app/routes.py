@@ -760,7 +760,7 @@ def integration_panel():
                 try:
                     conn_local = get_db_connection()
                     
-                    api_payload = { "order_id": selected_order['api_order_id'] }
+                    api_payload = { "order_id": int(selected_order['api_order_id']) }
 
                     # Отправляем запрос к API
                     api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
