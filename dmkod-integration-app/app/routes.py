@@ -776,7 +776,7 @@ def integration_panel():
                     if response_data.get('code') == 'get_request':
                         with conn_local.cursor() as cur:
                             cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,))
-                        conn_local.commit() # <-- Эта строка была пропущена
+                        conn_local.commit()
                         flash('Подпишите запрос на получение кодов. после получения кодов можно будет продолжить работу', 'success')
                         # Перенаправляем, чтобы обновить состояние кнопок
                         return redirect(url_for('.integration_panel', order_id=selected_order_id))
@@ -813,7 +813,7 @@ def integration_panel():
                     # --- Шаг 1: Собираем данные из нашей БД в DataFrame ---
                     with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute(
-                            "SELECT id, gtin, dm_quantity FROM dmkod_aggregation_details WHERE order_id = %s",
+                            "SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s",
                             (selected_order_id,)
                         )
                         details_data = cur.fetchall()
@@ -887,7 +887,10 @@ def integration_panel():
                         if tirages_data.get('orders') and tirages_data['orders'][0].get('printruns'):
                             all_api_printruns = tirages_data['orders'][0]['printruns']
                             # Получаем ID тиражей, которые уже есть в нашей БД для этого заказа
-                            existing_api_ids = set(details_df['api_id'].dropna().astype(int))
+                            # Проверяем, есть ли колонка 'api_id' и не пустая ли она
+                            existing_api_ids = set()
+                            if 'api_id' in details_df.columns and not details_df['api_id'].isnull().all():
+                                existing_api_ids = set(details_df['api_id'].dropna().astype(int))
                             
                             # Ищем первый тираж из API, которого еще нет в нашей базе
                             for pr in reversed(all_api_printruns): # Идем с конца, т.к. новые обычно там
