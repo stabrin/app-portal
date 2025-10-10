@@ -1317,6 +1317,64 @@ def integration_panel():
                     flash('Сначала необходимо создать заказ в API и разбить его на тиражи.', 'danger')
                     return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
+                # --- НОВАЯ ЛОГИКА для статуса 'delta' ---
+                if selected_order.get('status') == 'delta':
+                    user_logs = []
+                    try:
+                        conn_local = get_db_connection()
+                        with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                            # 1. Получаем все необработанные записи из delta_result
+                            cur.execute(
+                                "SELECT id, codes_json FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NULL",
+                                (selected_order_id,)
+                            )
+                            results_to_process = cur.fetchall()
+
+                        if not results_to_process:
+                            flash("Нет новых данных от 'Дельта' для подготовки сведений.", 'info')
+                            return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+                        api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
+                        full_url = f"{api_base_url}/psp/utilisation/upload"
+                        headers = {'Authorization': f'Bearer {access_token}'}
+                        user_logs.append(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки.")
+                        
+                        updated_count = 0
+                        with conn_local.cursor() as cur:
+                            for i, result in enumerate(results_to_process):
+                                payload = result['codes_json'] # JSON уже готов
+                                user_logs.append(f"--- {i+1}/{len(results_to_process)}: Отправка данных для записи ID {result['id']} ---")
+                                
+                                response = requests.post(full_url, headers=headers, json=payload, timeout=120)
+                                user_logs.append(f"  Статус ответа: {response.status_code}")
+                                response.raise_for_status()
+
+                                response_data = response.json()
+                                utilisation_upload_id = response_data.get('utilisation_upload_id')
+
+                                if not utilisation_upload_id:
+                                    raise Exception(f"API не вернуло 'utilisation_upload_id' в ответе. Ответ: {json.dumps(response_data)}")
+
+                                # Обновляем запись в delta_result
+                                cur.execute(
+                                    "UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s",
+                                    (utilisation_upload_id, result['id'])
+                                )
+                                user_logs.append(f"  Записи ID {result['id']} присвоен utilisation_upload_id: {utilisation_upload_id}")
+                                updated_count += 1
+                        
+                        conn_local.commit()
+                        flash(f'Успешно обработано {updated_count} записей. Сведения подготовлены.', 'success')
+                        return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
+                    except Exception as e:
+                        if 'conn_local' in locals() and conn_local: conn_local.rollback()
+                        error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
+                        user_logs.append(f"\n!!! ОШИБКА: {e}\nОтвет сервера (если был):\n{error_body}")
+                        api_response = {'status_code': 500, 'body': "\n".join(user_logs)}
+                    finally:
+                        if 'conn_local' in locals() and conn_local: conn_local.close()
+
                 user_logs = []
                 try:
                     conn_local = get_db_connection()
