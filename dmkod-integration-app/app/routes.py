@@ -754,7 +754,7 @@ def integration_panel():
     selected_order_id = request.form.get('order_id', type=int) if request.method == 'POST' else request.args.get('order_id', type=int)
 
     conn = get_db_connection()
-    try:
+    try: # Этот try-блок теперь охватывает и GET, и POST
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT id, client_name, created_at, api_order_id, api_status FROM orders WHERE status IN ('dmkod', 'delta') ORDER BY id DESC")
             orders = cur.fetchall()
@@ -764,13 +764,6 @@ def integration_panel():
                 cur.execute("SELECT * FROM orders WHERE id = %s", (selected_order_id,))
                 selected_order = cur.fetchone()
 
-    except Exception as e:
-        flash(f'Ошибка при загрузке заказов: {e}', 'danger')
-        orders = []
-    finally:
-        conn.close()
-
-    if request.method == 'POST':
         action = request.form.get('action')
         if not selected_order_id:
             flash('Пожалуйста, сначала выберите заказ.', 'warning')
@@ -784,8 +777,7 @@ def integration_panel():
                     return redirect(url_for('.login'))
 
                 try:
-                    conn_local = get_db_connection()
-                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
                         # 1. Получаем основную информацию о заказе и товарной группе
                         cur.execute("""
                             SELECT o.participant_id, o.notes, pg.dm_template
@@ -842,9 +834,9 @@ def integration_panel():
 
                     # 5. Обновляем наш заказ, записывая ID из API
                     if api_order_id:
-                        with conn_local.cursor() as cur:
+                        with conn.cursor() as cur:
                             cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, selected_order_id))
-                        conn_local.commit()
+                        conn.commit()
                         flash(f'Заказ в API успешно создан с ID: {api_order_id}.', 'success')
                         # Перенаправляем, чтобы обновить состояние кнопок
                         return redirect(url_for('.integration_panel', order_id=selected_order_id))
@@ -855,7 +847,7 @@ def integration_panel():
                     }
 
                 except Exception as e:
-                    if 'conn_local' in locals() and conn_local: conn_local.rollback()
+                    conn.rollback()
                     error_body = ""
                     if 'response' in locals() and hasattr(response, 'text'):
                         error_body = response.text
@@ -863,8 +855,6 @@ def integration_panel():
                         'status_code': response.status_code if 'response' in locals() else 500,
                         'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
                     }
-                finally:
-                    if 'conn_local' in locals() and conn_local: conn_local.close()
             elif action == 'create_suborder_request':
                 access_token = session.get('api_access_token')
                 if not access_token:
@@ -876,8 +866,6 @@ def integration_panel():
                     return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
                 try:
-                    conn_local = get_db_connection()
-                    
                     api_payload = { "order_id": int(selected_order['api_order_id']) }
 
                     # Отправляем запрос к API
@@ -892,9 +880,9 @@ def integration_panel():
 
                     # Обновляем наш заказ, записывая статус
                     if response_data.get('code') == 'get_request':
-                        with conn_local.cursor() as cur:
+                        with conn.cursor() as cur:
                             cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,)) # Обновляем статус
-                        conn_local.commit()
+                        conn.commit()
                         flash('Подпишите запрос на получение кодов. после получения кодов можно будет продолжить работу', 'success')
                         # Перенаправляем, чтобы обновить состояние кнопок
                         return redirect(url_for('.integration_panel', order_id=selected_order_id))
@@ -908,15 +896,13 @@ def integration_panel():
                         return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
 
                 except Exception as e:
-                    if conn_local: conn_local.rollback()
+                    conn.rollback()
                     error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
                     api_response = {
                         'status_code': response.status_code if 'response' in locals() else 500,
                         'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
                     }
                     return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
-                finally:
-                    if conn_local: conn_local.close()
             elif action == 'split_runs': # Полностью переписанная логика
                 access_token = session.get('api_access_token')
                 if not access_token:
@@ -1521,10 +1507,15 @@ def integration_panel():
         elif not action and selected_order_id:
              # Если просто выбрали заказ из списка, перенаправляем, чтобы URL был чистым
              return redirect(url_for('.integration_panel', order_id=selected_order_id))
+    except Exception as e:
+        flash(f'Произошла критическая ошибка: {e}', 'danger')
+        if conn: conn.rollback()
+        orders = [] # Очищаем список заказов в случае ошибки
+    finally:
+        if conn: conn.close()
 
     return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
-
-
+    
 @dmkod_bp.route('/admin', methods=['GET', 'POST'])
 @login_required
 @api_token_required
