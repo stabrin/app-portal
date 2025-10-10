@@ -492,8 +492,8 @@ def edit_integration(order_id):
                 flash(f'Заказ с ID {order_id} не найден.', 'danger')
                 return redirect(url_for('.dashboard'))
 
-            # Проверяем, можно ли редактировать этот заказ
-            if order['status'] != 'dmkod':
+            # Проверяем, можно ли редактировать этот заказ (разрешаем dmkod и delta)
+            if order['status'] not in ('dmkod', 'delta'):
                 flash(f'Заказ №{order_id} имеет статус "{order["status"]}" и не может быть отредактирован.', 'warning')
                 return redirect(url_for('.dashboard'))
 
@@ -638,7 +638,7 @@ def integration_panel():
     conn = get_db_connection()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT id, client_name, created_at, api_order_id, api_status FROM orders WHERE status = 'dmkod' ORDER BY id DESC")
+            cur.execute("SELECT id, client_name, created_at, api_order_id, api_status FROM orders WHERE status IN ('dmkod', 'delta') ORDER BY id DESC")
             orders = cur.fetchall()
 
             # Если заказ выбран, загружаем его полную информацию
@@ -1161,7 +1161,10 @@ def integration_panel():
 
                         user_logs.append(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
                         
-                        response = requests.post(full_url, headers=headers, json=payload, timeout=30)
+                        # РЕКОМЕНДАЦИЯ: Запускайте Gunicorn с увеличенным таймаутом, например:
+                        # gunicorn --workers 3 --timeout 300 'app:create_app()'
+                        # Увеличиваем таймаут для одного запроса, чтобы дать API больше времени на обработку.
+                        response = requests.post(full_url, headers=headers, json=payload, timeout=120)
                         
                         user_logs.append(f"  URL: {full_url}")
                         user_logs.append(f"  Тело: {json.dumps(payload)}")
@@ -1219,7 +1222,9 @@ def integration_panel():
                         payload = {"printrun_id": detail['api_id']}
                         user_logs.append(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
                         
-                        response = requests.post(full_url, headers=headers, json=payload, timeout=30)
+                        # Увеличиваем таймаут для одного запроса, чтобы дать API больше времени на обработку.
+                        # Общий таймаут Gunicorn также должен быть увеличен.
+                        response = requests.post(full_url, headers=headers, json=payload, timeout=120)
                         
                         user_logs.append(f"  URL: {full_url}")
                         user_logs.append(f"  Тело: {json.dumps(payload)}")
@@ -1299,6 +1304,13 @@ def integration_panel():
                     if not all_rows:
                         raise Exception("Не найдено корректных кодов для выгрузки.")
 
+                    # --- ИСПРАВЛЕНО: Обновляем статус заказа на 'delta' в той же транзакции ---
+                    with conn_local.cursor() as cur:
+                        cur.execute("UPDATE orders SET status = 'delta' WHERE id = %s", (selected_order_id,))
+                    conn_local.commit()
+                    user_logs.append(f"Статус заказа #{selected_order_id} обновлен на 'delta'.")
+                    flash(f"Статус заказа #{selected_order_id} обновлен на 'delta'.", "info")
+
                     df = pd.DataFrame(all_rows)
 
                     # Используем StringIO для сборки CSV в памяти,
@@ -1317,8 +1329,11 @@ def integration_panel():
                                      as_attachment=True,
                                      download_name=f'delta_export_order_{selected_order_id}.csv')
                 except Exception as e:
+                    if 'conn_local' in locals() and conn_local: conn_local.rollback()
                     flash(f'Ошибка при формировании отчета "Дельта": {e}', 'danger')
                     return redirect(url_for('.integration_panel', order_id=selected_order_id))
+                finally:
+                    if 'conn_local' in locals() and conn_local: conn_local.close()
 
         elif not action and selected_order_id:
              # Если просто выбрали заказ из списка, перенаправляем, чтобы URL был чистым
@@ -1368,7 +1383,7 @@ def admin():
                     pg.display_name as product_group_name
                 FROM orders o
                 LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
-                WHERE o.status = 'dmkod' ORDER BY o.id DESC
+                WHERE o.status IN ('dmkod', 'delta') ORDER BY o.id DESC
             """)
             orders = cur.fetchall()
     except Exception as e:

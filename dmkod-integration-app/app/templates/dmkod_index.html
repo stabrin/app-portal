@@ -37,7 +37,7 @@
                         <td>{{ order.notes|truncate(50) }}</td>
                         <td>{{ order.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
                         <td>
-                            {% if order.status == 'dmkod' %}
+                            {% if order.status in ['dmkod', 'delta'] %}
                             <a href="{{ url_for('dmkod_integration_app.edit_integration', order_id=order.id) }}" class="btn btn-sm btn-outline-primary">Редактировать</a>
                             {% endif %}
                         </td>
