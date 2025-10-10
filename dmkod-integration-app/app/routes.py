@@ -893,26 +893,29 @@ def integration_panel():
                     # Обновляем наш заказ, записывая статус
                     if response_data.get('code') == 'get_request':
                         with conn_local.cursor() as cur:
-                            cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,))
+                            cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,)) # Обновляем статус
                         conn_local.commit()
                         flash('Подпишите запрос на получение кодов. после получения кодов можно будет продолжить работу', 'success')
                         # Перенаправляем, чтобы обновить состояние кнопок
                         return redirect(url_for('.integration_panel', order_id=selected_order_id))
-
-                    api_response = {
-                        'status_code': response.status_code,
-                        'body': json.dumps(response_data, indent=2, ensure_ascii=False)
-                    }
+                    else:
+                        # Если API не вернуло ожидаемый код, выводим его ответ
+                        api_response = {
+                            'status_code': response.status_code,
+                            'body': json.dumps(response_data, indent=2, ensure_ascii=False)
+                        }
+                        flash('API не вернуло ожидаемый код "get_request". Статус заказа не изменен.', 'warning')
+                        return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
 
                 except Exception as e:
-                    if 'conn_local' in locals() and conn_local: conn_local.rollback()
+                    if conn_local: conn_local.rollback()
                     error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
                     api_response = {
                         'status_code': response.status_code if 'response' in locals() else 500,
                         'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
                     }
+                    return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
                 finally:
-                    if 'conn_local' in locals() and conn_local: conn_local.close()
             elif action == 'split_runs': # Полностью переписанная логика
                 access_token = session.get('api_access_token')
                 if not access_token:
