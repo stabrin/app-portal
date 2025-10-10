@@ -916,6 +916,7 @@ def integration_panel():
                     }
                     return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
                 finally:
+                    if conn_local: conn_local.close()
             elif action == 'split_runs': # Полностью переписанная логика
                 access_token = session.get('api_access_token')
                 if not access_token:
