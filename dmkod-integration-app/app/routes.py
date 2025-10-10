@@ -765,11 +765,11 @@ def integration_panel():
                 selected_order = cur.fetchone()
 
         action = request.form.get('action')
-        if not selected_order_id:
-            flash('Пожалуйста, сначала выберите заказ.', 'warning')
-            return redirect(url_for('.integration_panel'))
-
-        if action:
+        if action: # Все действия теперь внутри этого блока
+            if not selected_order_id:
+                flash('Пожалуйста, сначала выберите заказ.', 'warning')
+                return redirect(url_for('.integration_panel'))
+            
             if action == 'create_order':
                 access_token = session.get('api_access_token')
                 if not access_token:
@@ -1504,9 +1504,10 @@ def integration_panel():
                 finally:
                     if 'conn_local' in locals() and conn_local: conn_local.close()
 
-        elif not action and selected_order_id:
-             # Если просто выбрали заказ из списка, перенаправляем, чтобы URL был чистым
-             return redirect(url_for('.integration_panel', order_id=selected_order_id))
+        # Если это POST-запрос без действия (просто выбор заказа), перенаправляем на GET с параметром
+        elif request.method == 'POST' and not action and selected_order_id:
+            return redirect(url_for('.integration_panel', order_id=selected_order_id))
+
     except Exception as e:
         flash(f'Произошла критическая ошибка: {e}', 'danger')
         if conn: conn.rollback()
