@@ -878,22 +878,14 @@ def integration_panel():
                     
                     response_data = response.json()
 
-                    # Обновляем наш заказ, записывая статус
-                    if response_data.get('code') == 'get_request':
-                        with conn.cursor() as cur:
-                            cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,)) # Обновляем статус
-                        conn.commit()
-                        flash('Подпишите запрос на получение кодов. после получения кодов можно будет продолжить работу', 'success')
-                        # Перенаправляем, чтобы обновить состояние кнопок
-                        return redirect(url_for('.integration_panel', order_id=selected_order_id))
-                    else:
-                        # Если API не вернуло ожидаемый код, выводим его ответ
-                        api_response = {
-                            'status_code': response.status_code,
-                            'body': json.dumps(response_data, indent=2, ensure_ascii=False)
-                        }
-                        flash('API не вернуло ожидаемый код "get_request". Статус заказа не изменен.', 'warning')
-                        return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
+                    # --- ИСПРАВЛЕННАЯ ЛОГИКА ---
+                    # Обновляем статус заказа в любом случае, если запрос прошел успешно (статус 2xx)
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (selected_order_id,))
+                    conn.commit()
+                    flash('Запрос на получение кодов успешно отправлен. Статус заказа обновлен на "Запрос создан".', 'success')
+                    # Перенаправляем, чтобы обновить состояние кнопок
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
                 except Exception as e:
                     conn.rollback()
