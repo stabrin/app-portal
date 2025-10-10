@@ -34,6 +34,7 @@ def update_schema(conn):
     product_groups_table = 'dmkod_product_groups'
     aggregation_details_table = 'dmkod_aggregation_details'
     order_files_table = 'dmkod_order_files'
+    delta_result_table = 'delta_result'
 
     # Список команд для обновления схемы
     sql_commands = [
@@ -109,10 +110,24 @@ def update_schema(conn):
         ),
         sql.SQL("COMMENT ON TABLE {order_files} IS 'Оригинальные файлы заказов от клиентов для ДМкод';").format(order_files=sql.Identifier(order_files_table)),
 
-        # 5. Сброс счетчика SSCC для перехода на новую логику GCP.
+        # 5. Создание таблицы для результатов интеграции с "Дельта"
+        sql.SQL("""
+        CREATE TABLE IF NOT EXISTS {delta_table} (
+            id SERIAL PRIMARY KEY,
+            order_id INTEGER NOT NULL REFERENCES {orders_table}(id) ON DELETE CASCADE,
+            printrun_id INTEGER,
+            utilisation_upload_id INTEGER,
+            codes_json JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """).format(
+            delta_table=sql.Identifier(delta_result_table),
+            orders_table=sql.Identifier(orders_table)
+        ),
+        sql.SQL("COMMENT ON TABLE {delta_table} IS 'Результаты обработки для системы Дельта';").format(delta_table=sql.Identifier(delta_result_table)),
+
+        # 6. Сброс счетчика SSCC для перехода на новую логику GCP.
         # Устанавливаем начальное значение 1.
-        #sql.SQL("UPDATE system_counters SET current_value = 1 WHERE counter_name = 'sscc_id';"),
-        #sql.SQL("COMMENT ON TABLE system_counters IS 'Сброс счетчика sscc_id до 1 для новой логики GCP от 2025-09-29';"),
     ]
 
     try:

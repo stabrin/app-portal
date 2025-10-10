@@ -49,6 +49,32 @@
         <hr>
         {% endif %}
 
+        {# --- НОВЫЙ БЛОК: Форма для загрузки CSV-файла результатов из "Дельта" --- #}
+        {% if order.status == 'delta' %}
+        <div class="mb-4">
+            <h5>Загрузка CSV-файла результатов из "Дельта"</h5>
+            <p class="text-muted">
+                Загрузите CSV-файл с данными от "Дельта". Имя файла должно быть в формате <code>order_{{ order.id }}.csv</code>.
+                <br>Файл должен быть в кодировке UTF-8, с разделителем-табуляцией и заголовком.
+                <br>Обязательные колонки: <code>DataMatrix</code>, <code>Barcode</code>, <code>StartDate</code>, <code>EndDate</code>, <code>BoxSSCC</code>, <code>PaletSSCC</code>.
+            </p>
+            <form method="POST" action="{{ url_for('dmkod_integration_app.edit_integration', order_id=order.id) }}" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="upload_delta_csv">
+                
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-10">
+                        <input class="form-control" type="file" id="delta_csv_file" name="delta_csv_file" accept=".csv" required>
+                    </div>
+                    <div class="col-md-2 text-end">
+                        <button type="submit" class="btn btn-primary w-100"><i class="bi bi-upload"></i> Загрузить</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+        <hr>
+        {% endif %}
+
         <!-- Таблица с детализацией -->
         <div class="mb-4">
             <div class="d-flex justify-content-between align-items-center mb-3">

@@ -3,7 +3,7 @@ import requests
 import json
 from functools import wraps
 import logging
-import pandas as pd
+import pandas as pd # Уже импортирован
 import re
 from dateutil.relativedelta import relativedelta
 from flask import Blueprint, render_template, redirect, url_for, flash, request, session, Response, send_file
@@ -11,7 +11,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 from psycopg2 import sql
 from dateutil.relativedelta import relativedelta
 from psycopg2.extras import RealDictCursor
-from bcrypt import checkpw # Removed unused import of upsert_data_to_db
+from bcrypt import checkpw
 from io import BytesIO, StringIO
 
 from .db import get_db_connection
@@ -473,6 +473,124 @@ def edit_integration(order_id):
                         cur.execute(query, processed_values)
                     
                     flash(f'Изменения в {len(updates)} строках успешно сохранены.', 'success')
+
+                elif action == 'upload_delta_result':
+                    delta_file = request.files.get('delta_file')
+                    if not delta_file:
+                        flash('Файл с результатами от "Дельта" не был выбран.', 'danger')
+                    else:
+                        try:
+                            # Читаем содержимое файла
+                            file_content = delta_file.read()
+                            # Пытаемся декодировать как JSON
+                            codes_data = json.loads(file_content)
+
+                            # Получаем ID тиража и ID загрузки из формы
+                            printrun_id = request.form.get('printrun_id', type=int)
+                            utilisation_upload_id = request.form.get('utilisation_upload_id', type=int)
+
+                            # Сохраняем в новую таблицу delta_result
+                            cur.execute(
+                                """
+                                INSERT INTO delta_result (order_id, printrun_id, utilisation_upload_id, codes_json)
+                                VALUES (%s, %s, %s, %s)
+                                """,
+                                (order_id, printrun_id, utilisation_upload_id, json.dumps(codes_data))
+                            )
+                            flash('Результаты из "Дельта" успешно загружены и сохранены.', 'success')
+
+                        except json.JSONDecodeError:
+                            flash('Ошибка: загруженный файл не является корректным JSON.', 'danger')
+                        except Exception as e:
+                            # Откатываем транзакцию в случае другой ошибки
+                            conn.rollback()
+                            flash(f'Произошла ошибка при обработке файла: {e}', 'danger')
+
+                elif action == 'upload_delta_csv':
+                    delta_csv_file = request.files.get('delta_csv_file')
+                    if not delta_csv_file:
+                        flash('CSV-файл с результатами "Дельта" не был выбран.', 'danger')
+                        return redirect(url_for('.edit_integration', order_id=order_id))
+
+                    # 1. Валидация имени файла
+                    expected_filename_pattern = f"order_{order_id}.csv"
+                    if delta_csv_file.filename != expected_filename_pattern:
+                        flash(f'Ошибка: Имя файла должно быть "{expected_filename_pattern}", но получено "{delta_csv_file.filename}".', 'danger')
+                        return redirect(url_for('.edit_integration', order_id=order_id))
+
+                    try:
+                        # Читаем CSV-файл с помощью pandas
+                        # Используем BytesIO для обработки потока файла и указываем кодировку/разделитель
+                        file_content = delta_csv_file.read().decode('utf-8')
+                        df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str})
+
+                        # Проверяем наличие обязательных колонок
+                        required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
+                        if not all(col in df.columns for col in required_columns):
+                            flash(f'Ошибка: В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.', 'danger')
+                            return redirect(url_for('.edit_integration', order_id=order_id))
+
+                        # Преобразуем даты в нужный формат
+                        df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+                        df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+
+                        # Группируем данные по Barcode и StartDate
+                        grouped_data = df.groupby(['Barcode', 'StartDate'])
+
+                        inserted_count = 0
+                        for (barcode, start_date), group in grouped_data:
+                            # Получаем printrun_id из dmkod_aggregation_details
+                            cur.execute(
+                                """
+                                SELECT api_id FROM dmkod_aggregation_details
+                                WHERE order_id = %s AND gtin = %s
+                                LIMIT 1
+                                """,
+                                (order_id, barcode)
+                            )
+                            printrun_id_row = cur.fetchone()
+                            printrun_id = printrun_id_row[0] if printrun_id_row else None
+
+                            if printrun_id is None:
+                                flash(f'Предупреждение: Не найден printrun_id для Barcode "{barcode}" в заказе {order_id}. Данные для этой группы не будут сохранены.', 'warning')
+                                continue
+
+                            # Формируем JSON-объект
+                            include_codes = []
+                            for _, row in group.iterrows():
+                                # Удаляем символ GS (Group Separator, ASCII 29)
+                                cleaned_datamatrix = row['DataMatrix'].replace('\x1d', '')
+                                include_codes.append({"code": cleaned_datamatrix})
+
+                            json_data = {
+                                "include": include_codes,
+                                "attributes": {
+                                    "production_date": start_date,
+                                    "expiration_date": group['EndDate'].iloc[0] # Предполагаем, что EndDate одинаков для всей группы
+                                }
+                            }
+
+                            # Вставляем данные в delta_result
+                            cur.execute(
+                                """
+                                INSERT INTO delta_result (order_id, printrun_id, utilisation_upload_id, codes_json)
+                                VALUES (%s, %s, %s, %s)
+                                """,
+                                (order_id, printrun_id, None, json.dumps(json_data)) # utilisation_upload_id пока NULL
+                            )
+                            inserted_count += 1
+
+                        flash(f'Успешно загружено и обработано {inserted_count} групп данных из CSV-файла.', 'success')
+
+                    except pd.errors.EmptyDataError:
+                        flash('Ошибка: Загруженный CSV-файл пуст.', 'danger')
+                    except pd.errors.ParserError:
+                        flash('Ошибка: Не удалось разобрать CSV-файл. Проверьте формат (разделитель - табуляция, UTF-8).', 'danger')
+                    except UnicodeDecodeError:
+                        flash('Ошибка: Не удалось декодировать CSV-файл. Убедитесь, что он в кодировке UTF-8.', 'danger')
+                    except Exception as e:
+                        conn.rollback()
+                        flash(f'Произошла ошибка при обработке CSV-файла: {e}', 'danger')
 
             conn.commit()
             return redirect(url_for('.edit_integration', order_id=order_id))
