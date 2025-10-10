@@ -243,7 +243,7 @@ def order_details(order_id):
         return "Заказ не найден!", 404
 
     # --- НОВАЯ ЛОГИКА: Проверяем статус заказа ---
-    if order['status'] == 'dmkod':
+    if order['status'] in ['dmkod', 'delta']:
         # Если статус dmkod, получаем детализацию и проверяем наличие кодов
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
