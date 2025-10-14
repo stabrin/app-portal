@@ -110,11 +110,13 @@ def create_schema(conn):
             sscc VARCHAR(18) NOT NULL UNIQUE,
             owner VARCHAR(100) NOT NULL,
             level SMALLINT NOT NULL CHECK (level > 0),
-            parent_id INTEGER REFERENCES {parent_table}(id) ON DELETE SET NULL,
+            parent_id INTEGER REFERENCES {parent_table}(id) ON DELETE SET NULL, -- ID родительской упаковки
+            parent_sscc VARCHAR(18), -- Временное поле для SSCC родителя при импорте
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         """).format(table=sql.Identifier(packages_table), parent_table=sql.Identifier(packages_table)),
         sql.SQL("COMMENT ON TABLE {table} IS 'Транспортные упаковки всех уровней (короба, паллеты)';").format(table=sql.Identifier(packages_table)),
+        sql.SQL("COMMENT ON COLUMN {table}.parent_sscc IS 'Временное поле для SSCC родителя при импорте из внешних систем';").format(table=sql.Identifier(packages_table)),
         sql.SQL("""
         CREATE INDEX IF NOT EXISTS {index_name} ON {table}(parent_id);
         """).format(

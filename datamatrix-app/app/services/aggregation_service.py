@@ -546,6 +546,25 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
             # и не должен сохраняться в таблицу 'items'.
             if 'aggregation_level' in items_df.columns:
                 items_df_to_save = items_df.drop(columns=['aggregation_level'])
+
+            # --- НОВЫЙ БЛОК: Связывание кодов с упаковками для delta-заказов ---
+            orders_table_for_status = os.getenv('TABLE_ORDERS')
+            cur.execute(f"SELECT status FROM {orders_table_for_status} WHERE id = %s", (order_id,))
+            order_status = cur.fetchone()['status']
+
+            if order_status == 'delta':
+                logs.append("\nСтатус заказа 'delta'. Запускаю связывание кодов с упаковками...")
+                # 1. Получаем все SSCC для этого заказа из 'packages'
+                packages_table = os.getenv('TABLE_PACKAGES')
+                cur.execute(f"SELECT id, sscc FROM {packages_table} WHERE owner = 'delta'")
+                sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+
+                # 2. Обновляем package_id в items_df_to_save
+                # Для этого нам нужен доступ к BoxSSCC, который есть в исходном items_df
+                items_df_to_save['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                updated_count = items_df_to_save['package_id'].notna().sum()
+                logs.append(f"Успешно связано {updated_count} кодов с коробами.")
+
             else:
                 items_df_to_save = items_df
             upsert_data_to_db(cur, 'TABLE_ITEMS', items_df_to_save, 'datamatrix')

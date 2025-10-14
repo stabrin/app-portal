@@ -58,7 +58,7 @@
 
                     {# --- НОВАЯ КНОПКА: ВЫГРУЗКА В ФОРМАТЕ ДЕЛЬТА --- #}
                     <button type="submit" name="action" value="export_delta" class="btn btn-info"
-                            {% if not selected_order or selected_order.api_status not in ['Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен'] %}disabled{% endif %}
+                            {% if not selected_order or (selected_order.api_status not in ['Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен'] and selected_order.status != 'delta') %}disabled{% endif %}
                             title="Выгрузить CSV-файл с кодами и сроком годности для системы 'Дельта'">
                         <i class="bi bi-filetype-csv"></i> Выгрузить в формате Дельта
                     </button>

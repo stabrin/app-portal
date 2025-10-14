@@ -7,6 +7,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import date
 from bcrypt import checkpw
+import math
 
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from flask_wtf import FlaskForm
@@ -104,13 +105,27 @@ def logout():
 @login_required
 def index():
     """Главная страница (Дашборд)."""
+    page = request.args.get('page', 1, type=int)
+    PER_PAGE = 10
+    offset = (page - 1) * PER_PAGE
+
     conn = get_db_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         orders_table = os.getenv('TABLE_ORDERS', 'orders')
-        cur.execute(f"SELECT * FROM {orders_table} ORDER BY id DESC LIMIT 10")
+        
+        # Запрос для получения заказов для текущей страницы
+        cur.execute(
+            f"SELECT * FROM {orders_table} ORDER BY id DESC LIMIT %s OFFSET %s",
+            (PER_PAGE, offset)
+        )
         orders = cur.fetchall()
+
+        # Запрос для получения общего количества заказов
+        cur.execute(f"SELECT COUNT(id) AS total FROM {orders_table}")
+        total_orders = cur.fetchone()['total']
     conn.close()
-    return render_template('index.html', orders=orders, title="Панель управления")
+    total_pages = math.ceil(total_orders / PER_PAGE)
+    return render_template('index.html', orders=orders, title="Панель управления", current_page=page, total_pages=total_pages)
 
 # --- Раздел Заказы ---
 

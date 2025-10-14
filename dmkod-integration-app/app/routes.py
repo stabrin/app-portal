@@ -514,8 +514,8 @@ def edit_integration(order_id):
 
                     # 1. Валидация имени файла
                     expected_filename_pattern = f"order_{order_id}.csv"
-                    if delta_csv_file.filename != expected_filename_pattern:
-                        flash(f'Ошибка: Имя файла должно быть "{expected_filename_pattern}", но получено "{delta_csv_file.filename}".', 'danger')
+                    if expected_filename_pattern not in delta_csv_file.filename:
+                        flash(f'Ошибка: Имя файла должно содержать "{expected_filename_pattern}", но получено "{delta_csv_file.filename}".', 'danger')
                         return redirect(url_for('.edit_integration', order_id=order_id))
 
                     try:
@@ -523,6 +523,7 @@ def edit_integration(order_id):
                         # Используем BytesIO для обработки потока файла и указываем кодировку/разделитель
                         file_content = delta_csv_file.read().decode('utf-8')
                         df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str})
+                        df.columns = df.columns.str.strip() # Очищаем пробелы в заголовках
 
                         # Проверяем наличие обязательных колонок
                         required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
@@ -533,6 +534,93 @@ def edit_integration(order_id):
                         # Преобразуем даты в нужный формат
                         df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
                         df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+
+                        # --- НОВЫЙ БЛОК: Создание записей в 'packages' ---
+                        # 1. Собираем все уникальные SSCC коробов и паллет
+                        unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
+                        unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
+
+                        packages_to_insert = []
+                        # --- ИСПРАВЛЕНИЕ: Добавляем 'level' сразу при создании ---
+                        if not unique_boxes.empty:
+                            unique_boxes_with_level = unique_boxes.copy()
+                            unique_boxes_with_level['level'] = 1
+                            packages_to_insert.append(unique_boxes_with_level)
+
+                        if not unique_pallets.empty:
+                            unique_pallets_with_level = unique_pallets.copy()
+                            unique_pallets_with_level['level'] = 2
+                            packages_to_insert.append(unique_pallets_with_level)
+                        
+                        if packages_to_insert:
+                            all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
+                            all_packages_df['owner'] = 'delta' # Указываем владельца
+                            all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
+
+                            # 2. Определяем связи "короб-паллета"
+                            box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
+                            
+                            # Создаем словарь {pallet_sscc: pallet_id}
+                            # Мы не знаем ID паллет заранее, поэтому используем сами SSCC как временные ID
+                            
+                            # Создаем словарь {box_sscc: pallet_sscc}
+                            box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
+
+                            # Функция для поиска parent_id (SSCC паллеты)
+                            def find_parent_sscc(row):
+                                if row['level'] == 1:
+                                    return box_to_pallet_sscc_map.get(row['sscc'])
+                                return None
+
+                            all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
+
+                            # 3. Вставляем в базу 'packages'
+                            packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
+                            
+                            # Сначала вставляем паллеты (уровень 2), чтобы они уже были в БД
+                            pallets_df = all_packages_df[all_packages_df['level'] == 2]
+                            if not pallets_df.empty:
+                                from .utils import upsert_data_to_db # Импортируем утилиту
+                                upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc')
+                                flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
+
+                            # Теперь вставляем короба (уровень 1), указывая parent_sscc
+                            boxes_df = all_packages_df[all_packages_df['level'] == 1]
+                            if not boxes_df.empty:
+                                from .utils import upsert_data_to_db
+                                # Вставляем короба с parent_sscc, передавая имя переменной окружения
+                                upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc')
+                                flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
+                            
+                            # --- НОВЫЙ БЛОК: Обновление parent_id ---
+                            # После того как все короба и паллеты вставлены,
+                            # мы можем обновить parent_id для коробов, используя parent_sscc.
+                            update_parent_id_query = sql.SQL("""
+                                UPDATE {packages_table} p_child
+                                SET parent_id = p_parent.id
+                                FROM {packages_table} p_parent
+                                WHERE p_child.parent_sscc = p_parent.sscc
+                                  AND p_child.parent_sscc IS NOT NULL
+                                  AND p_child.parent_id IS NULL;
+                            """).format(packages_table=sql.Identifier(packages_table_name))
+                            
+                            cur.execute(update_parent_id_query)
+                            updated_parents_count = cur.rowcount
+                            flash(f"Связи 'короб-паллета' обновлены для {updated_parents_count} записей.", 'info')
+
+                            # Очищаем временное поле parent_sscc
+                            if updated_parents_count > 0:
+                                cleanup_query = sql.SQL("""
+                                    UPDATE {packages_table} SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;
+                                """).format(packages_table=sql.Identifier(packages_table_name))
+                                cur.execute(cleanup_query)
+                                flash("Временные данные по связям очищены.", 'info')
+
+                            # --- КОНЕЦ НОВОГО БЛОКА ---
+
+                            conn.commit() # Коммитим создание упаковок
+
+                        # --- КОНЕЦ НОВОГО БЛОКА ---
 
                         # Группируем данные по Barcode и StartDate
                         grouped_data = df.groupby(['Barcode', 'StartDate'])
@@ -1196,10 +1284,13 @@ def integration_panel():
                     if sanitized_client_name:
                         zip_download_name_parts.append(sanitized_client_name)
                     final_zip_download_name = "_".join(zip_download_name_parts) + ".zip"
+                    
                     flash('Коды успешно скачаны и упакованы в ZIP-архив.', 'success')
-                    # Отправляем ZIP-файл пользователю
-                    return send_file(zip_buffer, mimetype='application/zip', as_attachment=True, download_name=final_zip_download_name)
-
+                    
+                    # Вместо прямой отправки файла, сохраняем его в сессии и делаем редирект
+                    session['download_file'] = {'data': zip_buffer.getvalue(), 'name': final_zip_download_name, 'mimetype': 'application/zip'}
+                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
+                    
                 except Exception as e:
                     if 'conn_local' in locals() and conn_local: conn_local.rollback() # Откатываем транзакцию при ошибке
                     error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
@@ -1266,6 +1357,11 @@ def integration_panel():
                                 updated_count += 1
                         
                         conn_local.commit()
+                        # --- ДОБАВЛЕНО: Обновляем api_status заказа ---
+                        with conn_local.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (selected_order_id,))
+                        conn_local.commit()
+                        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
                         flash(f'Успешно обработано {updated_count} записей. Сведения подготовлены.', 'success')
                         return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
@@ -1505,6 +1601,16 @@ def integration_panel():
         if conn: conn.rollback()
         orders = [] # Очищаем список заказов в случае ошибки
     finally:
+        # Проверяем, есть ли файл для скачивания в сессии
+        if 'download_file' in session:
+            file_info = session.pop('download_file')
+            if conn: conn.close() # Закрываем соединение перед отправкой файла
+            return send_file(
+                BytesIO(file_info['data']),
+                mimetype=file_info['mimetype'],
+                as_attachment=True,
+                download_name=file_info['name']
+            )
         if conn: conn.close()
 
     return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
