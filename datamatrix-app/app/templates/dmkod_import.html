@@ -19,14 +19,22 @@
             <p><strong>Комментарий к заказу:</strong> {{ order.notes }}</p>
         {% endif %}
 
-        {% if not details_with_codes %}
+        {# --- НОВАЯ ЛОГИКА ОТОБРАЖЕНИЯ --- #}
+        {% if order.status == 'delta' %}
+            <div class="alert alert-success" role="alert">
+                <h4 class="alert-heading">Данные уже в системе</h4>
+                <p>Этот заказ был обработан через интеграцию с "Дельта". Все коды маркировки и информация об упаковках уже загружены в систему.</p>
+                <hr>
+                <p class="mb-0">Вы можете перейти к <a href="{{ url_for('datamatrix_app.order_details', order_id=order.id) }}" class="alert-link">деталям заказа</a> для просмотра или формирования отчетов.</p>
+            </div>
+        {% elif not details_with_codes %}
             <div class="alert alert-warning" role="alert">
                 <h4 class="alert-heading">Ожидание кодов</h4>
                 <p>По данному заказу коды еще не получены из API ДМкод.</p>
                 <hr>
                 <p class="mb-0">Пожалуйста, вернитесь в приложение "ДМкод интеграция", выберите этот заказ и выполните действие "Скачать коды".</p>
             </div>
-        {% else %}
+        {% else %} {# Этот блок теперь выполняется только для статуса 'dmkod' #}
             <p>Для этого заказа были получены коды маркировки. Вы можете загрузить их в систему для дальнейшей агрегации.</p>
             
             <table class="table table-bordered table-striped">
@@ -49,15 +57,8 @@
             </table>
 
             <form method="POST" action="{{ url_for('datamatrix_app.order_details', order_id=order.id) }}" id="aggregation-form">
-                {# --- ИЗМЕНЕНИЕ: Проверяем статус заказа --- #}
-                {% if order.status == 'delta' %}
-                    {# Если статус 'delta', агрегация не нужна. Отправляем форму с режимом 'none' #}
-                    <input type="hidden" name="action" value="import_from_dmkod">
-                    <input type="hidden" name="aggregation_mode" value="none">
-                    <div class="alert alert-info mt-4">
-                        <strong>Внимание!</strong> Этот заказ обработан в системе "Дельта", поэтому коды будут загружены без дополнительной агрегации.
-                    </div>
-                {% else %}
+                {# Этот блок теперь всегда для статуса 'dmkod' #}
+
                     {# Для обычных заказов ('dmkod') показываем опции агрегации #}
                     <input type="hidden" name="action" value="import_from_dmkod">
                     <hr class="my-4">
@@ -89,7 +90,6 @@
                             <input type="number" class="form-control" name="level3_qty" id="level3_qty" min="1">
                         </div>
                     </div>
-                {% endif %}
 
                 <button type="submit" class="btn btn-primary btn-lg"><i class="bi bi-database-down"></i> Загрузить из БД и агрегировать</button>
             </form>

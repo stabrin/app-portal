@@ -565,6 +565,7 @@ def edit_integration(order_id):
                     if packages_to_insert:
                         all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
                         all_packages_df['owner'] = 'delta' # Указываем владельца
+                        all_packages_df['order_id'] = order_id
                         logging.info(f"[Delta CSV] Всего подготовлено к обработке {len(all_packages_df)} упаковок (короба и паллеты).")
                         all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
 
@@ -595,7 +596,7 @@ def edit_integration(order_id):
                             logging.info(f"[Delta CSV] DataFrame паллет для вставки (первые 5 строк):\n{pallets_df.head().to_string()}")
                             logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
                             # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                            upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc')
+                            upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level', 'order_id']], 'sscc')
                             logging.info(f"[Delta CSV] Запрос на вставку паллет выполнен. Затронуто строк: {cur.rowcount}.")
                             flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
                             logging.info(f"[Delta CSV] Вставка паллет завершена.")
@@ -608,7 +609,7 @@ def edit_integration(order_id):
                             logging.info(f"[Delta CSV] DataFrame коробов для вставки (первые 5 строк):\n{boxes_df.head().to_string()}")
                             logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
                             # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                            upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc')
+                            upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc', 'order_id']], 'sscc')
                             logging.info(f"[Delta CSV] Запрос на вставку коробов выполнен. Затронуто строк: {cur.rowcount}.")
                             flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
                             logging.info(f"[Delta CSV] Вставка коробов завершена.")
@@ -640,6 +641,41 @@ def edit_integration(order_id):
                             flash("Временные данные по связям очищены.", 'info')
 
                     # --- КОНЕЦ НОВОГО БЛОКА ---
+
+                    # --- НОВЫЙ БЛОК: Создание и загрузка записей в 'items' ---
+                    logging.info("[Delta CSV] Начинаю подготовку данных для таблицы 'items'.")
+                    # 1. Получаем карту {sscc: id} для только что созданных коробов
+                    box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
+                    cur.execute(
+                        sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s AND order_id = %s").format(
+                            table=sql.Identifier(packages_table_name)
+                        ),
+                        (box_ssccs_tuple, order_id)
+                    )
+                    sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+                    logging.info(f"[Delta CSV] Создана карта SSCC->ID для {len(sscc_to_id_map)} коробов.")
+
+                    # 2. Создаем DataFrame для 'items'
+                    items_df = df[['DataMatrix', 'Barcode', 'BoxSSCC']].copy()
+                    items_df.rename(columns={'DataMatrix': 'datamatrix', 'Barcode': 'gtin'}, inplace=True)
+                    items_df['order_id'] = order_id
+                    items_df['serial'] = items_df['datamatrix'].str[18:31] # Пример извлечения серийного номера
+                    items_df['crypto_part_93'] = items_df['datamatrix'].str[-4:] # Пример извлечения криптохвоста
+                    
+                    # 3. Связываем с 'packages' через package_id
+                    items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                    
+                    # 4. Убираем временные колонки и загружаем в БД
+                    items_to_upload = items_df[['datamatrix', 'gtin', 'serial', 'crypto_part_93', 'order_id', 'package_id']]
+                    
+                    # Проверка на дубликаты в 'items' перед вставкой
+                    from .utils import upsert_data_to_db
+                    upsert_data_to_db(cur, 'TABLE_ITEMS', items_to_upload, 'datamatrix')
+                    
+                    inserted_items_count = cur.rowcount
+                    linked_items_count = items_to_upload['package_id'].notna().sum()
+                    logging.info(f"[Delta CSV] Загружено {inserted_items_count} записей в 'items'. Из них {linked_items_count} связано с коробами.")
+                    flash(f"Загружено {inserted_items_count} кодов маркировки в систему. {linked_items_count} из них связано с коробами.", 'success')
 
                     # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
                     # Группируем данные по коробам и паллетам для создания JSON
