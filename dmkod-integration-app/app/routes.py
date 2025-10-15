@@ -663,6 +663,10 @@ def edit_integration(order_id):
                     
                     # 3. Связываем с 'packages' через package_id
                     items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+
+                    # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None перед загрузкой в БД ---
+                    # Это предотвращает ошибку 'integer out of range' для кодов без короба.
+                    items_df['package_id'] = items_df['package_id'].astype('object').where(items_df['package_id'].notna(), None)
                     
                     # 4. Убираем временные колонки и загружаем в БД
                     items_to_upload = items_df[['datamatrix', 'gtin', 'serial', 'crypto_part_93', 'order_id', 'package_id']]
