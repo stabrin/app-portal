@@ -594,6 +594,7 @@ def edit_integration(order_id):
                                 logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
                                 generated_sql = upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc', return_sql=True)
                                 logging.info(f"[Delta CSV] SQL для вставки паллет: {generated_sql}")
+                                cur.execute(generated_sql) # ВЫПОЛНЯЕМ СГЕНЕРИРОВАННЫЙ SQL
                                 flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
                                 logging.info(f"[Delta CSV] Вставка паллет завершена.")
 
@@ -606,6 +607,7 @@ def edit_integration(order_id):
                                 logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
                                 generated_sql = upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc', return_sql=True)
                                 logging.info(f"[Delta CSV] SQL для вставки коробов: {generated_sql}")
+                                cur.execute(generated_sql) # ВЫПОЛНЯЕМ СГЕНЕРИРОВАННЫЙ SQL
                                 flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
                                 logging.info(f"[Delta CSV] Вставка коробов завершена.")
                             
