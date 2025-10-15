@@ -388,8 +388,8 @@ def edit_integration(order_id):
     try:
         if request.method == 'POST':
             action = request.form.get('action')
-            
-            with conn.cursor() as cur:
+
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 if action == 'delete_details':
                     cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
                     flash('Все записи детализации для этого заказа были удалены.', 'success')
