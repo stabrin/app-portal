@@ -5,6 +5,7 @@ from functools import wraps
 import logging
 import pandas as pd # Уже импортирован
 import re
+import math
 from dateutil.relativedelta import relativedelta
 from flask import Blueprint, render_template, redirect, url_for, flash, request, session, Response, send_file
 from flask_login import login_user, logout_user, login_required, current_user
@@ -165,21 +166,36 @@ def index():
 @login_required
 @api_token_required
 def dashboard():
+    page = request.args.get('page', 1, type=int)
+    PER_PAGE = 10
+    offset = (page - 1) * PER_PAGE
+
     conn = get_db_connection()
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
-        # Используем JOIN для получения названия товарной группы
+        # Запрос для получения заказов для текущей страницы
         cur.execute("""
             SELECT 
                 o.id, o.client_name, o.status, o.notes, o.created_at,
                 pg.display_name as product_group_name
             FROM orders o
             LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
-            ORDER BY o.id DESC 
-            LIMIT 20
-        """)
+            ORDER BY o.id DESC
+            LIMIT %s OFFSET %s
+        """, (PER_PAGE, offset))
         orders = cur.fetchall()
+
+        # Запрос для получения общего количества заказов
+        cur.execute("SELECT COUNT(id) AS total FROM orders")
+        total_orders = cur.fetchone()['total']
+
     conn.close()
-    return render_template('dmkod_index.html', orders=orders, title="Интеграция с ДМкод")
+    total_pages = math.ceil(total_orders / PER_PAGE)
+
+    return render_template('dmkod_index.html', 
+                           orders=orders, 
+                           title="Интеграция с ДМкод",
+                           current_page=page, 
+                           total_pages=total_pages)
 
 
 # 4. Новый роут для справочника
@@ -707,10 +723,11 @@ def edit_integration(order_id):
                     from .utils import upsert_data_to_db
                     upsert_data_to_db(cur, 'TABLE_ITEMS', items_to_upload, 'datamatrix')
                     
-                    inserted_items_count = cur.rowcount
-                    linked_items_count = items_to_upload['package_id'].notna().sum()
-                    logging.info(f"[Delta CSV] Загружено {inserted_items_count} записей в 'items'. Из них {linked_items_count} связано с коробами.")
-                    flash(f"Загружено {inserted_items_count} кодов маркировки в систему. {linked_items_count} из них связано с коробами.", 'success')
+                    total_codes_processed = len(items_to_upload)
+                    unlinked_codes_count = items_to_upload['package_id'].isna().sum()
+                    
+                    logging.info(f"[Delta CSV] Всего обработано {total_codes_processed} кодов. Из них не связано с коробами: {unlinked_codes_count}.")
+                    flash(f"Всего в систему загружено {total_codes_processed} кодов. Из них не связано с коробами: {unlinked_codes_count} шт.", 'success')
 
                     # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
                     # Группируем данные по коробам и паллетам для создания JSON
