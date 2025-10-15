@@ -739,10 +739,8 @@ def edit_integration(order_id):
                     # Группируем коды по gtin и дате производства
                     grouped_for_api = df_for_json.groupby(['gtin', 'production_date'])['DataMatrix'].apply(list).reset_index()
                     
-                    # Формируем JSON-структуру, как ожидает API
-                    # Для каждой группы создаем отдельную запись в delta_result
-                    records_to_insert = []
-                    for _, row in grouped_for_api.iterrows():
+                    # --- НОВАЯ ЛОГИКА: Формируем DataFrame для upsert ---
+                    def create_payload(row):
                         payload = {
                             "utilisation_type": "SHIPMENT",
                             "utilisation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
@@ -751,9 +749,18 @@ def edit_integration(order_id):
                             },
                             "codes": row['DataMatrix']
                         }
-                        records_to_insert.append((order_id, json.dumps(payload)))
+                        return json.dumps(payload)
 
-                    cur.executemany("INSERT INTO delta_result (order_id, codes_json) VALUES (%s, %s)", records_to_insert)
+                    grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
+                    grouped_for_api['order_id'] = order_id
+                    
+                    # Выбираем колонки для загрузки
+                    delta_result_df = grouped_for_api[['order_id', 'gtin', 'production_date', 'codes_json']]
+                    
+                    # Используем upsert для атомарного добавления/обновления
+                    from .utils import upsert_data_to_db
+                    upsert_data_to_db(cur, 'TABLE_DELTA_RESULT', delta_result_df, ['order_id', 'gtin', 'production_date'])
+
                     flash('Результаты из CSV-файла "Дельта" успешно сохранены для дальнейшей отправки в API.', 'success')
 
             conn.commit()
