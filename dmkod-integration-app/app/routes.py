@@ -641,9 +641,25 @@ def edit_integration(order_id):
 
                     # --- КОНЕЦ НОВОГО БЛОКА ---
 
-                    # --- ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ОТЛАДКИ АГРЕГАЦИИ ---
-                    # Блок обработки кодов маркировки и сохранения в delta_result.
-                    flash('Обработка кодов маркировки для таблицы `delta_result` временно отключена для отладки.', 'info')
+                    # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
+                    # Группируем данные по коробам и паллетам для создания JSON
+                    grouped = df.groupby(['PaletSSCC', 'BoxSSCC'])['DataMatrix'].apply(list).reset_index()
+                    
+                    # Формируем JSON-структуру, как ожидает API
+                    utilisation_payload = {
+                        "utilisation_type": "SHIPMENT",
+                        "utilisation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
+                        "containers": [
+                            {
+                                "container_id": pallet,
+                                "child_containers": [
+                                    {"container_id": box, "codes": codes} for _, box, codes in grouped[grouped['PaletSSCC'] == pallet].itertuples()
+                                ]
+                            } for pallet in grouped['PaletSSCC'].unique()
+                        ]
+                    }
+                    cur.execute("INSERT INTO delta_result (order_id, codes_json) VALUES (%s, %s)", (order_id, json.dumps(utilisation_payload)))
+                    flash('Результаты из CSV-файла "Дельта" успешно сохранены для дальнейшей отправки в API.', 'success')
 
             conn.commit()
             return redirect(url_for('.edit_integration', order_id=order_id))
@@ -1343,7 +1359,7 @@ def integration_panel():
                 user_logs = []
                 try:
                     conn_local = get_db_connection()
-                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                    with conn_local.cursor() as cur:
                         # Получаем все необходимые данные одним запросом, объединяя таблицы
                         cur.execute(
                             """
@@ -1529,7 +1545,7 @@ def integration_panel():
                     # --- ИСПРАВЛЕНО: Обновляем статус заказа на 'delta' в той же транзакции ---
                     with conn_local.cursor() as cur:
                         cur.execute("UPDATE orders SET status = 'delta' WHERE id = %s", (selected_order_id,))
-                    conn_local.commit()
+                        conn_local.commit()
                     user_logs.append(f"Статус заказа #{selected_order_id} обновлен на 'delta'.")
                     flash(f"Статус заказа #{selected_order_id} обновлен на 'delta'.", "info")
 

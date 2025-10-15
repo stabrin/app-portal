@@ -482,7 +482,7 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
         logs.append("Проверяю, не были ли эти коды обработаны ранее...")
 
         # --- Дальнейшая логика идентична run_aggregation_process ---
-        with conn.cursor() as cur:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # Проверка на дубликаты
             dm_to_check = tuple(items_df['datamatrix'].unique())
             items_table = os.getenv('TABLE_ITEMS')
@@ -548,7 +548,7 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
                 items_df_to_save = items_df.drop(columns=['aggregation_level'])
 
             # --- НОВЫЙ БЛОК: Связывание кодов с упаковками для delta-заказов ---
-            orders_table_for_status = os.getenv('TABLE_ORDERS')
+            orders_table_for_status = os.getenv('TABLE_ORDERS', 'orders')
             cur.execute(f"SELECT status FROM {orders_table_for_status} WHERE id = %s", (order_id,))
             order_status = cur.fetchone()['status']
 
@@ -556,7 +556,7 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
                 logs.append("\nСтатус заказа 'delta'. Запускаю связывание кодов с упаковками...")
                 # 1. Получаем все SSCC для этого заказа из 'packages'
                 packages_table = os.getenv('TABLE_PACKAGES')
-                cur.execute(f"SELECT id, sscc FROM {packages_table} WHERE owner = 'delta'")
+                cur.execute(f"SELECT id, sscc FROM {packages_table} WHERE owner = 'delta' AND order_id = %s", (order_id,))
                 sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
 
                 # 2. Обновляем package_id в items_df_to_save
