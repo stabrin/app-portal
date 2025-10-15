@@ -764,7 +764,8 @@ def edit_integration(order_id):
                                 "production_date": str(row['production_date']),
                                 "expiration_date": str(row['expiration_date'])
                             },
-                            "codes": row['DataMatrix']
+                            # --- ИСПРАВЛЕНО: Убираем спецсимволы GS из кодов ---
+                            "codes": [code.replace(GS_SEPARATOR, '') for code in row['DataMatrix']]
                         }
                         return json.dumps(payload)
 
