@@ -499,8 +499,8 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
             unique_gtins_in_upload = items_df['gtin'].unique()
             products_table = os.getenv('TABLE_PRODUCTS')
             cur.execute(f"SELECT gtin FROM {products_table} WHERE gtin IN %s", (tuple(unique_gtins_in_upload),))
-            existing_gtins = {row[0] for row in cur.fetchall()}
-            new_gtins = [gtin for gtin in unique_gtins_in_upload if gtin not in existing_gtins]
+            existing_gtins_from_db = {row['gtin'] for row in cur.fetchall()}
+            new_gtins = [gtin for gtin in unique_gtins_in_upload if gtin not in existing_gtins_from_db]
             if new_gtins:
                 logs.append(f"Найдено {len(new_gtins)} новых GTIN. Создаю для них заглушки...")
                 new_products_df = pd.DataFrame([{'gtin': gtin, 'name': f'Товар (GTIN: {gtin})'} for gtin in new_gtins])
