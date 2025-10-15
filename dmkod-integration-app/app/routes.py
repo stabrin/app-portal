@@ -759,13 +759,14 @@ def edit_integration(order_id):
 
                     # 4. Формируем DataFrame для upsert
                     def create_payload(row):
+                        # --- ИЗМЕНЕНО: Формируем структуру JSON согласно новому требованию ---
+                        cleaned_codes = [code.replace(GS_SEPARATOR, '') for code in row['DataMatrix']]
                         payload = {
+                            "include": [{"code": c} for c in cleaned_codes],
                             "attributes": {
                                 "production_date": str(row['production_date']),
                                 "expiration_date": str(row['expiration_date'])
-                            },
-                            # --- ИСПРАВЛЕНО: Убираем спецсимволы GS из кодов ---
-                            "codes": [code.replace(GS_SEPARATOR, '') for code in row['DataMatrix']]
+                            }
                         }
                         return json.dumps(payload)
 
