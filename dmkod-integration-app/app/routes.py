@@ -562,6 +562,9 @@ def edit_integration(order_id):
                     if packages_to_insert:
                         all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
                         all_packages_df['owner'] = 'delta' # Указываем владельца
+                        # --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Принудительно приводим SSCC к строке ПОСЛЕ конкатенации ---
+                        # Это предотвращает преобразование SSCC в числовой формат (float) из-за особенностей pandas.
+                        all_packages_df['sscc'] = all_packages_df['sscc'].astype(str)
                         logging.info(f"[Delta CSV] Всего подготовлено к обработке {len(all_packages_df)} упаковок (короба и паллеты).")
                         all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
 
