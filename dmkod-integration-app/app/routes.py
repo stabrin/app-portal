@@ -714,22 +714,29 @@ def edit_integration(order_id):
 
                     # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
                     # Группируем данные по коробам и паллетам для создания JSON
-                    grouped = df.groupby(['PaletSSCC', 'BoxSSCC'])['DataMatrix'].apply(list).reset_index()
+                    # --- ИЗМЕНЕНО: Группируем по GTIN и дате производства, как требует API ---
+                    df_for_json = df.copy()
+                    # Переименовываем колонки для удобства
+                    df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date'}, inplace=True)
+                    
+                    # Группируем коды по gtin и дате производства
+                    grouped_for_api = df_for_json.groupby(['gtin', 'production_date'])['DataMatrix'].apply(list).reset_index()
                     
                     # Формируем JSON-структуру, как ожидает API
-                    utilisation_payload = {
-                        "utilisation_type": "SHIPMENT",
-                        "utilisation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
-                        "containers": [
-                            {
-                                "container_id": pallet,
-                                "child_containers": [
-                                    {"container_id": box, "codes": codes} for _, box, codes in grouped[grouped['PaletSSCC'] == pallet].itertuples()
-                                ]
-                            } for pallet in grouped['PaletSSCC'].unique()
-                        ]
-                    }
-                    cur.execute("INSERT INTO delta_result (order_id, codes_json) VALUES (%s, %s)", (order_id, json.dumps(utilisation_payload)))
+                    # Для каждой группы создаем отдельную запись в delta_result
+                    records_to_insert = []
+                    for _, row in grouped_for_api.iterrows():
+                        payload = {
+                            "utilisation_type": "SHIPMENT",
+                            "utilisation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
+                            "attributes": {
+                                "production_date": row['production_date']
+                            },
+                            "codes": row['DataMatrix']
+                        }
+                        records_to_insert.append((order_id, json.dumps(payload)))
+
+                    cur.executemany("INSERT INTO delta_result (order_id, codes_json) VALUES (%s, %s)", records_to_insert)
                     flash('Результаты из CSV-файла "Дельта" успешно сохранены для дальнейшей отправки в API.', 'success')
 
             conn.commit()
