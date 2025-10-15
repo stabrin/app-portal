@@ -760,8 +760,6 @@ def edit_integration(order_id):
                     # 4. Формируем DataFrame для upsert
                     def create_payload(row):
                         payload = {
-                            "utilisation_type": "SHIPMENT",
-                            "utilisation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
                             "attributes": {
                                 "production_date": str(row['production_date']),
                                 "expiration_date": str(row['expiration_date'])
