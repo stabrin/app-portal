@@ -624,8 +624,6 @@ def edit_integration(order_id):
                                 cur.execute(cleanup_query)
                                 flash("Временные данные по связям очищены.", 'info')
 
-                            # --- КОНЕЦ НОВОГО БЛОКА ---
-
                             conn.commit() # Коммитим создание упаковок
 
                         # --- КОНЕЦ НОВОГО БЛОКА ---
