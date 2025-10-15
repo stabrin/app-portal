@@ -522,7 +522,11 @@ def edit_integration(order_id):
                     # Читаем CSV-файл с помощью pandas
                     # Используем BytesIO для обработки потока файла и указываем кодировку/разделитель
                     file_content = delta_csv_file.read().decode('utf-8')
-                    df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str})
+                    # --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Сразу указываем pandas читать SSCC как строки ---
+                    # Это предотвращает их автоматическое преобразование в числа (float) и потерю точности.
+                    df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str, 
+                                                                              'BoxSSCC': str, 
+                                                                              'PaletSSCC': str})
                     df.columns = df.columns.str.strip() # Очищаем пробелы в заголовках
 
                     # Проверяем наличие обязательных колонок
@@ -533,10 +537,9 @@ def edit_integration(order_id):
                     
                     # --- ИСПРАВЛЕННЫЙ БЛОК: Нормализация SSCC ---
                     # Принудительно преобразуем колонки в строковый тип (StringDtype), чтобы избежать ошибки
-                    # "Can only use .str accessor with string values!", если pandas считал их как числа.
-                    # StringDtype корректно обрабатывает NaN, не превращая их в строку 'nan'.
-                    df['BoxSSCC'] = df['BoxSSCC'].astype(pd.StringDtype()).str[-18:]
-                    df['PaletSSCC'] = df['PaletSSCC'].astype(pd.StringDtype()).str[-18:]
+                    # Берем последние 18 символов, чтобы отсечь возможные префиксы от сканера.
+                    df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
+                    df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
                     # Преобразуем даты в нужный формат
                     df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
                     df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
@@ -562,9 +565,6 @@ def edit_integration(order_id):
                     if packages_to_insert:
                         all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
                         all_packages_df['owner'] = 'delta' # Указываем владельца
-                        # --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Принудительно приводим SSCC к строке ПОСЛЕ конкатенации ---
-                        # Это предотвращает преобразование SSCC в числовой формат (float) из-за особенностей pandas.
-                        all_packages_df['sscc'] = all_packages_df['sscc'].astype(str)
                         logging.info(f"[Delta CSV] Всего подготовлено к обработке {len(all_packages_df)} упаковок (короба и паллеты).")
                         all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
 
