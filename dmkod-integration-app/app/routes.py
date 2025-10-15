@@ -535,9 +535,8 @@ def edit_integration(order_id):
                         # Принудительно преобразуем колонки в строковый тип (StringDtype), чтобы избежать ошибки
                         # "Can only use .str accessor with string values!", если pandas считал их как числа.
                         # StringDtype корректно обрабатывает NaN, не превращая их в строку 'nan'.
-                        df['BoxSSCC'] = df['BoxSSCC'].astype(pd.StringDtype()).str[-18:] # Удалена дублирующая строка
-                        df['PaletSSCC'] = df['PaletSSCC'].astype(pd.StringDtype()).str[-18:] # Удалена дублирующая строка
-
+                        df['BoxSSCC'] = df['BoxSSCC'].astype(pd.StringDtype()).str[-18:]
+                        df['PaletSSCC'] = df['PaletSSCC'].astype(pd.StringDtype()).str[-18:]
                         # Преобразуем даты в нужный формат
                         df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
                         df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
@@ -563,6 +562,7 @@ def edit_integration(order_id):
                         if packages_to_insert:
                             all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
                             all_packages_df['owner'] = 'delta' # Указываем владельца
+                            logging.info(f"[Delta CSV] Всего подготовлено к обработке {len(all_packages_df)} упаковок (короба и паллеты).")
                             all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
 
                             # 2. Определяем связи "короб-паллета"
@@ -593,7 +593,8 @@ def edit_integration(order_id):
                                 logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
                                 generated_sql = upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc', return_sql=True)
                                 logging.info(f"[Delta CSV] SQL для вставки паллет: {generated_sql}")
-                                cur.execute(generated_sql) # ВЫПОЛНЯЕМ СГЕНЕРИРОВАННЫЙ SQL
+                                cur.execute(generated_sql)
+                                logging.info(f"[Delta CSV] Запрос на вставку паллет выполнен. Затронуто строк: {cur.rowcount}.")
                                 flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
                                 logging.info(f"[Delta CSV] Вставка паллет завершена.")
 
@@ -606,7 +607,8 @@ def edit_integration(order_id):
                                 logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
                                 generated_sql = upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc', return_sql=True)
                                 logging.info(f"[Delta CSV] SQL для вставки коробов: {generated_sql}")
-                                cur.execute(generated_sql) # ВЫПОЛНЯЕМ СГЕНЕРИРОВАННЫЙ SQL
+                                cur.execute(generated_sql)
+                                logging.info(f"[Delta CSV] Запрос на вставку коробов выполнен. Затронуто строк: {cur.rowcount}.")
                                 flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
                                 logging.info(f"[Delta CSV] Вставка коробов завершена.")
                             
@@ -638,53 +640,9 @@ def edit_integration(order_id):
 
                         # --- КОНЕЦ НОВОГО БЛОКА ---
 
-                    # Группируем данные по Barcode и StartDate
-                    grouped_data = df.groupby(['Barcode', 'StartDate'])
-
-                    inserted_count = 0
-                    for (barcode, start_date), group in grouped_data:
-                        # Получаем printrun_id из dmkod_aggregation_details
-                        cur.execute(
-                            """
-                            SELECT api_id FROM dmkod_aggregation_details
-                            WHERE order_id = %s AND gtin = %s
-                            LIMIT 1
-                            """,
-                            (order_id, barcode)
-                        )
-                        printrun_id_row = cur.fetchone()
-                        printrun_id = printrun_id_row[0] if printrun_id_row else None
-
-                        if printrun_id is None:
-                            flash(f'Предупреждение: Не найден printrun_id для Barcode "{barcode}" в заказе {order_id}. Данные для этой группы не будут сохранены.', 'warning')
-                            continue
-
-                        # Формируем JSON-объект
-                        include_codes = []
-                        for _, row in group.iterrows():
-                            # Удаляем символ GS (Group Separator, ASCII 29)
-                            cleaned_datamatrix = row['DataMatrix'].replace('\x1d', '')
-                            include_codes.append({"code": cleaned_datamatrix})
-
-                        json_data = {
-                            "include": include_codes,
-                            "attributes": {
-                                "production_date": start_date,
-                                "expiration_date": group['EndDate'].iloc[0] # Предполагаем, что EndDate одинаков для всей группы
-                            }
-                        }
-
-                        # Вставляем данные в delta_result
-                        cur.execute(
-                            """
-                            INSERT INTO delta_result (order_id, printrun_id, utilisation_upload_id, codes_json)
-                            VALUES (%s, %s, %s, %s)
-                            """,
-                            (order_id, printrun_id, None, json.dumps(json_data)) # utilisation_upload_id пока NULL
-                        )
-                        inserted_count += 1
-
-                    flash(f'Успешно загружено и обработано {inserted_count} групп данных из CSV-файла.', 'success')
+                    # --- ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ОТЛАДКИ АГРЕГАЦИИ ---
+                    # Блок обработки кодов маркировки и сохранения в delta_result.
+                    flash('Обработка кодов маркировки для таблицы `delta_result` временно отключена для отладки.', 'info')
 
             conn.commit()
             return redirect(url_for('.edit_integration', order_id=order_id))
