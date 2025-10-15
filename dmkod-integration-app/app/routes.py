@@ -518,18 +518,18 @@ def edit_integration(order_id):
                         flash(f'Ошибка: Имя файла должно содержать "{expected_filename_pattern}", но получено "{delta_csv_file.filename}".', 'danger')
                         return redirect(url_for('.edit_integration', order_id=order_id))
 
-                    try:
-                        # Читаем CSV-файл с помощью pandas
-                        # Используем BytesIO для обработки потока файла и указываем кодировку/разделитель
-                        file_content = delta_csv_file.read().decode('utf-8')
-                        df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str})
-                        df.columns = df.columns.str.strip() # Очищаем пробелы в заголовках
+                    # --- ИЗМЕНЕНИЕ: Убираем вложенный try...except, чтобы использовать одну транзакцию ---
+                    # Читаем CSV-файл с помощью pandas
+                    # Используем BytesIO для обработки потока файла и указываем кодировку/разделитель
+                    file_content = delta_csv_file.read().decode('utf-8')
+                    df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str})
+                    df.columns = df.columns.str.strip() # Очищаем пробелы в заголовках
 
-                        # Проверяем наличие обязательных колонок
-                        required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
-                        if not all(col in df.columns for col in required_columns):
-                            flash(f'Ошибка: В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.', 'danger')
-                            return redirect(url_for('.edit_integration', order_id=order_id))
+                    # Проверяем наличие обязательных колонок
+                    required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
+                    if not all(col in df.columns for col in required_columns):
+                        flash(f'Ошибка: В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.', 'danger')
+                        return redirect(url_for('.edit_integration', order_id=order_id))
 
                         # --- ИСПРАВЛЕННЫЙ БЛОК: Нормализация SSCC ---
                         # Принудительно преобразуем колонки в строковый тип (StringDtype), чтобы избежать ошибки
@@ -631,69 +631,55 @@ def edit_integration(order_id):
                                 cur.execute(cleanup_query)
                                 flash("Временные данные по связям очищены.", 'info')
 
-                            logging.info("[Delta CSV] Фиксирую транзакцию (commit) для 'packages'...")
-                            conn.commit() # Коммитим создание упаковок
-                            logging.info("[Delta CSV] Транзакция для 'packages' успешно зафиксирована.")
-
                         # --- КОНЕЦ НОВОГО БЛОКА ---
 
-                        # Группируем данные по Barcode и StartDate
-                        grouped_data = df.groupby(['Barcode', 'StartDate'])
+                    # Группируем данные по Barcode и StartDate
+                    grouped_data = df.groupby(['Barcode', 'StartDate'])
 
-                        inserted_count = 0
-                        for (barcode, start_date), group in grouped_data:
-                            # Получаем printrun_id из dmkod_aggregation_details
-                            cur.execute(
-                                """
-                                SELECT api_id FROM dmkod_aggregation_details
-                                WHERE order_id = %s AND gtin = %s
-                                LIMIT 1
-                                """,
-                                (order_id, barcode)
-                            )
-                            printrun_id_row = cur.fetchone()
-                            printrun_id = printrun_id_row[0] if printrun_id_row else None
+                    inserted_count = 0
+                    for (barcode, start_date), group in grouped_data:
+                        # Получаем printrun_id из dmkod_aggregation_details
+                        cur.execute(
+                            """
+                            SELECT api_id FROM dmkod_aggregation_details
+                            WHERE order_id = %s AND gtin = %s
+                            LIMIT 1
+                            """,
+                            (order_id, barcode)
+                        )
+                        printrun_id_row = cur.fetchone()
+                        printrun_id = printrun_id_row[0] if printrun_id_row else None
 
-                            if printrun_id is None:
-                                flash(f'Предупреждение: Не найден printrun_id для Barcode "{barcode}" в заказе {order_id}. Данные для этой группы не будут сохранены.', 'warning')
-                                continue
+                        if printrun_id is None:
+                            flash(f'Предупреждение: Не найден printrun_id для Barcode "{barcode}" в заказе {order_id}. Данные для этой группы не будут сохранены.', 'warning')
+                            continue
 
-                            # Формируем JSON-объект
-                            include_codes = []
-                            for _, row in group.iterrows():
-                                # Удаляем символ GS (Group Separator, ASCII 29)
-                                cleaned_datamatrix = row['DataMatrix'].replace('\x1d', '')
-                                include_codes.append({"code": cleaned_datamatrix})
+                        # Формируем JSON-объект
+                        include_codes = []
+                        for _, row in group.iterrows():
+                            # Удаляем символ GS (Group Separator, ASCII 29)
+                            cleaned_datamatrix = row['DataMatrix'].replace('\x1d', '')
+                            include_codes.append({"code": cleaned_datamatrix})
 
-                            json_data = {
-                                "include": include_codes,
-                                "attributes": {
-                                    "production_date": start_date,
-                                    "expiration_date": group['EndDate'].iloc[0] # Предполагаем, что EndDate одинаков для всей группы
-                                }
+                        json_data = {
+                            "include": include_codes,
+                            "attributes": {
+                                "production_date": start_date,
+                                "expiration_date": group['EndDate'].iloc[0] # Предполагаем, что EndDate одинаков для всей группы
                             }
+                        }
 
-                            # Вставляем данные в delta_result
-                            cur.execute(
-                                """
-                                INSERT INTO delta_result (order_id, printrun_id, utilisation_upload_id, codes_json)
-                                VALUES (%s, %s, %s, %s)
-                                """,
-                                (order_id, printrun_id, None, json.dumps(json_data)) # utilisation_upload_id пока NULL
-                            )
-                            inserted_count += 1
+                        # Вставляем данные в delta_result
+                        cur.execute(
+                            """
+                            INSERT INTO delta_result (order_id, printrun_id, utilisation_upload_id, codes_json)
+                            VALUES (%s, %s, %s, %s)
+                            """,
+                            (order_id, printrun_id, None, json.dumps(json_data)) # utilisation_upload_id пока NULL
+                        )
+                        inserted_count += 1
 
-                        flash(f'Успешно загружено и обработано {inserted_count} групп данных из CSV-файла.', 'success')
-
-                    except pd.errors.EmptyDataError:
-                        flash('Ошибка: Загруженный CSV-файл пуст.', 'danger')
-                    except pd.errors.ParserError:
-                        flash('Ошибка: Не удалось разобрать CSV-файл. Проверьте формат (разделитель - табуляция, UTF-8).', 'danger')
-                    except UnicodeDecodeError:
-                        flash('Ошибка: Не удалось декодировать CSV-файл. Убедитесь, что он в кодировке UTF-8.', 'danger')
-                    except Exception as e:
-                        conn.rollback()
-                        flash(f'Произошла ошибка при обработке CSV-файла: {e}', 'danger')
+                    flash(f'Успешно загружено и обработано {inserted_count} групп данных из CSV-файла.', 'success')
 
             conn.commit()
             return redirect(url_for('.edit_integration', order_id=order_id))
