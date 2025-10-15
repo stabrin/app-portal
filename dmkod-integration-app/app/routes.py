@@ -18,7 +18,7 @@ from .db import get_db_connection
 from .forms import LoginForm, IntegrationForm, ProductGroupForm
 from .auth import User
 
-# --- ПЕРЕНЕСЕННАЯ ФУНКЦИЯ: Корректный парсер DataMatrix ---
+# --- ИСПРАВЛЕННАЯ ФУНКЦИЯ: Полная копия из datamatrix-app ---
 GS_SEPARATOR = '\x1d'
 def parse_datamatrix(dm_string: str) -> dict:
     """Разбирает (парсит) строку DataMatrix на составные части."""
@@ -26,8 +26,7 @@ def parse_datamatrix(dm_string: str) -> dict:
         'datamatrix': dm_string, 'gtin': '', 'serial': '',
         'crypto_part_91': '', 'crypto_part_92': '', 'crypto_part_93': ''
     }
-    # Некоторые сканеры заменяют GS на пробел, нормализуем это.
-    cleaned_dm = dm_string.replace(' ', GS_SEPARATOR).strip()
+    cleaned_dm = dm_string.replace(' ', '\x1d').strip()
     parts = cleaned_dm.split(GS_SEPARATOR)
     if len(parts) > 0:
         main_part = parts.pop(0)
@@ -35,7 +34,9 @@ def parse_datamatrix(dm_string: str) -> dict:
             result['gtin'] = main_part[2:16]
             serial_part = main_part[16:]
             if serial_part.startswith('21'):
-                result['serial'] = serial_part[2:]
+                # Убираем возможный GS в конце серийного номера
+                result['serial'] = serial_part[2:].split(GS_SEPARATOR)[0]
+
     for part in parts:
         if not part: continue
         if part.startswith('91'): result['crypto_part_91'] = part[2:]
@@ -696,7 +697,11 @@ def edit_integration(order_id):
                     items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
                     
                     # 4. Убираем временные колонки и загружаем в БД
-                    items_to_upload = items_df[['datamatrix', 'gtin', 'serial', 'crypto_part_93', 'order_id', 'package_id']]
+                    # --- ИСПРАВЛЕНО: Добавлены недостающие колонки crypto_part ---
+                    columns_to_save = ['datamatrix', 'gtin', 'serial', 
+                                       'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 
+                                       'order_id', 'package_id']
+                    items_to_upload = items_df[columns_to_save]
                     
                     # Проверка на дубликаты в 'items' перед вставкой
                     from .utils import upsert_data_to_db
