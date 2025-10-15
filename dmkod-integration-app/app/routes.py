@@ -535,9 +535,8 @@ def edit_integration(order_id):
                         # Принудительно преобразуем колонки в строковый тип (StringDtype), чтобы избежать ошибки
                         # "Can only use .str accessor with string values!", если pandas считал их как числа.
                         # StringDtype корректно обрабатывает NaN, не превращая их в строку 'nan'.
-                        df['BoxSSCC'] = df['BoxSSCC'].astype(pd.StringDtype()).str[-18:]
-                        df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
-                        df['PaletSSCC'] = df['PaletSSCC'].astype(pd.StringDtype()).str[-18:]
+                        df['BoxSSCC'] = df['BoxSSCC'].astype(pd.StringDtype()).str[-18:] # Удалена дублирующая строка
+                        df['PaletSSCC'] = df['PaletSSCC'].astype(pd.StringDtype()).str[-18:] # Удалена дублирующая строка
 
                         # Преобразуем даты в нужный формат
                         df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
