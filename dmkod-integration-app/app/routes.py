@@ -689,6 +689,7 @@ def edit_integration(order_id):
                     packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
                     box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
                     # --- ИСПРАВЛЕНИЕ: Выполняем запрос, только если есть короба ---
+                    sscc_to_id_map = {}
                     if box_ssccs_tuple:
                         cur.execute(
                             sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s").format(
@@ -696,7 +697,8 @@ def edit_integration(order_id):
                             ),
                             (box_ssccs_tuple,)
                         )
-                    sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+                        sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+
                     logging.info(f"[Delta CSV] Создана карта SSCC->ID для {len(sscc_to_id_map)} коробов.")
 
                     # 2. Создаем DataFrame для 'items' с использованием корректного парсера
