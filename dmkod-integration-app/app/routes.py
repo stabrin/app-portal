@@ -565,7 +565,6 @@ def edit_integration(order_id):
                     if packages_to_insert:
                         all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
                         all_packages_df['owner'] = 'delta' # Указываем владельца
-                        all_packages_df['order_id'] = order_id
                         logging.info(f"[Delta CSV] Всего подготовлено к обработке {len(all_packages_df)} упаковок (короба и паллеты).")
                         all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
 
@@ -596,7 +595,7 @@ def edit_integration(order_id):
                             logging.info(f"[Delta CSV] DataFrame паллет для вставки (первые 5 строк):\n{pallets_df.head().to_string()}")
                             logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
                             # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                            upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level', 'order_id']], 'sscc')
+                            upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc')
                             logging.info(f"[Delta CSV] Запрос на вставку паллет выполнен. Затронуто строк: {cur.rowcount}.")
                             flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
                             logging.info(f"[Delta CSV] Вставка паллет завершена.")
@@ -609,7 +608,7 @@ def edit_integration(order_id):
                             logging.info(f"[Delta CSV] DataFrame коробов для вставки (первые 5 строк):\n{boxes_df.head().to_string()}")
                             logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
                             # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                            upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc', 'order_id']], 'sscc')
+                            upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc')
                             logging.info(f"[Delta CSV] Запрос на вставку коробов выполнен. Затронуто строк: {cur.rowcount}.")
                             flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
                             logging.info(f"[Delta CSV] Вставка коробов завершена.")
@@ -646,11 +645,11 @@ def edit_integration(order_id):
                     logging.info("[Delta CSV] Начинаю подготовку данных для таблицы 'items'.")
                     # 1. Получаем карту {sscc: id} для только что созданных коробов
                     box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
-                    cur.execute(
-                        sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s AND order_id = %s").format(
+                    cur.execute( # <-- ИСПРАВЛЕНО: Убран фильтр по order_id
+                        sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s").format(
                             table=sql.Identifier(packages_table_name)
                         ),
-                        (box_ssccs_tuple, order_id)
+                        (box_ssccs_tuple,)
                     )
                     sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
                     logging.info(f"[Delta CSV] Создана карта SSCC->ID для {len(sscc_to_id_map)} коробов.")
