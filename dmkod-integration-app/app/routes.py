@@ -38,7 +38,9 @@ def parse_datamatrix(dm_string: str) -> dict:
                 result['serial'] = serial_part[2:]
     for part in parts:
         if not part: continue
-        if part.startswith('93'): result['crypto_part_93'] = part[2:]
+        if part.startswith('91'): result['crypto_part_91'] = part[2:]
+        elif part.startswith('92'): result['crypto_part_92'] = part[2:]
+        elif part.startswith('93'): result['crypto_part_93'] = part[2:]
     return result
 
 # 1. Определяем Blueprint
