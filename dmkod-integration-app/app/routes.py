@@ -18,6 +18,29 @@ from .db import get_db_connection
 from .forms import LoginForm, IntegrationForm, ProductGroupForm
 from .auth import User
 
+# --- ПЕРЕНЕСЕННАЯ ФУНКЦИЯ: Корректный парсер DataMatrix ---
+GS_SEPARATOR = '\x1d'
+def parse_datamatrix(dm_string: str) -> dict:
+    """Разбирает (парсит) строку DataMatrix на составные части."""
+    result = {
+        'datamatrix': dm_string, 'gtin': '', 'serial': '',
+        'crypto_part_91': '', 'crypto_part_92': '', 'crypto_part_93': ''
+    }
+    # Некоторые сканеры заменяют GS на пробел, нормализуем это.
+    cleaned_dm = dm_string.replace(' ', GS_SEPARATOR).strip()
+    parts = cleaned_dm.split(GS_SEPARATOR)
+    if len(parts) > 0:
+        main_part = parts.pop(0)
+        if main_part.startswith('01'):
+            result['gtin'] = main_part[2:16]
+            serial_part = main_part[16:]
+            if serial_part.startswith('21'):
+                result['serial'] = serial_part[2:]
+    for part in parts:
+        if not part: continue
+        if part.startswith('93'): result['crypto_part_93'] = part[2:]
+    return result
+
 # 1. Определяем Blueprint
 import zipfile # Добавляем импорт для работы с ZIP-архивами
 dmkod_bp = Blueprint(
@@ -654,19 +677,21 @@ def edit_integration(order_id):
                     sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
                     logging.info(f"[Delta CSV] Создана карта SSCC->ID для {len(sscc_to_id_map)} коробов.")
 
-                    # 2. Создаем DataFrame для 'items'
-                    items_df = df[['DataMatrix', 'Barcode', 'BoxSSCC']].copy()
-                    items_df.rename(columns={'DataMatrix': 'datamatrix', 'Barcode': 'gtin'}, inplace=True)
+                    # 2. Создаем DataFrame для 'items' с использованием корректного парсера
+                    parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
+                    items_df = pd.DataFrame(parsed_dm_data)
+                    
+                    # Добавляем остальные нужные колонки
                     items_df['order_id'] = order_id
-                    items_df['serial'] = items_df['datamatrix'].str[18:31] # Пример извлечения серийного номера
-                    items_df['crypto_part_93'] = items_df['datamatrix'].str[-4:] # Пример извлечения криптохвоста
+                    # BoxSSCC нужен для маппинга, берем его из исходного DataFrame
+                    items_df['BoxSSCC'] = df['BoxSSCC']
                     
                     # 3. Связываем с 'packages' через package_id
                     items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
 
                     # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None перед загрузкой в БД ---
                     # Это предотвращает ошибку 'integer out of range' для кодов без короба.
-                    items_df['package_id'] = items_df['package_id'].astype('object').where(items_df['package_id'].notna(), None)
+                    items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
                     
                     # 4. Убираем временные колонки и загружаем в БД
                     items_to_upload = items_df[['datamatrix', 'gtin', 'serial', 'crypto_part_93', 'order_id', 'package_id']]
