@@ -730,22 +730,32 @@ def edit_integration(order_id):
                     flash(f"Всего в систему загружено {total_codes_processed} кодов. Из них не связано с коробами: {unlinked_codes_count} шт.", 'success')
 
                     # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
-                    # Группируем данные по коробам и паллетам для создания JSON
-                    # --- ИЗМЕНЕНО: Группируем по GTIN и дате производства, как требует API ---
+                    # --- НОВАЯ ЛОГИКА: Группировка по printrun_id и дате производства ---
                     df_for_json = df.copy()
-                    # Переименовываем колонки для удобства
                     df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date'}, inplace=True)
-                    
-                    # Группируем коды по gtin и дате производства
-                    grouped_for_api = df_for_json.groupby(['gtin', 'production_date'])['DataMatrix'].apply(list).reset_index()
-                    
-                    # --- НОВАЯ ЛОГИКА: Формируем DataFrame для upsert ---
+
+                    # 1. Получаем карту {gtin: printrun_id} из деталей заказа
+                    cur.execute(
+                        "SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL",
+                        (order_id,)
+                    )
+                    gtin_to_printrun_map = {row['gtin']: row['api_id'] for row in cur.fetchall()}
+                    if not gtin_to_printrun_map:
+                        raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
+
+                    # 2. Добавляем printrun_id в DataFrame
+                    df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
+
+                    # 3. Группируем по printrun_id и дате производства
+                    grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date'])['DataMatrix'].apply(list).reset_index()
+
+                    # 4. Формируем DataFrame для upsert
                     def create_payload(row):
                         payload = {
                             "utilisation_type": "SHIPMENT",
                             "utilisation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
                             "attributes": {
-                                "production_date": row['production_date']
+                                "production_date": str(row['production_date'])
                             },
                             "codes": row['DataMatrix']
                         }
@@ -753,13 +763,15 @@ def edit_integration(order_id):
 
                     grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
                     grouped_for_api['order_id'] = order_id
-                    
-                    # Выбираем колонки для загрузки
-                    delta_result_df = grouped_for_api[['order_id', 'gtin', 'production_date', 'codes_json']]
-                    
+                    # Преобразуем printrun_id в integer для корректной вставки
+                    grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
+
+                    # 5. Выбираем колонки и выполняем upsert
+                    delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
+
                     # Используем upsert для атомарного добавления/обновления
                     from .utils import upsert_data_to_db
-                    upsert_data_to_db(cur, 'TABLE_DELTA_RESULT', delta_result_df, ['order_id', 'gtin', 'production_date'])
+                    upsert_data_to_db(cur, 'TABLE_DELTA_RESULT', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
 
                     flash('Результаты из CSV-файла "Дельта" успешно сохранены для дальнейшей отправки в API.', 'success')
 
