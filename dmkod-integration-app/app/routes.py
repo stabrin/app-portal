@@ -740,7 +740,7 @@ def edit_integration(order_id):
                     # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
                     # --- НОВАЯ ЛОГИКА: Группировка по printrun_id и дате производства ---
                     df_for_json = df.copy()
-                    df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date'}, inplace=True)
+                    df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
 
                     # 1. Получаем карту {gtin: printrun_id} из деталей заказа
                     cur.execute(
@@ -754,8 +754,8 @@ def edit_integration(order_id):
                     # 2. Добавляем printrun_id в DataFrame
                     df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
 
-                    # 3. Группируем по printrun_id и дате производства
-                    grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date'])['DataMatrix'].apply(list).reset_index()
+                    # 3. Группируем по printrun_id, дате производства и сроку годности
+                    grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date'])['DataMatrix'].apply(list).reset_index()
 
                     # 4. Формируем DataFrame для upsert
                     def create_payload(row):
@@ -763,7 +763,8 @@ def edit_integration(order_id):
                             "utilisation_type": "SHIPMENT",
                             "utilisation_date": pd.Timestamp.now().strftime('%Y-%m-%d'),
                             "attributes": {
-                                "production_date": str(row['production_date'])
+                                "production_date": str(row['production_date']),
+                                "expiration_date": str(row['expiration_date'])
                             },
                             "codes": row['DataMatrix']
                         }
@@ -773,6 +774,7 @@ def edit_integration(order_id):
                     grouped_for_api['order_id'] = order_id
                     # Преобразуем printrun_id в integer для корректной вставки
                     grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
+                    grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
 
                     # 5. Выбираем колонки и выполняем upsert
                     delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
