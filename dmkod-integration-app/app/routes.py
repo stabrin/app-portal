@@ -531,6 +531,12 @@ def edit_integration(order_id):
                             flash(f'Ошибка: В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.', 'danger')
                             return redirect(url_for('.edit_integration', order_id=order_id))
 
+                        # --- НОВЫЙ БЛОК: Нормализация SSCC ---
+                        # Некоторые сканеры могут добавлять префиксы. Берем только последние 18 символов.
+                        # .str акссесор корректно обрабатывает NaN значения.
+                        df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
+                        df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
+
                         # Преобразуем даты в нужный формат
                         df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
                         df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
