@@ -548,6 +548,7 @@ def edit_integration(order_id):
                         unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
                         unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
 
+                        logging.info(f"[Delta CSV] Найдено {len(unique_boxes)} уникальных коробов и {len(unique_pallets)} уникальных паллет в файле.")
                         packages_to_insert = []
                         # --- ИСПРАВЛЕНИЕ: Добавляем 'level' сразу при создании ---
                         if not unique_boxes.empty:
@@ -589,16 +590,20 @@ def edit_integration(order_id):
                             pallets_df = all_packages_df[all_packages_df['level'] == 2]
                             if not pallets_df.empty:
                                 from .utils import upsert_data_to_db # Импортируем утилиту
+                                logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
                                 upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc')
                                 flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
+                                logging.info(f"[Delta CSV] Вставка паллет завершена.")
 
                             # Теперь вставляем короба (уровень 1), указывая parent_sscc
                             boxes_df = all_packages_df[all_packages_df['level'] == 1]
                             if not boxes_df.empty:
                                 from .utils import upsert_data_to_db
                                 # Вставляем короба с parent_sscc, передавая имя переменной окружения
+                                logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
                                 upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc')
                                 flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
+                                logging.info(f"[Delta CSV] Вставка коробов завершена.")
                             
                             # --- НОВЫЙ БЛОК: Обновление parent_id ---
                             # После того как все короба и паллеты вставлены,
@@ -612,10 +617,12 @@ def edit_integration(order_id):
                                   AND p_child.parent_id IS NULL;
                             """).format(packages_table=sql.Identifier(packages_table_name))
                             
+                            logging.info("[Delta CSV] Выполняю запрос на обновление parent_id для связки коробов и паллет...")
                             cur.execute(update_parent_id_query)
                             updated_parents_count = cur.rowcount
                             flash(f"Связи 'короб-паллета' обновлены для {updated_parents_count} записей.", 'info')
-
+                            logging.info(f"[Delta CSV] Обновлено {updated_parents_count} связей parent_id.")
+                            
                             # Очищаем временное поле parent_sscc
                             if updated_parents_count > 0:
                                 cleanup_query = sql.SQL("""
@@ -624,7 +631,9 @@ def edit_integration(order_id):
                                 cur.execute(cleanup_query)
                                 flash("Временные данные по связям очищены.", 'info')
 
+                            logging.info("[Delta CSV] Фиксирую транзакцию (commit) для 'packages'...")
                             conn.commit() # Коммитим создание упаковок
+                            logging.info("[Delta CSV] Транзакция для 'packages' успешно зафиксирована.")
 
                         # --- КОНЕЦ НОВОГО БЛОКА ---
 
