@@ -686,13 +686,16 @@ def edit_integration(order_id):
                     # --- НОВЫЙ БЛОК: Создание и загрузка записей в 'items' ---
                     logging.info("[Delta CSV] Начинаю подготовку данных для таблицы 'items'.")
                     # 1. Получаем карту {sscc: id} для только что созданных коробов
+                    packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
                     box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
-                    cur.execute( # <-- ИСПРАВЛЕНО: Убран фильтр по order_id
-                        sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s").format(
-                            table=sql.Identifier(packages_table_name)
-                        ),
-                        (box_ssccs_tuple,)
-                    )
+                    # --- ИСПРАВЛЕНИЕ: Выполняем запрос, только если есть короба ---
+                    if box_ssccs_tuple:
+                        cur.execute(
+                            sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s").format(
+                                table=sql.Identifier(packages_table_name)
+                            ),
+                            (box_ssccs_tuple,)
+                        )
                     sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
                     logging.info(f"[Delta CSV] Создана карта SSCC->ID для {len(sscc_to_id_map)} коробов.")
 
@@ -706,7 +709,10 @@ def edit_integration(order_id):
                     items_df['BoxSSCC'] = df['BoxSSCC']
                     
                     # 3. Связываем с 'packages' через package_id
-                    items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                    if sscc_to_id_map:
+                        items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                    else:
+                        items_df['package_id'] = None
 
                     # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None перед загрузкой в БД ---
                     # Это предотвращает ошибку 'integer out of range' для кодов без короба.
