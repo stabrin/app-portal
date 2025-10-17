@@ -197,31 +197,9 @@ def order_details(order_id):
             return render_template('results.html', logs=logs, title=f"Результат обработки заказа №{order_id}")
 
         elif action == 'import_from_dmkod':
-            # Получаем параметры агрегации из новой формы на странице dmkod_import.html
-            mode = request.form.get('aggregation_mode')
-            level1_qty, level2_qty, level3_qty = 0, 0, 0
-
-            try:
-                if mode in ['level1', 'level2', 'level3']:
-                    level1_qty = int(request.form.get('level1_qty', 0))
-                    if level1_qty <= 0:
-                        raise ValueError('Количество в коробе должно быть > 0.')
-                if mode in ['level2', 'level3']:
-                    level2_qty = int(request.form.get('level2_qty', 0))
-                    if level2_qty <= 0:
-                        raise ValueError('Количество коробов на паллете должно быть > 0.')
-                if mode == 'level3':
-                    level3_qty = int(request.form.get('level3_qty', 0))
-                    if level3_qty <= 0:
-                        raise ValueError('Количество паллет в контейнере должно быть > 0.')
-            except (ValueError, TypeError) as e:
-                flash(f'Ошибка в параметрах агрегации: {e}', 'danger')
-                # Возвращаемся на страницу импорта, чтобы пользователь мог исправить ошибку
-                return redirect(url_for('.order_details', order_id=order_id))
-            
-            logs = run_import_from_dmkod(
-                order_id, mode, level1_qty, level2_qty, level3_qty
-            )
+            # Теперь функция принимает только order_id, так как вся логика агрегации
+            # определяется автоматически на основе данных из БД.
+            logs = run_import_from_dmkod(order_id)
             return render_template('results.html', logs=logs, title=f"Результат обработки заказа №{order_id}")
 
         elif action == 'upload_foreign_sscc':
