@@ -481,7 +481,7 @@ def run_import_from_dmkod(order_id: int) -> list:
         logs.append(f"\nВсего найдено и разобрано {len(items_df)} кодов DataMatrix.")
         logs.append("Проверяю, не были ли эти коды обработаны ранее...")
 
-            # --- ИСПРАВЛЕНИЕ: Убираем лишний отступ, чтобы код был внутри блока try, а не with ---
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             dm_to_check = tuple(items_df['datamatrix'].unique())
             items_table = os.getenv('TABLE_ITEMS', 'items')
             cur.execute(f"SELECT datamatrix, order_id FROM {items_table} WHERE datamatrix IN %s", (dm_to_check,))
@@ -578,7 +578,7 @@ def run_import_from_dmkod(order_id: int) -> list:
             upsert_data_to_db(cur, 'TABLE_ITEMS', items_df_to_save, 'datamatrix')
             
             conn.commit()
-            logs.append("\nПроцесс импорта и агрегации успешно завершен!")
+            logs.append("\nПроцесс импорта и агрегации успешно завершен!")    
     except Exception as e:
         if conn: conn.rollback()
         logs.append(f"\nКРИТИЧЕСКАЯ ОШИБКА: {e}")
