@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite frontend",
-    "build": "vite build frontend",
+    "dev": "vite",
+    "build": "vite build",
     "preview": "vite preview",
     "tauri": "tauri"
   },
