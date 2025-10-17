@@ -1,10 +1,10 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "build": {
-    "beforeBuildCommand": "",
-    "beforeDevCommand": "",
+    "beforeBuildCommand": null,
+    "beforeDevCommand": null,
     "devPath": "http://109.172.115.204:8080",
-    "distDir": "http://109.172.115.204:8080"
+    "distDir": "../dist"
   },
   "package": {
     "productName": "App Portal Desktop",
