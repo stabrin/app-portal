@@ -535,7 +535,31 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
                         _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
                         all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 1, 'parent_id': None})
                 packages_df = pd.DataFrame(all_packages)
-                # Логика для level2 и level3... (опущена для краткости, она идентична)
+
+                # --- ИСПРАВЛЕНИЕ: Добавлена корректная логика для агрегации 2-го и 3-го уровней ---
+                if aggregation_mode in ['level2', 'level3']:
+                    logs.append("\n--- Создаю паллеты (уровень 2) ---")
+                    all_box_ids = packages_df[packages_df['level'] == 1]['id'].tolist()
+                    for i in range(0, len(all_box_ids), level2_qty):
+                        boxes_on_pallet_ids = all_box_ids[i:i + level2_qty]
+                        pallet_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
+                        if warning and warning not in logs: logs.append(warning)
+                        packages_df.loc[packages_df['id'].isin(boxes_on_pallet_ids), 'parent_id'] = pallet_id
+                        _, full_sscc = generate_sscc(pallet_id, gcp_for_sscc)
+                        pallet_record = pd.DataFrame([{'id': pallet_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 2, 'parent_id': None}])
+                        packages_df = pd.concat([packages_df, pallet_record], ignore_index=True)
+
+                if aggregation_mode == 'level3':
+                    logs.append("\n--- Создаю контейнеры (уровень 3) ---")
+                    all_pallet_ids = packages_df[packages_df['level'] == 2]['id'].tolist()
+                    for i in range(0, len(all_pallet_ids), level3_qty):
+                        pallets_in_container_ids = all_pallet_ids[i:i + level3_qty]
+                        container_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
+                        if warning and warning not in logs: logs.append(warning)
+                        packages_df.loc[packages_df['id'].isin(pallets_in_container_ids), 'parent_id'] = container_id
+                        _, full_sscc = generate_sscc(container_id, gcp_for_sscc)
+                        container_record = pd.DataFrame([{'id': container_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 3, 'parent_id': None}])
+                        packages_df = pd.concat([packages_df, container_record], ignore_index=True)
             else:
                 items_df['package_id'] = None
                 logs.append("\nАгрегация не требуется.")
