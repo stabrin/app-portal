@@ -444,7 +444,7 @@ def run_import_from_dmkod(order_id: int) -> list:
 
     try:
         conn = get_db_connection()
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur: # --- ИЗМЕНЕНИЕ: Единый блок для всех операций с БД ---
             # 1. Получаем все строки детализации с кодами для этого заказа
             # --- ИЗМЕНЕНИЕ: Также получаем aggregation_level ---
             cur.execute("""
@@ -481,11 +481,10 @@ def run_import_from_dmkod(order_id: int) -> list:
         logs.append(f"\nВсего найдено и разобрано {len(items_df)} кодов DataMatrix.")
         logs.append("Проверяю, не были ли эти коды обработаны ранее...")
 
-        # --- Дальнейшая логика идентична run_aggregation_process ---
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        # --- Дальнейшая логика теперь внутри того же блока 'with' ---
             # Проверка на дубликаты
             dm_to_check = tuple(items_df['datamatrix'].unique())
-            items_table = os.getenv('TABLE_ITEMS')
+            items_table = os.getenv('TABLE_ITEMS', 'items')
             cur.execute(f"SELECT datamatrix, order_id FROM {items_table} WHERE datamatrix IN %s", (dm_to_check,))
             existing_codes = cur.fetchall()
             if existing_codes:
@@ -497,7 +496,7 @@ def run_import_from_dmkod(order_id: int) -> list:
             
             # Проверка и создание GTIN в справочнике
             unique_gtins_in_upload = items_df['gtin'].unique()
-            products_table = os.getenv('TABLE_PRODUCTS')
+            products_table = os.getenv('TABLE_PRODUCTS', 'products')
             cur.execute(f"SELECT gtin FROM {products_table} WHERE gtin IN %s", (tuple(unique_gtins_in_upload),))
             existing_gtins_from_db = {row['gtin'] for row in cur.fetchall()}
             new_gtins = [gtin for gtin in unique_gtins_in_upload if gtin not in existing_gtins_from_db]
@@ -555,32 +554,32 @@ def run_import_from_dmkod(order_id: int) -> list:
             # и не должен сохраняться в таблицу 'items'.
             if 'aggregation_level' in items_df.columns:
                 items_df_to_save = items_df.drop(columns=['aggregation_level'])
+            else:
+                items_df_to_save = items_df
 
             # --- НОВЫЙ БЛОК: Связывание кодов с упаковками для delta-заказов ---
+            # Этот блок был перемещен сюда, чтобы использовать тот же курсор
             orders_table_for_status = os.getenv('TABLE_ORDERS', 'orders')
             cur.execute(f"SELECT status FROM {orders_table_for_status} WHERE id = %s", (order_id,))
-            order_status = cur.fetchone()['status']
-
-            if order_status == 'delta':
+            order_status_row = cur.fetchone()
+            if order_status_row and order_status_row['status'] == 'delta':
                 logs.append("\nСтатус заказа 'delta'. Запускаю связывание кодов с упаковками...")
-                # 1. Получаем все SSCC для этого заказа из 'packages'
-                packages_table = os.getenv('TABLE_PACKAGES')
+                packages_table = os.getenv('TABLE_PACKAGES', 'packages')
                 cur.execute(f"SELECT id, sscc FROM {packages_table} WHERE owner = 'delta' AND order_id = %s", (order_id,))
                 sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
 
-                # 2. Обновляем package_id в items_df_to_save
                 # Для этого нам нужен доступ к BoxSSCC, который есть в исходном items_df
-                items_df_to_save['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
-                updated_count = items_df_to_save['package_id'].notna().sum()
-                logs.append(f"Успешно связано {updated_count} кодов с коробами.")
+                if 'BoxSSCC' in items_df.columns:
+                    items_df_to_save['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                    updated_count = items_df_to_save['package_id'].notna().sum()
+                    logs.append(f"Успешно связано {updated_count} кодов с коробами.")
+                else:
+                    logs.append("ПРЕДУПРЕЖДЕНИЕ: В данных отсутствует колонка 'BoxSSCC', связывание с коробами для 'delta' заказа невозможно.")
 
-            else:
-                items_df_to_save = items_df
             upsert_data_to_db(cur, 'TABLE_ITEMS', items_df_to_save, 'datamatrix')
             
             conn.commit()
             logs.append("\nПроцесс импорта и агрегации успешно завершен!")
-
     except Exception as e:
         if conn: conn.rollback()
         logs.append(f"\nКРИТИЧЕСКАЯ ОШИБКА: {e}")
