@@ -3,8 +3,8 @@
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
-    "devPath": "http://109.172.115.204:8080",
-    "distDir": "../dist"
+    "devPath": "http://localhost:5173",
+    "distDir": "./dist"
   },
   "package": {
     "productName": "App Portal Desktop",
@@ -14,7 +14,7 @@
     "allowlist": {
       "all": false,
       "http": {
-        "all": false,
+        "all": true,
         "scope": ["http://109.172.115.204:8080/*"]
       },
       "shell": {
