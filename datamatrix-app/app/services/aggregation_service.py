@@ -444,7 +444,7 @@ def run_import_from_dmkod(order_id: int) -> list:
 
     try:
         conn = get_db_connection()
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur: # --- ИЗМЕНЕНИЕ: Единый блок для всех операций с БД ---
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             # 1. Получаем все строки детализации с кодами для этого заказа
             # --- ИЗМЕНЕНИЕ: Также получаем aggregation_level ---
             cur.execute("""
@@ -481,8 +481,7 @@ def run_import_from_dmkod(order_id: int) -> list:
         logs.append(f"\nВсего найдено и разобрано {len(items_df)} кодов DataMatrix.")
         logs.append("Проверяю, не были ли эти коды обработаны ранее...")
 
-        # --- Дальнейшая логика теперь внутри того же блока 'with' ---
-            # Проверка на дубликаты
+            # --- ИСПРАВЛЕНИЕ: Убираем лишний отступ, чтобы код был внутри блока try, а не with ---
             dm_to_check = tuple(items_df['datamatrix'].unique())
             items_table = os.getenv('TABLE_ITEMS', 'items')
             cur.execute(f"SELECT datamatrix, order_id FROM {items_table} WHERE datamatrix IN %s", (dm_to_check,))
