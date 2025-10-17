@@ -361,7 +361,7 @@ def run_import_from_dmkod(order_id: int) -> list:
 
     try:
         conn = get_db_connection()
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with conn.cursor() as cur:
             # 1. Получаем все строки детализации с кодами для этого заказа
             # --- ИЗМЕНЕНИЕ: Также получаем aggregation_level ---
             cur.execute("""
@@ -369,14 +369,16 @@ def run_import_from_dmkod(order_id: int) -> list:
                 FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL
             """, (order_id,))
             details_with_codes = cur.fetchall()
+            # Преобразуем кортежи в словари вручную для удобства
+            columns = [desc[0] for desc in cur.description]
+            details_with_codes = [dict(zip(columns, row)) for row in details_with_codes]
 
             if not details_with_codes:
                 raise ValueError("Не найдено кодов для импорта в базе данных.")
 
             # 2. Собираем все коды в один список all_dm_data
             for i, detail in enumerate(details_with_codes):
-                codes = detail['api_codes_json'].get('codes', [])
-                gtin = detail['gtin']
+                codes, gtin = detail.get('api_codes_json', {}).get('codes', []), detail.get('gtin')
                 aggregation_level = detail['aggregation_level']
                 api_id = detail['api_id'] # Получаем реальный ID тиража
                 logs.append(f"  -> Извлечено {len(codes)} кодов для GTIN {gtin} (ID тиража: {api_id}).")
@@ -398,7 +400,7 @@ def run_import_from_dmkod(order_id: int) -> list:
         logs.append(f"\nВсего найдено и разобрано {len(items_df)} кодов DataMatrix.")
         logs.append("Проверяю, не были ли эти коды обработаны ранее...")
 
-        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+        with conn.cursor() as cur:
             dm_to_check = tuple(items_df['datamatrix'].unique())
             items_table = os.getenv('TABLE_ITEMS', 'items')
             cur.execute(f"SELECT datamatrix, order_id FROM {items_table} WHERE datamatrix IN %s", (dm_to_check,))
@@ -414,7 +416,7 @@ def run_import_from_dmkod(order_id: int) -> list:
             unique_gtins_in_upload = items_df['gtin'].unique()
             products_table = os.getenv('TABLE_PRODUCTS', 'products')
             cur.execute(f"SELECT gtin FROM {products_table} WHERE gtin IN %s", (tuple(unique_gtins_in_upload),))
-            existing_gtins_from_db = {row['gtin'] for row in cur.fetchall()}
+            existing_gtins_from_db = {row[0] for row in cur.fetchall()}
             new_gtins = [gtin for gtin in unique_gtins_in_upload if gtin not in existing_gtins_from_db]
             if new_gtins:
                 logs.append(f"Найдено {len(new_gtins)} новых GTIN. Создаю для них заглушки...")
@@ -476,12 +478,13 @@ def run_import_from_dmkod(order_id: int) -> list:
             # --- НОВЫЙ БЛОК: Связывание кодов с упаковками для delta-заказов ---
             # Этот блок был перемещен сюда, чтобы использовать тот же курсор
             orders_table_for_status = os.getenv('TABLE_ORDERS', 'orders')
-            cur.execute(f"SELECT status FROM {orders_table_for_status} WHERE id = %s", (order_id,))
-            order_status_row = cur.fetchone()
-            if order_status_row and order_status_row['status'] == 'delta':
+            cur.execute(f"SELECT status FROM {orders_table_for_status} WHERE id = %s", (order_id,)) # Используем стандартный курсор
+            order_status_row = cur.fetchone() # Вернет кортеж, например ('delta',)
+            if order_status_row and order_status_row[0] == 'delta':
                 logs.append("\nСтатус заказа 'delta'. Запускаю связывание кодов с упаковками...")
                 packages_table = os.getenv('TABLE_PACKAGES', 'packages')
                 cur.execute(f"SELECT id, sscc FROM {packages_table} WHERE owner = 'delta' AND order_id = %s", (order_id,))
+                sscc_columns = [desc[0] for desc in cur.description]
                 sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
 
                 # Для этого нам нужен доступ к BoxSSCC, который есть в исходном items_df
