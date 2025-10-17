@@ -518,13 +518,17 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
                     # Получаем уровень агрегации для этого тиража (он одинаков для всех кодов в группе)
                     agg_level = group['aggregation_level'].iloc[0]
                     gtin = group['gtin'].iloc[0]
-
-                    if not agg_level or agg_level <= 0:
-                        logs.append(f"ИНФО: Агрегация 1-го уровня для тиража №{tirage_num} (GTIN: {gtin}) пропущена, т.к. кол-во в коробе не задано (aggregation_level=0).")
+ 
+                    # Преобразуем в int, обрабатывая None и возможные float из pandas
+                    agg_level_int = int(agg_level) if pd.notna(agg_level) else 0
+ 
+                    if agg_level_int <= 0:
+                        logs.append(f"ИНФО: Агрегация 1-го уровня для тиража №{tirage_num} (GTIN: {gtin}) пропущена, т.к. кол-во в коробе не задано (aggregation_level={agg_level}).")
                         continue
                     
-                    for i in range(0, len(item_indices), agg_level):
-                        chunk_indices = item_indices[i:i + agg_level]
+                    logs.append(f"  -> Агрегирую тираж №{tirage_num} (GTIN: {gtin}) с шагом {agg_level_int} шт. в коробе.")
+                    for i in range(0, len(item_indices), agg_level_int):
+                        chunk_indices = item_indices[i:i + agg_level_int]
                         box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
                         if warning and warning not in logs: logs.append(warning)
                         items_df.loc[chunk_indices, 'package_id'] = box_id
