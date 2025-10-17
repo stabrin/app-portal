@@ -434,10 +434,10 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
                         logs.append(f"Не удалось удалить временный файл {path}: {e}")        
     return logs
 
-def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int, level2_qty: int, level3_qty: int) -> list:
+def run_import_from_dmkod(order_id: int) -> list:
     """
     Выполняет импорт кодов из JSON-поля в dmkod_aggregation_details и их агрегацию.
-    """
+    Агрегация всегда только 1-го уровня и управляется полем aggregation_level из БД."""
     logs = [f"Запуск импорта кодов из БД для Заказа №{order_id}..."]
     conn = None
     all_dm_data = []
@@ -508,61 +508,42 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
 
             # Агрегация
             packages_df = pd.DataFrame()
-            if aggregation_mode in ['level1', 'level2', 'level3']:
-                logs.append(f"\nНачинаю агрегацию...")
-                all_packages = []
-                items_df['package_id'] = None
-                # --- ИЗМЕНЕННАЯ ЛОГИКА: Группируем по номеру тиража, чтобы обработать каждый тираж отдельно ---
-                for tirage_num, group in items_df.groupby('tirage_number'):
-                    item_indices = group.index.tolist()
-                    # Получаем уровень агрегации для этого тиража (он одинаков для всех кодов в группе)
-                    agg_level = group['aggregation_level'].iloc[0]
-                    gtin = group['gtin'].iloc[0]
- 
-                    # Преобразуем в int, обрабатывая None и возможные float из pandas
-                    agg_level_int = int(agg_level) if pd.notna(agg_level) else 0
- 
-                    if agg_level_int <= 0:
-                        logs.append(f"ИНФО: Агрегация 1-го уровня для тиража №{tirage_num} (GTIN: {gtin}) пропущена, т.к. кол-во в коробе не задано (aggregation_level={agg_level}).")
-                        continue
-                    
-                    logs.append(f"  -> Агрегирую тираж №{tirage_num} (GTIN: {gtin}) с шагом {agg_level_int} шт. в коробе.")
-                    for i in range(0, len(item_indices), agg_level_int):
-                        chunk_indices = item_indices[i:i + agg_level_int]
-                        box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
-                        if warning and warning not in logs: logs.append(warning)
-                        items_df.loc[chunk_indices, 'package_id'] = box_id
-                        _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
-                        all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 1, 'parent_id': None})
+            logs.append(f"\nНачинаю автоматическую агрегацию 1-го уровня...")
+            all_packages = []
+            items_df['package_id'] = None
+            
+            # Группируем по номеру тиража, чтобы обработать каждый тираж отдельно
+            for tirage_num, group in items_df.groupby('tirage_number'):
+                item_indices = group.index.tolist()
+                agg_level = group['aggregation_level'].iloc[0]
+                gtin = group['gtin'].iloc[0]
+                agg_level_int = int(agg_level) if pd.notna(agg_level) else 0
+
+                if agg_level_int <= 0:
+                    logs.append(f"ИНФО: Агрегация для тиража №{tirage_num} (GTIN: {gtin}) пропущена, т.к. кол-во в коробе не задано (aggregation_level={agg_level}).")
+                    continue
+                
+                # --- НОВАЯ ЛОГИКА ---
+                # Если agg_level_int == 1, каждый код в отдельный короб.
+                # Если agg_level_int > 1, группируем как раньше.
+                # Шаг для цикла всегда будет agg_level_int, т.к. range(0, N, 1) работает корректно.
+                step = agg_level_int
+                
+                if step == 1:
+                    logs.append(f"  -> Агрегирую тираж №{tirage_num} (GTIN: {gtin}) в индивидуальные короба (1 к 1).")
+                else:
+                    logs.append(f"  -> Агрегирую тираж №{tirage_num} (GTIN: {gtin}) с шагом {step} шт. в коробе.")
+
+                for i in range(0, len(item_indices), step):
+                    chunk_indices = item_indices[i:i + step]
+                    box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
+                    if warning and warning not in logs: logs.append(warning)
+                    items_df.loc[chunk_indices, 'package_id'] = box_id
+                    _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
+                    all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 1, 'parent_id': None})
+            
+            if all_packages:
                 packages_df = pd.DataFrame(all_packages)
-
-                # --- ИСПРАВЛЕНИЕ: Добавлена корректная логика для агрегации 2-го и 3-го уровней ---
-                if aggregation_mode in ['level2', 'level3'] and level2_qty > 0:
-                    logs.append("\n--- Создаю паллеты (уровень 2) ---")
-                    all_box_ids = packages_df[packages_df['level'] == 1]['id'].tolist()
-                    for i in range(0, len(all_box_ids), level2_qty):
-                        boxes_on_pallet_ids = all_box_ids[i:i + level2_qty]
-                        pallet_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
-                        if warning and warning not in logs: logs.append(warning)
-                        packages_df.loc[packages_df['id'].isin(boxes_on_pallet_ids), 'parent_id'] = pallet_id
-                        _, full_sscc = generate_sscc(pallet_id, gcp_for_sscc)
-                        pallet_record = pd.DataFrame([{'id': pallet_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 2, 'parent_id': None}])
-                        packages_df = pd.concat([packages_df, pallet_record], ignore_index=True)
-
-                if aggregation_mode == 'level3' and level3_qty > 0:
-                    logs.append("\n--- Создаю контейнеры (уровень 3) ---")
-                    all_pallet_ids = packages_df[packages_df['level'] == 2]['id'].tolist()
-                    for i in range(0, len(all_pallet_ids), level3_qty):
-                        pallets_in_container_ids = all_pallet_ids[i:i + level3_qty]
-                        container_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
-                        if warning and warning not in logs: logs.append(warning)
-                        packages_df.loc[packages_df['id'].isin(pallets_in_container_ids), 'parent_id'] = container_id
-                        _, full_sscc = generate_sscc(container_id, gcp_for_sscc)
-                        container_record = pd.DataFrame([{'id': container_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 3, 'parent_id': None}])
-                        packages_df = pd.concat([packages_df, container_record], ignore_index=True)
-            else:
-                items_df['package_id'] = None
-                logs.append("\nАгрегация не требуется.")
 
             # Сохранение результатов
             if not packages_df.empty:
