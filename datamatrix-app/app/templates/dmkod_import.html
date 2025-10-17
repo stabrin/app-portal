@@ -109,12 +109,11 @@
         // Показываем/скрываем весь блок с полями
         fieldsDiv.style.display = mode !== 'none' ? 'flex' : 'none';
 
-        // --- НОВАЯ ЛОГИКА ---
+        // --- ИСПРАВЛЕННАЯ ЛОГИКА ---
         // Поле "Кол-во в коробе" для dmkod-заказов всегда берется из БД,
-        // поэтому мы его не показываем пользователю, даже если выбрана агрегация.
-        // Оно нужно только для агрегации 2-го и 3-го уровня.
+        // поэтому мы его не показываем пользователю.
         level1.style.display = 'none'; // Всегда скрыто
-        level2.style.display = ['level2', 'level3'].includes(mode) ? 'block' : 'none';
+        level2.style.display = ['level1', 'level2', 'level3'].includes(mode) ? 'block' : 'none';
         level3.style.display = mode === 'level3' ? 'block' : 'none';
     });
 </script>

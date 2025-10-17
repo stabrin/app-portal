@@ -537,7 +537,7 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
                 packages_df = pd.DataFrame(all_packages)
 
                 # --- ИСПРАВЛЕНИЕ: Добавлена корректная логика для агрегации 2-го и 3-го уровней ---
-                if aggregation_mode in ['level2', 'level3']:
+                if aggregation_mode in ['level2', 'level3'] and level2_qty > 0:
                     logs.append("\n--- Создаю паллеты (уровень 2) ---")
                     all_box_ids = packages_df[packages_df['level'] == 1]['id'].tolist()
                     for i in range(0, len(all_box_ids), level2_qty):
@@ -549,7 +549,7 @@ def run_import_from_dmkod(order_id: int, aggregation_mode: str, level1_qty: int,
                         pallet_record = pd.DataFrame([{'id': pallet_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 2, 'parent_id': None}])
                         packages_df = pd.concat([packages_df, pallet_record], ignore_index=True)
 
-                if aggregation_mode == 'level3':
+                if aggregation_mode == 'level3' and level3_qty > 0:
                     logs.append("\n--- Создаю контейнеры (уровень 3) ---")
                     all_pallet_ids = packages_df[packages_df['level'] == 2]['id'].tolist()
                     for i in range(0, len(all_pallet_ids), level3_qty):
