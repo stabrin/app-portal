@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "build": {
     "beforeBuildCommand": "",
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "node_modules/serve/bin/serve.js frontend -l 3000",
     "devPath": "http://localhost:3000",
     "distDir": "./frontend"
   },
