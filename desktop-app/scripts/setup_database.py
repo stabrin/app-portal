@@ -1,3 +1,17 @@
+# C:/app-portal/desktop-app/.env
+
+# Параметры SSH
+SSH_HOST=109.172.115.204
+SSH_PORT=22
+SSH_USER=root
+SSH_KEY_FILENAME=id_rsa # Просто имя файла ключа в папке /keys/
+
+# Параметры PostgreSQL
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=your_postgres_password # <-- ЗАМЕНИТЕ НА ВАШ ПАРОЛЬ
+DB_NAME=tilda_db
 # scripts/setup_database.py
 
 import os
