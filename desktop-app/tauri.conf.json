@@ -3,7 +3,7 @@
   "build": {
     "beforeBuildCommand": "",
     "beforeDevCommand": "",
-    "devPath": "./frontend",
+    "devPath": "./frontend/index.html",
     "distDir": "./frontend"
   },
   "package": {
