@@ -1483,7 +1483,7 @@ def integration_panel():
                 user_logs = []
                 try:
                     conn_local = get_db_connection()
-                    with conn_local.cursor() as cur:
+                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
                         # Получаем все необходимые данные одним запросом, объединяя таблицы
                         cur.execute(
                             """
