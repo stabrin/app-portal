@@ -1,9 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
   "build": {
-    "beforeBuildCommand": "npm run build",
-    "beforeDevCommand": "npm run dev",
-    "devPath": "http://localhost:5173",
+    "beforeBuildCommand": "",
+    "beforeDevCommand": "",
+    "devPath": "./frontend",
     "distDir": "./frontend"
   },
   "package": {
@@ -77,7 +77,7 @@
         "fullscreen": false,
         "height": 720,
         "resizable": true,
-        "title": "Портал Приложений",
+        "title": "Привет, мир!",
         "width": 1280
       }
     ]
