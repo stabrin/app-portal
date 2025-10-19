@@ -419,21 +419,92 @@ def open_clients_management_window():
         editor_window.title("Редактор клиента")
         editor_window.grab_set()
 
-        # Поля для ввода
-        fields = ["Имя", "SSH Хост", "SSH Порт", "SSH Пользователь", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль", "SSH Ключ"]
+        # --- Новая компоновка окна ---
+        # Основной фрейм с отступами
+        main_editor_frame = ttk.Frame(editor_window, padding="10")
+        main_editor_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Верхний фрейм для колонок
+        top_frame = ttk.Frame(main_editor_frame)
+        top_frame.pack(fill=tk.X, pady=5)
+
+        # Левая колонка (SSH)
+        ssh_frame = ttk.LabelFrame(top_frame, text="Параметры подключения SSH")
+        ssh_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        # Правая колонка (БД)
+        db_frame = ttk.LabelFrame(top_frame, text="Параметры подключения к базе")
+        db_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+
         entries = {}
-        
-        for i, field in enumerate(fields):
-            ttk.Label(editor_window, text=field + ":").grid(row=i, column=0, padx=5, pady=5, sticky='w')
-            if field == "SSH Ключ":
-                widget = tk.Text(editor_window, height=10, width=50)
-            else:
-                widget = ttk.Entry(editor_window, width=50)
-            widget.grid(row=i, column=1, padx=5, pady=5)
-            entries[field] = widget
+        ssh_fields = ["Имя", "SSH Хост", "SSH Порт", "SSH Пользователь"]
+        db_fields = ["DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль"]
+
+        for i, field in enumerate(ssh_fields):
+            ttk.Label(ssh_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
+            entry = ttk.Entry(ssh_frame, width=40)
+            entry.grid(row=i, column=1, padx=5, pady=2, sticky='ew')
+            entries[field] = entry
+
+        for i, field in enumerate(db_fields):
+            ttk.Label(db_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
+            entry = ttk.Entry(db_frame, width=40)
+            entry.grid(row=i, column=1, padx=5, pady=2, sticky='ew')
+            entries[field] = entry
+
+        # Поле для SSH ключа
+        key_frame = ttk.LabelFrame(main_editor_frame, text="Приватный SSH ключ")
+        key_frame.pack(fill=tk.X, pady=5)
+        ssh_key_text = tk.Text(key_frame, height=8, width=80)
+        ssh_key_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
+        entries["SSH Ключ"] = ssh_key_text
+
+        # --- Блок управления пользователями ---
+        users_management_frame = ttk.LabelFrame(main_editor_frame, text="Пользователи этого клиента")
+        users_management_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        # Кнопки управления
+        user_buttons_frame = ttk.Frame(users_management_frame)
+        user_buttons_frame.pack(fill=tk.X, padx=5, pady=5)
+
+        btn_add_user = ttk.Button(user_buttons_frame, text="Создать")
+        btn_add_user.pack(side=tk.LEFT, padx=2)
+        btn_edit_user = ttk.Button(user_buttons_frame, text="Редактировать")
+        btn_edit_user.pack(side=tk.LEFT, padx=2)
+        btn_delete_user = ttk.Button(user_buttons_frame, text="Удалить")
+        btn_delete_user.pack(side=tk.LEFT, padx=2)
+        btn_toggle_user = ttk.Button(user_buttons_frame, text="Вкл/Выкл")
+        btn_toggle_user.pack(side=tk.LEFT, padx=2)
+
+        # Таблица пользователей
+        user_tree_cols = ('id', 'name', 'login', 'role', 'is_active')
+        users_in_editor_tree = ttk.Treeview(users_management_frame, columns=user_tree_cols, show='headings', height=5)
+        users_in_editor_tree.heading('id', text='ID')
+        users_in_editor_tree.heading('name', text='Имя')
+        users_in_editor_tree.heading('login', text='Логин')
+        users_in_editor_tree.heading('role', text='Роль')
+        users_in_editor_tree.heading('is_active', text='Активен')
+        users_in_editor_tree.column('id', width=40)
+        users_in_editor_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        def load_users_for_editor(c_id):
+            for i in users_in_editor_tree.get_children():
+                users_in_editor_tree.delete(i)
+            try:
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT id, name, login, role, is_active FROM users WHERE client_id = %s ORDER BY name;", (c_id,))
+                        for row in cur.fetchall():
+                            users_in_editor_tree.insert('', 'end', values=row)
+            except Exception as e:
+                logging.error(f"Ошибка загрузки пользователей в редакторе: {e}")
 
         client_data = None
         if client_id: # Если редактирование, загружаем данные
+            # Активируем кнопки
+            for btn in [btn_add_user, btn_edit_user, btn_delete_user, btn_toggle_user]:
+                btn.config(state="normal")
+            
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -441,14 +512,21 @@ def open_clients_management_window():
                         client_data = cur.fetchone()
                 if client_data:
                     for i, field in enumerate(fields):
-                        value = client_data[i] if client_data[i] is not None else ""
-                        if field == "SSH Ключ":
-                            entries[field].insert('1.0', value)
-                        else:
-                            entries[field].insert(0, str(value))
+                        # Сопоставляем поля с данными из БД
+                        db_field_map = {"Имя": 0, "SSH Хост": 1, "SSH Порт": 2, "SSH Пользователь": 3, "DB Хост": 4, "DB Порт": 5, "DB Имя": 6, "DB Пользователь": 7, "DB Пароль": 8, "SSH Ключ": 9}
+                        if field in db_field_map:
+                            value = client_data[db_field_map[field]] if client_data[db_field_map[field]] is not None else ""
+                            if field == "SSH Ключ":
+                                entries[field].insert('1.0', value)
+                            else:
+                                entries[field].insert(0, str(value))
+                load_users_for_editor(client_id)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить данные клиента: {e}", parent=editor_window)
                 editor_window.destroy()
+        else: # Новый клиент
+            for btn in [btn_add_user, btn_edit_user, btn_delete_user, btn_toggle_user]:
+                btn.config(state="disabled")
 
         def save_client():
             """Сохраняет данные клиента в БД."""
@@ -493,8 +571,45 @@ def open_clients_management_window():
                 logging.error(f"Ошибка сохранения клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка", f"Не удалось сохранить клиента: {e}", parent=editor_window)
 
-        ttk.Button(editor_window, text="Сохранить", command=save_client).grid(row=len(fields), column=1, sticky='e', padx=5, pady=10)
-        ttk.Button(editor_window, text="Отмена", command=editor_window.destroy).grid(row=len(fields), column=0, sticky='w', padx=5, pady=10)
+        # Нижние кнопки Сохранить/Отмена
+        bottom_buttons_frame = ttk.Frame(main_editor_frame)
+        bottom_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        ttk.Button(bottom_buttons_frame, text="Сохранить", command=save_client).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(bottom_buttons_frame, text="Отмена", command=editor_window.destroy).pack(side=tk.RIGHT)
+
+def open_supervisor_creator_window():
+    """Открывает окно для создания супервизора."""
+    sup_window = tk.Toplevel(root)
+    sup_window.title("Создание нового супервизора")
+    sup_window.grab_set()
+
+    fields = ["Имя", "Логин", "Пароль"]
+    entries = {}
+    for i, field in enumerate(fields):
+        ttk.Label(sup_window, text=field + ":").grid(row=i, column=0, padx=10, pady=5, sticky='w')
+        entry = ttk.Entry(sup_window, width=40, show="*" if field == "Пароль" else "")
+        entry.grid(row=i, column=1, padx=10, pady=5)
+        entries[field] = entry
+
+    def save_supervisor():
+        user_data = {field: entries[field].get() for field in fields}
+        if not all(user_data.values()):
+            messagebox.showwarning("Внимание", "Все поля должны быть заполнены.", parent=sup_window)
+            return
+        
+        try:
+            hashed_pass = bcrypt.hashpw(user_data['Пароль'].encode('utf-8'), bcrypt.gensalt())
+            with get_main_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, 'супервизор', NULL)",
+                        (user_data['Имя'], user_data['Логин'], hashed_pass.decode('utf-8'))
+                    )
+                conn.commit()
+            messagebox.showinfo("Успех", "Супервизор успешно создан.", parent=sup_window)
+            sup_window.destroy()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать супервизора: {e}", parent=sup_window)
 
     def edit_selected_client():
         selected_item = clients_tree.focus()
@@ -657,6 +772,7 @@ def main():
     # -- Меню "Администрирование" --
     admin_menu = tk.Menu(menubar, tearoff=0)
     admin_menu.add_command(label="Клиенты", command=open_clients_management_window)
+    admin_menu.add_command(label="Создать супервизора", command=open_supervisor_creator_window)
     menubar.add_cascade(label="Администрирование", menu=admin_menu)
 
     # -- Меню "Справка" --
