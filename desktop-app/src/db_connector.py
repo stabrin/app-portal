@@ -83,7 +83,9 @@ def get_main_db_connection():
     готовое соединение с ГЛАВНОЙ базой данных (tilda_db).
     """
     # Загружаем переменные из .env файла
-    desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+    # ИСПРАВЛЕНИЕ: Путь к корню приложения - это один уровень вверх от папки 'src'
+    desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    
     dotenv_path = os.path.join(desktop_app_root, '.env')
     load_dotenv(dotenv_path=dotenv_path)
 
