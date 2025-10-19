@@ -106,29 +106,27 @@ def connect_and_show_orders(mode='local'):
             ) as server:
                 logging.info(f"SSH туннель успешно создан. Локальный порт: {server.local_bind_port}")
                 # Подключаемся к БД через локальный порт туннеля
-                conn = psycopg2.connect(
+                with psycopg2.connect(
                     dbname=os.getenv("DB_NAME"),
                     user=os.getenv("DB_USER"),
                     password=os.getenv("DB_PASSWORD"),
                     host=server.local_bind_host,
                     port=server.local_bind_port
-                )
-                orders = get_orders_from_db(conn)
-                conn.close()
+                ) as conn:
+                    orders = get_orders_from_db(conn)
                 logging.info("Данные из удаленной БД успешно получены.")
 
         else: # mode == 'local'
             logging.info("Попытка подключения к локальной БД...")
             # Прямое подключение к БД (как было раньше)
-            conn = psycopg2.connect(
+            with psycopg2.connect(
                 dbname=os.getenv("DB_NAME"),
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASSWORD"),
                 host=os.getenv("DB_HOST", "localhost"),
                 port=os.getenv("DB_PORT")
-            )
-            orders = get_orders_from_db(conn)
-            conn.close()
+            ) as conn:
+                orders = get_orders_from_db(conn)
             logging.info("Данные из локальной БД успешно получены.")
 
         # Создаем Treeview для отображения данных
