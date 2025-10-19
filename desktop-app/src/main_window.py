@@ -282,6 +282,7 @@ def open_print_management_window():
     try:
         import win32print
         import win32ui
+        import win32con # Добавляем импорт модуля с константами
         from pywintypes import error as pywin_error
     except ImportError:
         messagebox.showerror("Ошибка", "Библиотека 'pywin32' не установлена.\nПожалуйста, установите ее командой: pip install pywin32")
@@ -411,7 +412,7 @@ def open_print_management_window():
                 line2 = "из 'ТильдаКод'"
 
                 # Устанавливаем выравнивание по центру
-                dc.SetTextAlign(win32ui.TA_CENTER | win32ui.TA_TOP)
+                dc.SetTextAlign(win32con.TA_CENTER | win32con.TA_TOP)
 
                 # "Рисуем" текст, позиционируя его по центру ширины этикетки
                 # и с небольшим отступом сверху
