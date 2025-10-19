@@ -451,44 +451,48 @@ def open_print_management_window():
     # --- Первоначальная загрузка данных ---
     load_printers()
 
+def main():
+    """Главная функция для создания и запуска GUI приложения."""
+    global root # Делаем root глобальной, чтобы функции могли к ней обращаться
+    # 1. Создаем главное окно приложения
+    root = tk.Tk()
 
-# 1. Создаем главное окно приложения
-root = tk.Tk()
+    # 2. Устанавливаем заголовок окна
+    root.title("ТильдаКод")
 
-# 2. Устанавливаем заголовок окна
-root.title("ТильдаКод")
+    # 3. Устанавливаем начальный размер окна (ширина x высота)
+    root.geometry("600x400")
 
-# 3. Устанавливаем начальный размер окна (ширина x высота)
-root.geometry("600x400")
+    # 4. Создаем главное меню
+    menubar = tk.Menu(root)
+    root.config(menu=menubar)
 
-# 4. Создаем главное меню
-menubar = tk.Menu(root)
-root.config(menu=menubar)
+    # -- Меню "Файл" --
+    file_menu = tk.Menu(menubar, tearoff=0)
+    file_menu.add_command(label="Инициализация БД", command=run_db_setup)
+    file_menu.add_separator()
+    file_menu.add_command(label="Выход", command=root.quit)
+    menubar.add_cascade(label="Файл", menu=file_menu)
 
-# -- Меню "Файл" --
-file_menu = tk.Menu(menubar, tearoff=0)
-file_menu.add_command(label="Инициализация БД", command=run_db_setup)
-file_menu.add_separator()
-file_menu.add_command(label="Выход", command=root.quit)
-menubar.add_cascade(label="Файл", menu=file_menu)
+    # -- Меню "Печать" --
+    print_menu = tk.Menu(menubar, tearoff=0)
+    print_menu.add_command(label="Управление печатью", command=open_print_management_window)
+    menubar.add_cascade(label="Печать", menu=print_menu)
 
-# -- Меню "Печать" --
-print_menu = tk.Menu(menubar, tearoff=0)
-print_menu.add_command(label="Управление печатью", command=open_print_management_window)
-menubar.add_cascade(label="Печать", menu=print_menu)
+    # -- Меню "База данных" --
+    db_menu = tk.Menu(menubar, tearoff=0)
+    db_menu.add_command(label="Проверить подключение", command=test_connection)
+    db_menu.add_separator()
+    db_menu.add_command(label="Показать заказы", command=connect_and_show_orders)
+    menubar.add_cascade(label="База данных", menu=db_menu)
 
-# -- Меню "База данных" --
-db_menu = tk.Menu(menubar, tearoff=0)
-db_menu.add_command(label="Проверить подключение", command=test_connection)
-db_menu.add_separator()
-db_menu.add_command(label="Показать заказы", command=connect_and_show_orders)
-menubar.add_cascade(label="База данных", menu=db_menu)
+    # -- Меню "Справка" --
+    help_menu = tk.Menu(menubar, tearoff=0)
+    help_menu.add_command(label="О программе") # Пока без функции
+    menubar.add_cascade(label="Справка", menu=help_menu)
 
-# -- Меню "Справка" --
-help_menu = tk.Menu(menubar, tearoff=0)
-help_menu.add_command(label="О программе") # Пока без функции
-menubar.add_cascade(label="Справка", menu=help_menu)
+    # 6. Запускаем главный цикл приложения.
+    root.mainloop()
 
-# 6. Запускаем главный цикл приложения.
-#    Окно будет отображаться и ждать действий пользователя, пока его не закроют.
-root.mainloop()
+if __name__ == "__main__":
+    main()

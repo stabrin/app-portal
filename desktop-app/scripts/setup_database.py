@@ -91,7 +91,7 @@ def main():
             remote_port=REMOTE_DB_PORT
         ) as tunnel:
             
-            local_port = tunnel.local_bind_port
+            local_port = tunnel.local_port # ИСПРАВЛЕНИЕ: Правильное имя атрибута
             logging.info(f"SSH-туннель успешно создан. Локальный порт: {local_port}.")
 
             if not MAIN_DB_NAME:
