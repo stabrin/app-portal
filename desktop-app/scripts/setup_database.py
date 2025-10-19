@@ -169,6 +169,20 @@ def main():
             # conn_new_db.commit() больше не нужен при автокоммите.
             conn_new_db.close()
 
+            # --- ФИНАЛЬНАЯ ДИАГНОСТИКА: Выводим список всех баз данных на сервере ---
+            logging.info("\n--- Финальная диагностика: список баз данных на сервере ---")
+            conn_diag = psycopg2.connect(
+                host='127.0.0.1', port=local_port,
+                user=DB_USER, password=DB_PASSWORD, dbname='postgres'
+            )
+            with conn_diag.cursor() as cur:
+                cur.execute("SELECT datname FROM pg_database WHERE datistemplate = false;")
+                databases = cur.fetchall()
+                logging.info("Обнаружены следующие базы данных:")
+                for db in databases:
+                    logging.info(f"  -> {db[0]}")
+            conn_diag.close()
+
     except Exception as e:
         error_details = traceback.format_exc()
         logging.error(f"Произошла критическая ошибка: {e}\n{error_details}")
