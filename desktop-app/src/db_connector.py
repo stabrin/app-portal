@@ -7,6 +7,7 @@ import subprocess
 import time
 import logging
 import psycopg2
+from contextlib import contextmanager
 from dotenv import load_dotenv
 
 class SshTunnelProcess:
@@ -75,6 +76,7 @@ class SshTunnelProcess:
             self.process.wait()
             logging.info("SSH-туннель закрыт.")
 
+@contextmanager
 def get_main_db_connection():
     """
     Контекстный менеджер, который создает SSH-туннель и возвращает
