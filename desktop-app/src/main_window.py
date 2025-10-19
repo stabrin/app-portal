@@ -11,6 +11,7 @@ import time
 import socket
 import psycopg2
 from psycopg2 import sql
+import bcrypt
 from dotenv import load_dotenv
 
 # --- Настройка логирования ---
@@ -451,6 +452,243 @@ def open_print_management_window():
     # --- Первоначальная загрузка данных ---
     load_printers()
 
+def open_clients_management_window():
+    """Открывает окно для управления клиентами и пользователями."""
+    
+    # --- Вспомогательные функции для работы с главной БД ---
+    def get_main_db_connection(tunnel):
+        """Подключается к главной БД tilda_db через туннель."""
+        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        dotenv_path = os.path.join(desktop_app_root, '.env')
+        load_dotenv(dotenv_path=dotenv_path)
+        
+        return psycopg2.connect(
+            dbname=os.getenv("TILDA_DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=tunnel.local_host,
+            port=tunnel.local_port
+        )
+
+    def load_clients():
+        """Загружает список клиентов из БД в Treeview."""
+        for i in clients_tree.get_children():
+            clients_tree.delete(i)
+        
+        try:
+            desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+
+            with SshTunnelProcess(
+                ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
+                ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
+                remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
+            ) as tunnel:
+                with get_main_db_connection(tunnel) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT id, name, ssh_host, created_at FROM clients ORDER BY name;")
+                        for row in cur.fetchall():
+                            clients_tree.insert('', 'end', values=row)
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка загрузки клиентов: {e}\n{error_details}")
+            messagebox.showerror("Ошибка", "Не удалось загрузить список клиентов.", parent=clients_window)
+
+    def on_client_select(event):
+        """При выборе клиента загружает список его пользователей."""
+        selected_item = clients_tree.focus()
+        if not selected_item:
+            return
+        client_id = clients_tree.item(selected_item)['values'][0]
+        load_users(client_id)
+
+    def load_users(client_id):
+        """Загружает пользователей для указанного клиента."""
+        for i in users_tree.get_children():
+            users_tree.delete(i)
+        
+        try:
+            desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+            ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+
+            with SshTunnelProcess(
+                ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
+                ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
+                remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
+            ) as tunnel:
+                with get_main_db_connection(tunnel) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT id, name, login, role, is_active FROM users WHERE client_id = %s ORDER BY name;", (client_id,))
+                        for row in cur.fetchall():
+                            users_tree.insert('', 'end', values=row)
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка загрузки пользователей: {e}\n{error_details}")
+            messagebox.showerror("Ошибка", "Не удалось загрузить список пользователей.", parent=clients_window)
+
+    def open_client_editor(client_id=None):
+        """Открывает окно для добавления или редактирования клиента."""
+        editor_window = tk.Toplevel(clients_window)
+        editor_window.title("Редактор клиента")
+        editor_window.grab_set()
+
+        # Поля для ввода
+        fields = ["Имя", "SSH Хост", "SSH Порт", "SSH Пользователь", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль", "SSH Ключ"]
+        entries = {}
+        
+        for i, field in enumerate(fields):
+            ttk.Label(editor_window, text=field + ":").grid(row=i, column=0, padx=5, pady=5, sticky='w')
+            if field == "SSH Ключ":
+                widget = tk.Text(editor_window, height=10, width=50)
+            else:
+                widget = ttk.Entry(editor_window, width=50)
+            widget.grid(row=i, column=1, padx=5, pady=5)
+            entries[field] = widget
+
+        client_data = None
+        if client_id: # Если редактирование, загружаем данные
+            try:
+                desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+                with SshTunnelProcess(
+                    ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
+                    ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
+                    remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
+                ) as tunnel:
+                    with get_main_db_connection(tunnel) as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key FROM clients WHERE id = %s", (client_id,))
+                            client_data = cur.fetchone()
+                if client_data:
+                    for i, field in enumerate(fields):
+                        value = client_data[i] if client_data[i] is not None else ""
+                        if field == "SSH Ключ":
+                            entries[field].insert('1.0', value)
+                        else:
+                            entries[field].insert(0, str(value))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить данные клиента: {e}", parent=editor_window)
+                editor_window.destroy()
+
+        def save_client():
+            """Сохраняет данные клиента в БД."""
+            data_to_save = {
+                'name': entries['Имя'].get(),
+                'ssh_host': entries['SSH Хост'].get(),
+                'ssh_port': int(entries['SSH Порт'].get() or 0),
+                'ssh_user': entries['SSH Пользователь'].get(),
+                'db_host': entries['DB Хост'].get(),
+                'db_port': int(entries['DB Порт'].get() or 0),
+                'db_name': entries['DB Имя'].get(),
+                'db_user': entries['DB Пользователь'].get(),
+                'db_password': entries['DB Пароль'].get(),
+                'ssh_private_key': entries['SSH Ключ'].get('1.0', 'end-1c')
+            }
+
+            try:
+                desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+                with SshTunnelProcess(
+                    ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
+                    ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
+                    remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
+                ) as tunnel:
+                    with get_main_db_connection(tunnel) as conn:
+                        with conn.cursor() as cur:
+                            if client_id: # Обновление
+                                query = sql.SQL("UPDATE clients SET name=%s, ssh_host=%s, ssh_port=%s, ssh_user=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, ssh_private_key=%s WHERE id=%s")
+                                cur.execute(query, (*data_to_save.values(), client_id))
+                            else: # Вставка нового клиента
+                                query = sql.SQL("INSERT INTO clients (name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
+                                cur.execute(query, tuple(data_to_save.values()))
+                                new_client_id = cur.fetchone()[0]
+                                
+                                # Создаем пользователя по умолчанию
+                                default_login = f"admin@{data_to_save['name']}"
+                                default_pass = "12345"
+                                hashed_pass = bcrypt.hashpw(default_pass.encode('utf-8'), bcrypt.gensalt())
+                                
+                                cur.execute(
+                                    "INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, %s, %s)",
+                                    ("Администратор", default_login, hashed_pass.decode('utf-8'), 'администратор', new_client_id)
+                                )
+                        conn.commit()
+                load_clients()
+                editor_window.destroy()
+            except Exception as e:
+                error_details = traceback.format_exc()
+                logging.error(f"Ошибка сохранения клиента: {e}\n{error_details}")
+                messagebox.showerror("Ошибка", f"Не удалось сохранить клиента: {e}", parent=editor_window)
+
+        ttk.Button(editor_window, text="Сохранить", command=save_client).grid(row=len(fields), column=1, sticky='e', padx=5, pady=10)
+        ttk.Button(editor_window, text="Отмена", command=editor_window.destroy).grid(row=len(fields), column=0, sticky='w', padx=5, pady=10)
+
+    def edit_selected_client():
+        selected_item = clients_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Внимание", "Выберите клиента для редактирования.", parent=clients_window)
+            return
+        client_id = clients_tree.item(selected_item)['values'][0]
+        open_client_editor(client_id)
+
+    # --- Основное окно управления клиентами ---
+    clients_window = tk.Toplevel(root)
+    clients_window.title("Управление клиентами")
+    clients_window.geometry("800x600")
+
+    # Разделение окна на две части
+    paned_window = ttk.PanedWindow(clients_window, orient=tk.VERTICAL)
+    paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # --- Верхняя часть: Клиенты ---
+    clients_frame = ttk.LabelFrame(paned_window, text="Клиенты")
+    paned_window.add(clients_frame, weight=1)
+
+    clients_tree_frame = ttk.Frame(clients_frame)
+    clients_tree_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=5)
+
+    clients_cols = ('id', 'name', 'ssh_host', 'created_at')
+    clients_tree = ttk.Treeview(clients_tree_frame, columns=clients_cols, show='headings')
+    clients_tree.heading('id', text='ID')
+    clients_tree.heading('name', text='Имя клиента')
+    clients_tree.heading('ssh_host', text='SSH Хост')
+    clients_tree.heading('created_at', text='Дата создания')
+    clients_tree.column('id', width=40)
+    clients_tree.pack(fill=tk.BOTH, expand=True)
+    clients_tree.bind('<<TreeviewSelect>>', on_client_select)
+
+    clients_buttons_frame = ttk.Frame(clients_frame)
+    clients_buttons_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+    ttk.Button(clients_buttons_frame, text="Добавить", command=lambda: open_client_editor()).pack(pady=2, fill=tk.X)
+    ttk.Button(clients_buttons_frame, text="Редактировать", command=edit_selected_client).pack(pady=2, fill=tk.X)
+    ttk.Button(clients_buttons_frame, text="Обновить", command=load_clients).pack(pady=2, fill=tk.X)
+
+    # --- Нижняя часть: Пользователи ---
+    users_frame = ttk.LabelFrame(paned_window, text="Пользователи выбранного клиента")
+    paned_window.add(users_frame, weight=1)
+
+    users_tree_frame = ttk.Frame(users_frame)
+    users_tree_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=5)
+
+    users_cols = ('id', 'name', 'login', 'role', 'is_active')
+    users_tree = ttk.Treeview(users_tree_frame, columns=users_cols, show='headings')
+    users_tree.heading('id', text='ID')
+    users_tree.heading('name', text='Имя')
+    users_tree.heading('login', text='Логин')
+    users_tree.heading('role', text='Роль')
+    users_tree.heading('is_active', text='Активен')
+    users_tree.column('id', width=40)
+    users_tree.pack(fill=tk.BOTH, expand=True)
+
+    users_buttons_frame = ttk.Frame(users_frame)
+    users_buttons_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+    ttk.Button(users_buttons_frame, text="Сменить пароль").pack(pady=2, fill=tk.X) # TODO
+    ttk.Button(users_buttons_frame, text="Изменить роль").pack(pady=2, fill=tk.X) # TODO
+    ttk.Button(users_buttons_frame, text="Вкл/Выкл").pack(pady=2, fill=tk.X) # TODO
+
+    # Первоначальная загрузка
+    load_clients()
+
 def main():
     """Главная функция для создания и запуска GUI приложения."""
     global root # Делаем root глобальной, чтобы функции могли к ней обращаться
@@ -485,6 +723,11 @@ def main():
     db_menu.add_separator()
     db_menu.add_command(label="Показать заказы", command=connect_and_show_orders)
     menubar.add_cascade(label="База данных", menu=db_menu)
+
+    # -- Меню "Администрирование" --
+    admin_menu = tk.Menu(menubar, tearoff=0)
+    admin_menu.add_command(label="Клиенты", command=open_clients_management_window)
+    menubar.add_cascade(label="Администрирование", menu=admin_menu)
 
     # -- Меню "Справка" --
     help_menu = tk.Menu(menubar, tearoff=0)
