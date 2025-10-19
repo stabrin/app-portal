@@ -39,17 +39,6 @@ from main_window import SshTunnelProcess
 dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path=dotenv_path)
 
-# --- НАСТРОЙКА ЛОГИРОВАНИЯ (аналогично main_window.py) ---
-log_file_path = os.path.join(project_root, 'app.log')
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - (setup_database) - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file_path, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-
 # --- ЧТЕНИЕ КОНФИГУРАЦИИ ---
 
 # Параметры SSH
@@ -184,5 +173,8 @@ if __name__ == "__main__":
         main()
         logging.info("--- Скрипт успешно завершил работу. ---")
     finally:
+        # Корректно завершаем работу логгера, чтобы избежать ошибок при выходе
+        # и гарантировать, что все транзакции успеют завершиться.
+        logging.shutdown()
         # Эта строка не даст окну закрыться, чтобы можно было увидеть результат
         input("\nНажмите Enter для выхода...")
