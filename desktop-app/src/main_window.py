@@ -319,7 +319,9 @@ def open_print_management_window():
                 # Получаем список поддерживаемых форм (бумаги)
                 forms = win32print.EnumForms(h_printer)
                 for form in forms:
-                    paper_listbox.insert(tk.END, form['Name'])
+                    # Фильтруем только те форматы, которые начинаются с "Tilda_"
+                    if form['Name'].startswith('Tilda_'):
+                        paper_listbox.insert(tk.END, form['Name'])
             finally:
                 win32print.ClosePrinter(h_printer)
         except Exception as e:
