@@ -338,27 +338,48 @@ def open_print_management_window():
             messagebox.showwarning("Внимание", "Пожалуйста, выберите принтер.", parent=print_window)
             return
 
+        # --- НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ МЕТОД ПЕЧАТИ ЧЕРЕЗ GDI ---
         try:
-            h_printer = win32print.OpenPrinter(printer_name)
-            try:
-                h_job = win32print.StartDocPrinter(h_printer, 1, ("Тестовая страница", None, "RAW"))
-                try:
-                    win32print.StartPagePrinter(h_printer)
-                    test_text = "Тестовая печать из приложения 'ТильдаКод'.\n\nЕсли вы видите этот текст, принтер работает корректно."
-                    # В Windows для кириллицы лучше использовать cp1251 или cp866
-                    win32print.WritePrinter(h_printer, test_text.encode('cp1251'))
-                    win32print.EndPagePrinter(h_printer)
-                finally:
-                    win32print.EndDocPrinter(h_printer)
-            finally:
-                win32print.ClosePrinter(h_printer)
-            
-            messagebox.showinfo("Успех", f"Тестовая страница отправлена на принтер '{printer_name}'.", parent=print_window)
+            # 1. Получаем хендл принтера
+            h_printer = win32print.OpenPrinter(printer_name, {"DesiredAccess": win32print.PRINTER_ALL_ACCESS})
 
-        except pywin_error as e:
-            error_details = traceback.format_exc()
-            logging.error(f"Ошибка печати (Win32 API): {e}\n{error_details}")
-            messagebox.showerror("Ошибка печати", f"Ошибка Win32 API.\nПодробности в файле app.log", parent=print_window)
+            # 2. Создаем контекст устройства (DC) для этого принтера
+            # Это как "холст", на котором мы будем рисовать
+            dc = win32ui.CreateDC()
+            dc.CreatePrinterDC(printer_name)
+
+            try:
+                # 3. Начинаем документ
+                dc.StartDoc("Тестовая страница из 'ТильдаКод'")
+                
+                # 4. Начинаем страницу
+                dc.StartPage()
+
+                # 5. Настраиваем шрифт
+                font_data = {
+                    'name': 'Arial',
+                    'height': 40, # Размер шрифта
+                    'weight': 400, # Нормальный вес
+                }
+                font = win32ui.CreateFont(font_data)
+                dc.SelectObject(font)
+
+                # 6. "Рисуем" текст на странице
+                # Координаты (x, y) в точках от левого верхнего угла
+                dc.TextOut(100, 100, "Тестовая печать из приложения 'ТильдаКод'.")
+                dc.TextOut(100, 160, "Если вы видите этот текст, принтер работает корректно.")
+
+                # 7. Завершаем страницу и документ
+                dc.EndPage()
+                dc.EndDoc()
+
+                messagebox.showinfo("Успех", f"Тестовая страница отправлена на принтер '{printer_name}'.", parent=print_window)
+
+            finally:
+                try:
+                    dc.DeleteDC() # Очищаем контекст устройства
+                finally:
+                    win32print.ClosePrinter(h_printer) # Закрываем принтер
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Общая ошибка печати: {e}\n{error_details}")
