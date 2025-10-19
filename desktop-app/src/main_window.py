@@ -7,12 +7,16 @@ import sys
 import os
 import logging
 import traceback
-import time
-import socket
 import psycopg2
 from psycopg2 import sql
 import bcrypt
 from dotenv import load_dotenv
+# Импортируем наши новые компоненты
+from core.db_connector import get_main_db_connection, SshTunnelProcess
+
+# --- Загрузка переменных окружения ---
+# Делаем это один раз при старте приложения
+load_dotenv(os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), '.env'))
 
 # --- Настройка логирования ---
 # Определяем путь к лог-файлу в корне папки desktop-app
@@ -29,81 +33,6 @@ logging.basicConfig(
 
 # Глобальная переменная для хранения виджета таблицы, чтобы его можно было удалять
 tree = None
-
-class SshTunnelProcess:
-    """
-    Контекстный менеджер для управления SSH-туннелем через системный процесс ssh.exe.
-    """
-    def __init__(self, ssh_host, ssh_port, ssh_user, ssh_key, remote_host, remote_port):
-        self.ssh_host = ssh_host
-        self.ssh_port = ssh_port
-        self.ssh_user = ssh_user
-        self.ssh_key = ssh_key
-        self.remote_host = remote_host
-        self.remote_port = remote_port
-        
-        self.local_host = '127.0.0.1'
-        self.local_port = self._get_free_port()
-        self.process = None
-
-    def _get_free_port(self):
-        """Находит свободный TCP-порт для туннеля."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
-
-    def __enter__(self):
-        """Запускает SSH-туннель в фоновом процессе."""
-        ssh_executable = 'ssh'
-        # На Windows лучше указать полный путь к системному ssh.exe
-        if sys.platform == "win32":
-            ssh_executable = r'C:\Windows\System32\OpenSSH\ssh.exe'
-
-        tunnel_command = [
-            ssh_executable,
-            '-N',  # Не выполнять удаленную команду
-            '-L', f'{self.local_host}:{self.local_port}:{self.remote_host}:{self.remote_port}',
-            '-p', str(self.ssh_port),
-            '-i', self.ssh_key,
-            f'{self.ssh_user}@{self.ssh_host}',
-            '-o', 'StrictHostKeyChecking=no', # Автоматически принимать ключ хоста
-            '-o', 'ExitOnForwardFailure=yes'  # Выйти, если не удалось создать туннель
-        ]
-        
-        logging.info(f"Запуск SSH-туннеля командой: {' '.join(tunnel_command)}")
-        
-        # Для Windows, чтобы окно консоли не появлялось
-        startupinfo = None
-        if sys.platform == "win32":
-            startupinfo = subprocess.STARTUPINFO()
-            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-
-        # Перенаправляем stderr в лог, чтобы видеть ошибки от ssh.exe
-        self.process = subprocess.Popen(
-            tunnel_command, 
-            startupinfo=startupinfo,
-            stderr=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            text=True,
-            encoding='utf-8'
-        )
-        time.sleep(2)  # Даем время на установку соединения
-        
-        # Проверяем, не завершился ли процесс с ошибкой
-        if self.process.poll() is not None:
-            error_output = self.process.stderr.read()
-            logging.error(f"Процесс ssh.exe завершился с ошибкой: {error_output.strip()}")
-            raise ConnectionError(f"Не удалось запустить SSH-туннель. Ошибка: {error_output.strip()}")
-            
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Завершает процесс SSH-туннеля."""
-        if self.process:
-            logging.info("Закрытие SSH-туннеля...")
-            self.process.terminate()
-            self.process.wait()
-            logging.info("SSH-туннель закрыт.")
 
 def run_db_setup():
     """
@@ -143,13 +72,6 @@ def test_connection():
     """
     try:
         logging.info("Проверка подключения к удаленной БД...")
-        # Загружаем переменные из .env файла
-        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        dotenv_path = os.path.join(desktop_app_root, '.env')
-        if not os.path.exists(dotenv_path):
-            messagebox.showerror("Ошибка", f"Файл .env не найден по пути: {dotenv_path}")
-            return
-        load_dotenv(dotenv_path=dotenv_path)
 
         # 1. Устанавливаем SSH подключение (туннель)
         logging.info("Шаг 1: Установка SSH-туннеля...")
@@ -197,15 +119,6 @@ def connect_and_show_orders():
         tree.destroy()
 
     try:
-        # Загружаем переменные из .env файла в папке desktop-app
-        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        dotenv_path = os.path.join(desktop_app_root, '.env')
-        if os.path.exists(dotenv_path):
-            load_dotenv(dotenv_path=dotenv_path)
-        else:
-            messagebox.showerror("Ошибка", f"Файл .env не найден по пути: {dotenv_path}")
-            return
-
         orders = []
 
         def get_orders_from_db(connection):
@@ -220,6 +133,7 @@ def connect_and_show_orders():
         logging.info("Попытка подключения к удаленной БД через SSH-туннель...")
         
         # Путь к ключу. Предполагаем, что папка 'keys' находится рядом с .env
+        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
         if not os.path.exists(ssh_key_path):
             raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
@@ -455,40 +369,16 @@ def open_print_management_window():
 def open_clients_management_window():
     """Открывает окно для управления клиентами и пользователями."""
     
-    # --- Вспомогательные функции для работы с главной БД ---
-    def get_main_db_connection(tunnel):
-        """Подключается к главной БД tilda_db через туннель."""
-        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        dotenv_path = os.path.join(desktop_app_root, '.env')
-        load_dotenv(dotenv_path=dotenv_path)
-        
-        return psycopg2.connect(
-            dbname=os.getenv("TILDA_DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            host=tunnel.local_host,
-            port=tunnel.local_port
-        )
-
     def load_clients():
         """Загружает список клиентов из БД в Treeview."""
         for i in clients_tree.get_children():
             clients_tree.delete(i)
-        
         try:
-            desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-
-            with SshTunnelProcess(
-                ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
-                ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
-                remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
-            ) as tunnel:
-                with get_main_db_connection(tunnel) as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT id, name, ssh_host, created_at FROM clients ORDER BY name;")
-                        for row in cur.fetchall():
-                            clients_tree.insert('', 'end', values=row)
+            with get_main_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, name, ssh_host, created_at FROM clients ORDER BY name;")
+                    for row in cur.fetchall():
+                        clients_tree.insert('', 'end', values=row)
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка загрузки клиентов: {e}\n{error_details}")
@@ -506,21 +396,12 @@ def open_clients_management_window():
         """Загружает пользователей для указанного клиента."""
         for i in users_tree.get_children():
             users_tree.delete(i)
-        
         try:
-            desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-            ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-
-            with SshTunnelProcess(
-                ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
-                ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
-                remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
-            ) as tunnel:
-                with get_main_db_connection(tunnel) as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT id, name, login, role, is_active FROM users WHERE client_id = %s ORDER BY name;", (client_id,))
-                        for row in cur.fetchall():
-                            users_tree.insert('', 'end', values=row)
+            with get_main_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, name, login, role, is_active FROM users WHERE client_id = %s ORDER BY name;", (client_id,))
+                    for row in cur.fetchall():
+                        users_tree.insert('', 'end', values=row)
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка загрузки пользователей: {e}\n{error_details}")
@@ -548,17 +429,10 @@ def open_clients_management_window():
         client_data = None
         if client_id: # Если редактирование, загружаем данные
             try:
-                desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-                ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-                with SshTunnelProcess(
-                    ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
-                    ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
-                    remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
-                ) as tunnel:
-                    with get_main_db_connection(tunnel) as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("SELECT name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key FROM clients WHERE id = %s", (client_id,))
-                            client_data = cur.fetchone()
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key FROM clients WHERE id = %s", (client_id,))
+                        client_data = cur.fetchone()
                 if client_data:
                     for i, field in enumerate(fields):
                         value = client_data[i] if client_data[i] is not None else ""
@@ -586,33 +460,26 @@ def open_clients_management_window():
             }
 
             try:
-                desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-                ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-                with SshTunnelProcess(
-                    ssh_host=os.getenv("SSH_HOST"), ssh_port=int(os.getenv("SSH_PORT", 22)),
-                    ssh_user=os.getenv("SSH_USER"), ssh_key=ssh_key_path,
-                    remote_host=os.getenv("DB_HOST"), remote_port=int(os.getenv("DB_PORT"))
-                ) as tunnel:
-                    with get_main_db_connection(tunnel) as conn:
-                        with conn.cursor() as cur:
-                            if client_id: # Обновление
-                                query = sql.SQL("UPDATE clients SET name=%s, ssh_host=%s, ssh_port=%s, ssh_user=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, ssh_private_key=%s WHERE id=%s")
-                                cur.execute(query, (*data_to_save.values(), client_id))
-                            else: # Вставка нового клиента
-                                query = sql.SQL("INSERT INTO clients (name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
-                                cur.execute(query, tuple(data_to_save.values()))
-                                new_client_id = cur.fetchone()[0]
-                                
-                                # Создаем пользователя по умолчанию
-                                default_login = f"admin@{data_to_save['name']}"
-                                default_pass = "12345"
-                                hashed_pass = bcrypt.hashpw(default_pass.encode('utf-8'), bcrypt.gensalt())
-                                
-                                cur.execute(
-                                    "INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, %s, %s)",
-                                    ("Администратор", default_login, hashed_pass.decode('utf-8'), 'администратор', new_client_id)
-                                )
-                        conn.commit()
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        if client_id: # Обновление
+                            query = sql.SQL("UPDATE clients SET name=%s, ssh_host=%s, ssh_port=%s, ssh_user=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, ssh_private_key=%s WHERE id=%s")
+                            cur.execute(query, (*data_to_save.values(), client_id))
+                        else: # Вставка нового клиента
+                            query = sql.SQL("INSERT INTO clients (name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
+                            cur.execute(query, tuple(data_to_save.values()))
+                            new_client_id = cur.fetchone()[0]
+                            
+                            # Создаем пользователя по умолчанию
+                            default_login = f"admin@{data_to_save['name']}"
+                            default_pass = "12345"
+                            hashed_pass = bcrypt.hashpw(default_pass.encode('utf-8'), bcrypt.gensalt())
+                            
+                            cur.execute(
+                                "INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, %s, %s)",
+                                ("Администратор", default_login, hashed_pass.decode('utf-8'), 'администратор', new_client_id)
+                            )
+                    conn.commit()
                 load_clients()
                 editor_window.destroy()
             except Exception as e:
