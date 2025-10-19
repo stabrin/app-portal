@@ -325,7 +325,9 @@ def open_print_management_window():
                 if form['Name'].startswith('Tilda_'):
                     paper_listbox.insert(tk.END, form['Name'])
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось получить размеры бумаги для '{printer_name}':\n{e}", parent=print_window)
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка при получении системных форматов бумаги: {e}\n{error_details}")
+            messagebox.showerror("Ошибка", f"Не удалось получить размеры бумаги.\nПодробности в файле app.log", parent=print_window)
 
     def print_test_page():
         """Отправляет простую текстовую строку на выбранный принтер."""
