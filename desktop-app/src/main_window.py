@@ -611,6 +611,14 @@ def open_supervisor_creator_window():
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать супервизора: {e}", parent=sup_window)
 
+    # Добавляем недостающие кнопки
+    buttons_frame = ttk.Frame(sup_window)
+    buttons_frame.grid(row=len(fields), columnspan=2, pady=10)
+    ttk.Button(buttons_frame, text="Сохранить", command=save_supervisor).pack(side=tk.RIGHT, padx=5)
+    ttk.Button(buttons_frame, text="Отмена", command=sup_window.destroy).pack(side=tk.RIGHT)
+
+def open_clients_management_window():
+    """Открывает окно для управления клиентами и пользователями."""
     # --- Основное окно управления клиентами ---
     clients_window = tk.Toplevel(root)
     clients_window.title("Управление клиентами")
