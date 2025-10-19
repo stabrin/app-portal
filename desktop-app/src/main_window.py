@@ -77,6 +77,17 @@ def connect_and_show_orders(mode='local'):
             messagebox.showerror("Ошибка", f"Файл .env не найден по пути: {dotenv_path}")
             return
 
+        orders = []
+
+        def get_orders_from_db(connection):
+            """Внутренняя функция для выполнения запроса и получения данных."""
+            with connection.cursor() as cur:
+                # Используем имя таблицы из .env для консистентности
+                orders_table = os.getenv('TABLE_ORDERS', 'orders')
+                query = sql.SQL("SELECT id, client_name, status, created_at FROM {} ORDER BY id DESC;").format(sql.Identifier(orders_table))
+                cur.execute(query)
+                return cur.fetchall()
+
         if mode == 'remote':
             logging.info("Попытка подключения к удаленной БД через SSH-туннель...")
             
@@ -102,9 +113,7 @@ def connect_and_show_orders(mode='local'):
                     host=server.local_bind_host,
                     port=server.local_bind_port
                 )
-                with conn.cursor() as cur:
-                    cur.execute("SELECT id, client_name, status, created_at FROM orders ORDER BY id DESC;")
-                    orders = cur.fetchall()
+                orders = get_orders_from_db(conn)
                 conn.close()
                 logging.info("Данные из удаленной БД успешно получены.")
 
@@ -118,9 +127,7 @@ def connect_and_show_orders(mode='local'):
                 host=os.getenv("DB_HOST", "localhost"),
                 port=os.getenv("DB_PORT")
             )
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, client_name, status, created_at FROM orders ORDER BY id DESC;")
-                orders = cur.fetchall()
+            orders = get_orders_from_db(conn)
             conn.close()
             logging.info("Данные из локальной БД успешно получены.")
 
