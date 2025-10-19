@@ -320,10 +320,10 @@ def open_print_management_window():
             # Это позволяет увидеть все кастомные форматы.
             # `None` означает "локальный сервер печати", `1` - уровень детализации.
             forms = win32print.EnumForms(None, 1)
-                for form in forms:
-                    # Фильтруем только те форматы, которые начинаются с "Tilda_"
-                    if form['Name'].startswith('Tilda_'):
-                        paper_listbox.insert(tk.END, form['Name'])
+            for form in forms:
+                # Фильтруем только те форматы, которые начинаются с "Tilda_"
+                if form['Name'].startswith('Tilda_'):
+                    paper_listbox.insert(tk.END, form['Name'])
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось получить размеры бумаги для '{printer_name}':\n{e}", parent=print_window)
 
