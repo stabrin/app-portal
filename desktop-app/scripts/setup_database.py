@@ -130,52 +130,42 @@ def main():
                 cur.execute("""
                     DO $$
                     BEGIN
-                        CREATE TYPE user_role AS ENUM ('супервизор', 'администратор', 'пользователь');
+                        -- Возвращаем проверку, чтобы скрипт можно было запускать повторно
+                        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+                            CREATE TYPE user_role AS ENUM ('супервизор', 'администратор', 'пользователь');
+                        END IF;
                     END$$;
                 """)
-                # --- ПРОВЕРКА 2: Тип user_role ---
-                cur.execute("SELECT 1 FROM pg_type WHERE typname = 'user_role'")
-                if cur.fetchone():
-                    logging.info("ПРОВЕРКА УСПЕШНА: Тип 'user_role' создан.")
-                else:
-                    raise Exception("КРИТИЧЕСКАЯ ОШИБКА: Тип 'user_role' не был создан.")
+                logging.info("Тип 'user_role' создан или уже существует.")
 
                 logging.info("Создаю таблицу 'clients' для хранения настроек подключений...")
                 cur.execute("""
-                    CREATE TABLE clients (
+                    -- Возвращаем проверку IF NOT EXISTS
+                    CREATE TABLE IF NOT EXISTS clients (
                         id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL, ssh_host VARCHAR(255),
                         ssh_port INTEGER, ssh_user VARCHAR(100), ssh_private_key TEXT, db_host VARCHAR(255),
                         db_port INTEGER, db_name VARCHAR(100), db_user VARCHAR(100), db_password VARCHAR(255),
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() );
                 """)
-                # --- ПРОВЕРКА 3: Таблица clients ---
-                cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'clients'")
-                if cur.fetchone():
-                    logging.info("ПРОВЕРКА УСПЕШНА: Таблица 'clients' создана.")
-                else:
-                    raise Exception("КРИТИЧЕСКАЯ ОШИБКА: Таблица 'clients' не была создана.")
+                logging.info("Таблица 'clients' создана или уже существует.")
                 
                 logging.info("Создаю таблицу 'users' со связью с 'clients'...")
                 cur.execute("""
-                    CREATE TABLE users (
+                    -- Возвращаем проверку IF NOT EXISTS
+                    CREATE TABLE IF NOT EXISTS users (
                         id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, login VARCHAR(100) UNIQUE NOT NULL,
                         password_hash VARCHAR(255) NOT NULL, role user_role NOT NULL,
                         is_active BOOLEAN NOT NULL DEFAULT TRUE, client_id INTEGER,
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                         
                         CONSTRAINT fk_client
-                            FOREIGN KEY(client_id) 
+                            FOREIGN KEY(client_id)
                             REFERENCES clients(id)
                             ON DELETE SET NULL );
                 """)
-                # --- ПРОВЕРКА 4: Таблица users ---
-                cur.execute("SELECT 1 FROM information_schema.tables WHERE table_name = 'users'")
-                if cur.fetchone():
-                    logging.info("ПРОВЕРКА УСПЕШНА: Таблица 'users' создана.")
-                else:
-                    raise Exception("КРИТИЧЕСКАЯ ОШИБКА: Таблица 'users' не была создана.")
+                logging.info("Таблица 'users' создана или уже существует.")
 
-            logging.info("Все шаги создания и проверки успешно завершены.")
+            logging.info("Все объекты базы данных успешно созданы или уже существовали.")
             # conn_new_db.commit() больше не нужен при автокоммите.
             conn_new_db.close()
 
