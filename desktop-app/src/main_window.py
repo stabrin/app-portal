@@ -314,16 +314,18 @@ def open_print_management_window():
         
         paper_listbox.delete(0, tk.END)
         try:
-            # --- ИЗМЕНЕНИЕ ---
-            # Запрашиваем ВСЕ формы, зарегистрированные в системе, а не только те,
-            # о которых заявляет драйвер конкретного принтера.
-            # Это позволяет увидеть все кастомные форматы.
-            # `None` означает "локальный сервер печати", `1` - уровень детализации.
-            forms = win32print.EnumForms(None, 1)
-            for form in forms:
-                # Фильтруем только те форматы, которые начинаются с "Tilda_"
-                if form['Name'].startswith('Tilda_'):
-                    paper_listbox.insert(tk.END, form['Name'])
+            # Получаем дескриптор локального сервера печати, передавая None в OpenPrinter
+            h_server = win32print.OpenPrinter(None)
+            try:
+                # Запрашиваем ВСЕ формы, зарегистрированные в системе.
+                # Это позволяет увидеть все кастомные форматы.
+                forms = win32print.EnumForms(h_server)
+                for form in forms:
+                    # Фильтруем только те форматы, которые начинаются с "Tilda_"
+                    if form['Name'].startswith('Tilda_'):
+                        paper_listbox.insert(tk.END, form['Name'])
+            finally:
+                win32print.ClosePrinter(h_server) # Обязательно закрываем дескриптор
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка при получении системных форматов бумаги: {e}\n{error_details}")
