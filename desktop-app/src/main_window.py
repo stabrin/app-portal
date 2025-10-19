@@ -275,6 +275,103 @@ def connect_and_show_orders():
         logging.error(f"Ошибка при подключении к БД или получении данных: {e}\n{error_details}")
         messagebox.showerror("Ошибка подключения к БД", f"Не удалось получить данные.\nПодробности записаны в файл app.log")
 
+def open_print_management_window():
+    """
+    Открывает окно для управления печатью: выбор принтера, просмотр размеров бумаги и тестовая печать.
+    """
+    try:
+        import win32print
+        import win32ui
+        from pywintypes import error as pywin_error
+    except ImportError:
+        messagebox.showerror("Ошибка", "Библиотека 'pywin32' не установлена.\nПожалуйста, установите ее командой: pip install pywin32")
+        return
+
+    # --- Создание окна ---
+    print_window = tk.Toplevel(root)
+    print_window.title("Управление печатью")
+    print_window.geometry("500x400")
+    print_window.transient(root) # Окно будет поверх главного
+    print_window.grab_set() # Модальное поведение
+
+    # --- Функции для работы с принтерами ---
+    def load_printers():
+        """Загружает список установленных принтеров в выпадающий список."""
+        try:
+            printers = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1)]
+            printer_combobox['values'] = printers
+            if printers:
+                printer_combobox.current(0)
+                load_paper_sizes()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось получить список принтеров:\n{e}", parent=print_window)
+
+    def load_paper_sizes(*args):
+        """Загружает размеры бумаги для выбранного принтера."""
+        printer_name = printer_combobox.get()
+        if not printer_name:
+            return
+        
+        paper_listbox.delete(0, tk.END)
+        try:
+            h_printer = win32print.OpenPrinter(printer_name)
+            try:
+                # Получаем список поддерживаемых форм (бумаги)
+                forms = win32print.EnumForms(h_printer)
+                for form in forms:
+                    paper_listbox.insert(tk.END, form['Name'])
+            finally:
+                win32print.ClosePrinter(h_printer)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось получить размеры бумаги для '{printer_name}':\n{e}", parent=print_window)
+
+    def print_test_page():
+        """Отправляет простую текстовую строку на выбранный принтер."""
+        printer_name = printer_combobox.get()
+        if not printer_name:
+            messagebox.showwarning("Внимание", "Пожалуйста, выберите принтер.", parent=print_window)
+            return
+
+        try:
+            h_printer = win32print.OpenPrinter(printer_name)
+            try:
+                h_job = win32print.StartDocPrinter(h_printer, 1, ("Тестовая страница", None, "RAW"))
+                try:
+                    win32print.StartPagePrinter(h_printer)
+                    test_text = "Тестовая печать из приложения 'ТильдаКод'.\n\nЕсли вы видите этот текст, принтер работает корректно."
+                    # В Windows для кириллицы лучше использовать cp1251 или cp866
+                    win32print.WritePrinter(h_printer, test_text.encode('cp1251'))
+                    win32print.EndPagePrinter(h_printer)
+                finally:
+                    win32print.EndDocPrinter(h_printer)
+            finally:
+                win32print.ClosePrinter(h_printer)
+            
+            messagebox.showinfo("Успех", f"Тестовая страница отправлена на принтер '{printer_name}'.", parent=print_window)
+
+        except pywin_error as e:
+            messagebox.showerror("Ошибка печати", f"Ошибка Win32 API: {e}", parent=print_window)
+        except Exception as e:
+            messagebox.showerror("Ошибка печати", f"Не удалось напечатать тестовую страницу:\n{e}", parent=print_window)
+
+    # --- Виджеты окна ---
+    main_frame = ttk.Frame(print_window, padding="10")
+    main_frame.pack(expand=True, fill="both")
+
+    ttk.Label(main_frame, text="Выберите принтер:").pack(fill="x", pady=2)
+    printer_combobox = ttk.Combobox(main_frame, state="readonly")
+    printer_combobox.pack(fill="x", pady=2)
+    printer_combobox.bind("<<ComboboxSelected>>", load_paper_sizes)
+
+    ttk.Label(main_frame, text="Поддерживаемые размеры бумаги:").pack(fill="x", pady=(10, 2))
+    paper_listbox = tk.Listbox(main_frame, height=10)
+    paper_listbox.pack(expand=True, fill="both", pady=2)
+
+    ttk.Button(main_frame, text="Напечатать тестовую страницу", command=print_test_page).pack(fill="x", pady=(10, 2))
+
+    # --- Первоначальная загрузка данных ---
+    load_printers()
+
 
 # 1. Создаем главное окно приложения
 root = tk.Tk()
@@ -295,6 +392,11 @@ file_menu.add_command(label="Инициализация БД", command=run_db_se
 file_menu.add_separator()
 file_menu.add_command(label="Выход", command=root.quit)
 menubar.add_cascade(label="Файл", menu=file_menu)
+
+# -- Меню "Печать" --
+print_menu = tk.Menu(menubar, tearoff=0)
+print_menu.add_command(label="Управление печатью", command=open_print_management_window)
+menubar.add_cascade(label="Печать", menu=print_menu)
 
 # -- Меню "База данных" --
 db_menu = tk.Menu(menubar, tearoff=0)
