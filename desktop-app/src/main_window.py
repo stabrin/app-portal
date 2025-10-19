@@ -7,8 +7,9 @@ import sys
 import os
 import logging
 import traceback
+import time
+import socket
 import psycopg2
-from sshtunnel import SSHTunnelForwarder
 from psycopg2 import sql
 from dotenv import load_dotenv
 
@@ -28,6 +29,65 @@ logging.basicConfig(
 # Глобальная переменная для хранения виджета таблицы, чтобы его можно было удалять
 tree = None
 
+class SshTunnelProcess:
+    """
+    Контекстный менеджер для управления SSH-туннелем через системный процесс ssh.exe.
+    """
+    def __init__(self, ssh_host, ssh_port, ssh_user, ssh_key, remote_host, remote_port):
+        self.ssh_host = ssh_host
+        self.ssh_port = ssh_port
+        self.ssh_user = ssh_user
+        self.ssh_key = ssh_key
+        self.remote_host = remote_host
+        self.remote_port = remote_port
+        
+        self.local_host = '127.0.0.1'
+        self.local_port = self._get_free_port()
+        self.process = None
+
+    def _get_free_port(self):
+        """Находит свободный TCP-порт для туннеля."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("", 0))
+            return s.getsockname()[1]
+
+    def __enter__(self):
+        """Запускает SSH-туннель в фоновом процессе."""
+        tunnel_command = [
+            'ssh',
+            '-N',  # Не выполнять удаленную команду
+            '-L', f'{self.local_host}:{self.local_port}:{self.remote_host}:{self.remote_port}',
+            '-p', str(self.ssh_port),
+            '-i', self.ssh_key,
+            f'{self.ssh_user}@{self.ssh_host}',
+            '-o', 'StrictHostKeyChecking=no', # Автоматически принимать ключ хоста
+            '-o', 'ExitOnForwardFailure=yes'  # Выйти, если не удалось создать туннель
+        ]
+        
+        logging.info(f"Запуск SSH-туннеля командой: {' '.join(tunnel_command)}")
+        
+        # Для Windows, чтобы окно консоли не появлялось
+        startupinfo = None
+        if sys.platform == "win32":
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+
+        self.process = subprocess.Popen(tunnel_command, startupinfo=startupinfo)
+        time.sleep(2)  # Даем время на установку соединения
+        
+        # Проверяем, не завершился ли процесс с ошибкой
+        if self.process.poll() is not None:
+            raise ConnectionError("Не удалось запустить процесс SSH-туннеля. Проверьте параметры SSH и доступность хоста.")
+            
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Завершает процесс SSH-туннеля."""
+        if self.process:
+            logging.info("Закрытие SSH-туннеля...")
+            self.process.terminate()
+            self.process.wait()
+            logging.info("SSH-туннель закрыт.")
 
 def run_db_setup():
     """
@@ -49,8 +109,12 @@ def run_db_setup():
         # (правильный Python из вашего .venv)
         command = [sys.executable, script_path]
 
-        # Запускаем скрипт в новом окне консоли
-        subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        # Запускаем скрипт в новом окне консоли (кросс-платформенный способ)
+        if sys.platform == "win32":
+            subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
+        else:
+            # Для Linux/macOS потребуется терминал, например xterm
+            subprocess.Popen(['xterm', '-e'] + command)
 
     except Exception as e:
         error_details = traceback.format_exc()
@@ -77,13 +141,15 @@ def test_connection():
         if not os.path.exists(ssh_key_path):
             raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
 
-        with SSHTunnelForwarder(
-            (os.getenv("SSH_HOST"), int(os.getenv("SSH_PORT", 22))),
-            ssh_username=os.getenv("SSH_USER"),
-            ssh_pkey=ssh_key_path,
-            remote_bind_address=(os.getenv("DB_HOST"), int(os.getenv("DB_PORT"))),
-        ) as server:
-            logging.info(f"SSH-туннель успешно создан. Локальный порт: {server.local_bind_port}")
+        with SshTunnelProcess(
+            ssh_host=os.getenv("SSH_HOST"),
+            ssh_port=int(os.getenv("SSH_PORT", 22)),
+            ssh_user=os.getenv("SSH_USER"),
+            ssh_key=ssh_key_path,
+            remote_host=os.getenv("DB_HOST"),
+            remote_port=int(os.getenv("DB_PORT"))
+        ) as tunnel:
+            logging.info(f"SSH-туннель успешно создан. Локальный порт: {tunnel.local_port}")
             
             # 2. Проверяем доступность постгреса
             logging.info("Шаг 2: Проверка подключения к PostgreSQL через туннель...")
@@ -91,8 +157,8 @@ def test_connection():
                 dbname=os.getenv("DB_NAME"),
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASSWORD"),
-                host=server.local_bind_host,
-                port=server.local_bind_port,
+                host=tunnel.local_host,
+                port=tunnel.local_port,
                 connect_timeout=5  # Таймаут подключения 5 секунд
             ) as conn:
                 # Просто проверяем, что соединение активно
@@ -143,24 +209,26 @@ def connect_and_show_orders():
             raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
 
         # Создаем SSH туннель
-        with SSHTunnelForwarder(
-            (os.getenv("SSH_HOST"), int(os.getenv("SSH_PORT", 22))),
-            ssh_username=os.getenv("SSH_USER"),
-            ssh_pkey=ssh_key_path,
-            remote_bind_address=(os.getenv("DB_HOST"), int(os.getenv("DB_PORT"))),
-            # local_bind_address=('127.0.0.1', 6543) # Можно указать явно или дать выбрать свободный порт
-        ) as server:
-            logging.info(f"SSH туннель успешно создан. Локальный порт: {server.local_bind_port}")
+        with SshTunnelProcess(
+            ssh_host=os.getenv("SSH_HOST"),
+            ssh_port=int(os.getenv("SSH_PORT", 22)),
+            ssh_user=os.getenv("SSH_USER"),
+            ssh_key=ssh_key_path,
+            remote_host=os.getenv("DB_HOST"),
+            remote_port=int(os.getenv("DB_PORT"))
+        ) as tunnel:
+            logging.info(f"SSH туннель успешно создан. Локальный порт: {tunnel.local_port}")
             # Подключаемся к БД через локальный порт туннеля
             with psycopg2.connect(
                 dbname=os.getenv("DB_NAME"),
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASSWORD"),
-                host=server.local_bind_host,
-                port=server.local_bind_port
+                host=tunnel.local_host,
+                port=tunnel.local_port
             ) as conn:
                 orders = get_orders_from_db(conn)
             logging.info("Данные из удаленной БД успешно получены.")
+
 
         # Создаем Treeview для отображения данных
         columns = ('id', 'client_name', 'status', 'created_at')
