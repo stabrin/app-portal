@@ -1,6 +1,7 @@
 # scripts/setup_database.py
 
 import os
+import sys
 import psycopg2
 import logging
 import traceback
@@ -15,11 +16,29 @@ from dotenv import load_dotenv
 current_file_path = os.path.dirname(os.path.abspath(__file__))
 # Путь к корневой папке проекта (на уровень выше, чем scripts)
 project_root = os.path.abspath(os.path.join(current_file_path, '..'))
+
+# --- ИМПОРТ ИЗ ОСНОВНОГО ПРИЛОЖЕНИЯ ---
+# Добавляем папку 'src' в sys.path, чтобы импортировать SshTunnelProcess
+src_path = os.path.join(project_root, 'src')
+sys.path.insert(0, src_path)
+from main_window import SshTunnelProcess
+
 sys.path.insert(0, project_root)
 
 # Загружаем переменные окружения из файла .env в корне проекта
 dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path=dotenv_path)
+
+# --- НАСТРОЙКА ЛОГИРОВАНИЯ (аналогично main_window.py) ---
+log_file_path = os.path.join(project_root, 'app.log')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - (setup_database) - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file_path, encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 
 # --- ЧТЕНИЕ КОНФИГУРАЦИИ ---
 
@@ -150,9 +169,11 @@ def main():
         error_details = traceback.format_exc()
         logging.error(f"Произошла критическая ошибка: {e}\n{error_details}")
     finally:
-        logging.info("--- Скрипт завершил работу. ---")
-        # Убираем input, чтобы скрипт мог работать в автоматическом режиме
-        input("Нажмите Enter для выхода...") # Эта строка не даст окну закрыться
+        logging.info("--- Скрипт завершил работу. ---")        
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # Эта строка не даст окну закрыться, чтобы можно было увидеть результат
+        input("\nНажмите Enter для выхода...")
