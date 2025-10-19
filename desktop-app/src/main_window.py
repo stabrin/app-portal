@@ -18,7 +18,7 @@ from psycopg2 import sql
 import bcrypt
 from dotenv import load_dotenv
 # Импортируем наши новые компоненты
-from core.db_connector import get_main_db_connection, SshTunnelProcess
+from db_connector import get_main_db_connection, SshTunnelProcess
 
 # --- Загрузка переменных окружения ---
 # Делаем это один раз при старте приложения
