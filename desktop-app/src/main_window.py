@@ -57,10 +57,57 @@ def run_db_setup():
         logging.error(f"Не удалось запустить скрипт 'setup_database.py': {e}\n{error_details}")
         messagebox.showerror("Ошибка запуска", f"Произошла ошибка при запуске скрипта.\nПодробности в файле app.log")
 
-def connect_and_show_orders(mode='local'):
+def test_connection():
+    """
+    Устанавливает SSH-туннель и проверяет доступность PostgreSQL, не получая данных.
+    """
+    try:
+        logging.info("Проверка подключения к удаленной БД...")
+        # Загружаем переменные из .env файла
+        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        dotenv_path = os.path.join(desktop_app_root, '.env')
+        if not os.path.exists(dotenv_path):
+            messagebox.showerror("Ошибка", f"Файл .env не найден по пути: {dotenv_path}")
+            return
+        load_dotenv(dotenv_path=dotenv_path)
+
+        # 1. Устанавливаем SSH подключение (туннель)
+        logging.info("Шаг 1: Установка SSH-туннеля...")
+        ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+        if not os.path.exists(ssh_key_path):
+            raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
+
+        with SSHTunnelForwarder(
+            (os.getenv("SSH_HOST"), int(os.getenv("SSH_PORT", 22))),
+            ssh_username=os.getenv("SSH_USER"),
+            ssh_pkey=ssh_key_path,
+            remote_bind_address=(os.getenv("DB_HOST"), int(os.getenv("DB_PORT"))),
+        ) as server:
+            logging.info(f"SSH-туннель успешно создан. Локальный порт: {server.local_bind_port}")
+            
+            # 2. Проверяем доступность постгреса
+            logging.info("Шаг 2: Проверка подключения к PostgreSQL через туннель...")
+            with psycopg2.connect(
+                dbname=os.getenv("DB_NAME"),
+                user=os.getenv("DB_USER"),
+                password=os.getenv("DB_PASSWORD"),
+                host=server.local_bind_host,
+                port=server.local_bind_port,
+                connect_timeout=5  # Таймаут подключения 5 секунд
+            ) as conn:
+                # Просто проверяем, что соединение активно
+                logging.info(f"Соединение с PostgreSQL (версия {conn.server_version}) успешно установлено.")
+        
+        messagebox.showinfo("Проверка подключения", "Подключение к удаленной базе данных успешно установлено!")
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logging.error(f"Ошибка при проверке подключения: {e}\n{error_details}")
+        messagebox.showerror("Ошибка подключения", f"Не удалось подключиться.\nПодробности записаны в файл app.log")
+
+def connect_and_show_orders():
     """
     Подключается к БД, считывает таблицу orders и отображает ее в главном окне.
-    :param mode: 'local' для прямого подключения, 'remote' для подключения через SSH-туннель.
     """
     global tree
     # Очищаем предыдущую таблицу, если она есть
@@ -88,46 +135,32 @@ def connect_and_show_orders(mode='local'):
                 cur.execute(query)
                 return cur.fetchall()
 
-        if mode == 'remote':
-            logging.info("Попытка подключения к удаленной БД через SSH-туннель...")
-            
-            # Путь к ключу. Предполагаем, что папка 'keys' находится рядом с .env
-            ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-            if not os.path.exists(ssh_key_path):
-                raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
+        logging.info("Попытка подключения к удаленной БД через SSH-туннель...")
+        
+        # Путь к ключу. Предполагаем, что папка 'keys' находится рядом с .env
+        ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+        if not os.path.exists(ssh_key_path):
+            raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
 
-            # Создаем SSH туннель
-            with SSHTunnelForwarder(
-                (os.getenv("SSH_HOST"), int(os.getenv("SSH_PORT", 22))),
-                ssh_username=os.getenv("SSH_USER"),
-                ssh_pkey=ssh_key_path,
-                remote_bind_address=(os.getenv("DB_HOST"), int(os.getenv("DB_PORT"))),
-                # local_bind_address=('127.0.0.1', 6543) # Можно указать явно или дать выбрать свободный порт
-            ) as server:
-                logging.info(f"SSH туннель успешно создан. Локальный порт: {server.local_bind_port}")
-                # Подключаемся к БД через локальный порт туннеля
-                with psycopg2.connect(
-                    dbname=os.getenv("DB_NAME"),
-                    user=os.getenv("DB_USER"),
-                    password=os.getenv("DB_PASSWORD"),
-                    host=server.local_bind_host,
-                    port=server.local_bind_port
-                ) as conn:
-                    orders = get_orders_from_db(conn)
-                logging.info("Данные из удаленной БД успешно получены.")
-
-        else: # mode == 'local'
-            logging.info("Попытка подключения к локальной БД...")
-            # Прямое подключение к БД (как было раньше)
+        # Создаем SSH туннель
+        with SSHTunnelForwarder(
+            (os.getenv("SSH_HOST"), int(os.getenv("SSH_PORT", 22))),
+            ssh_username=os.getenv("SSH_USER"),
+            ssh_pkey=ssh_key_path,
+            remote_bind_address=(os.getenv("DB_HOST"), int(os.getenv("DB_PORT"))),
+            # local_bind_address=('127.0.0.1', 6543) # Можно указать явно или дать выбрать свободный порт
+        ) as server:
+            logging.info(f"SSH туннель успешно создан. Локальный порт: {server.local_bind_port}")
+            # Подключаемся к БД через локальный порт туннеля
             with psycopg2.connect(
                 dbname=os.getenv("DB_NAME"),
                 user=os.getenv("DB_USER"),
                 password=os.getenv("DB_PASSWORD"),
-                host=os.getenv("DB_HOST", "localhost"),
-                port=os.getenv("DB_PORT")
+                host=server.local_bind_host,
+                port=server.local_bind_port
             ) as conn:
                 orders = get_orders_from_db(conn)
-            logging.info("Данные из локальной БД успешно получены.")
+            logging.info("Данные из удаленной БД успешно получены.")
 
         # Создаем Treeview для отображения данных
         columns = ('id', 'client_name', 'status', 'created_at')
@@ -163,9 +196,6 @@ def connect_and_show_orders(mode='local'):
 # 1. Создаем главное окно приложения
 root = tk.Tk()
 
-# Глобальная переменная для режима подключения ('local' или 'remote')
-connection_mode = tk.StringVar(value='local')
-
 # 2. Устанавливаем заголовок окна
 root.title("ТильдаКод")
 
@@ -183,16 +213,11 @@ file_menu.add_separator()
 file_menu.add_command(label="Выход", command=root.quit)
 menubar.add_cascade(label="Файл", menu=file_menu)
 
-# -- Меню "Режим подключения" --
-connection_menu = tk.Menu(menubar, tearoff=0)
-connection_menu.add_radiobutton(label="Локально (Docker)", variable=connection_mode, value='local')
-connection_menu.add_radiobutton(label="Удаленно (SSH)", variable=connection_mode, value='remote')
-menubar.add_cascade(label="Режим подключения", menu=connection_menu)
-
 # -- Меню "База данных" --
 db_menu = tk.Menu(menubar, tearoff=0)
-# Теперь команда вызывает функцию с учетом выбранного режима
-db_menu.add_command(label="Подключиться и показать заказы", command=lambda: connect_and_show_orders(mode=connection_mode.get()))
+db_menu.add_command(label="Проверить подключение", command=test_connection)
+db_menu.add_separator()
+db_menu.add_command(label="Показать заказы", command=connect_and_show_orders)
 menubar.add_cascade(label="База данных", menu=db_menu)
 
 # -- Меню "Справка" --
