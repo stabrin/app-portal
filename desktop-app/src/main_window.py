@@ -8,6 +8,8 @@ import os
 import logging
 import traceback
 import psycopg2
+from sshtunnel import SSHTunnelForwarder
+from psycopg2 import sql
 from dotenv import load_dotenv
 
 # --- Настройка логирования ---
@@ -25,6 +27,9 @@ logging.basicConfig(
 
 # Глобальная переменная для хранения виджета таблицы, чтобы его можно было удалять
 tree = None
+# Глобальная переменная для режима подключения ('local' или 'remote')
+connection_mode = tk.StringVar(value='local') 
+
 
 def run_db_setup():
     """
@@ -54,9 +59,10 @@ def run_db_setup():
         logging.error(f"Не удалось запустить скрипт 'setup_database.py': {e}\n{error_details}")
         messagebox.showerror("Ошибка запуска", f"Произошла ошибка при запуске скрипта.\nПодробности в файле app.log")
 
-def connect_and_show_orders():
+def connect_and_show_orders(mode='local'):
     """
     Подключается к БД, считывает таблицу orders и отображает ее в главном окне.
+    :param mode: 'local' для прямого подключения, 'remote' для подключения через SSH-туннель.
     """
     global tree
     # Очищаем предыдущую таблицу, если она есть
@@ -73,18 +79,52 @@ def connect_and_show_orders():
             messagebox.showerror("Ошибка", f"Файл .env не найден по пути: {dotenv_path}")
             return
 
-        # Подключаемся к БД
-        conn = psycopg2.connect(
-            dbname=os.getenv("DB_NAME"),
-            user=os.getenv("DB_USER"),
-            password=os.getenv("DB_PASSWORD"),
-            host=os.getenv("DB_HOST_LOCAL", "localhost"),
-            port=os.getenv("DB_PORT")
-        )
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, client_name, status, created_at FROM orders ORDER BY id DESC;")
-            orders = cur.fetchall()
-        conn.close()
+        if mode == 'remote':
+            logging.info("Попытка подключения к удаленной БД через SSH-туннель...")
+            
+            # Путь к ключу. Предполагаем, что папка 'keys' находится рядом с .env
+            ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+            if not os.path.exists(ssh_key_path):
+                raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
+
+            # Создаем SSH туннель
+            with SSHTunnelForwarder(
+                (os.getenv("SSH_HOST"), int(os.getenv("SSH_PORT", 22))),
+                ssh_username=os.getenv("SSH_USER"),
+                ssh_pkey=ssh_key_path,
+                remote_bind_address=(os.getenv("DB_HOST"), int(os.getenv("DB_PORT"))),
+                # local_bind_address=('127.0.0.1', 6543) # Можно указать явно или дать выбрать свободный порт
+            ) as server:
+                logging.info(f"SSH туннель успешно создан. Локальный порт: {server.local_bind_port}")
+                # Подключаемся к БД через локальный порт туннеля
+                conn = psycopg2.connect(
+                    dbname=os.getenv("DB_NAME"),
+                    user=os.getenv("DB_USER"),
+                    password=os.getenv("DB_PASSWORD"),
+                    host=server.local_bind_host,
+                    port=server.local_bind_port
+                )
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, client_name, status, created_at FROM orders ORDER BY id DESC;")
+                    orders = cur.fetchall()
+                conn.close()
+                logging.info("Данные из удаленной БД успешно получены.")
+
+        else: # mode == 'local'
+            logging.info("Попытка подключения к локальной БД...")
+            # Прямое подключение к БД (как было раньше)
+            conn = psycopg2.connect(
+                dbname=os.getenv("DB_NAME"),
+                user=os.getenv("DB_USER"),
+                password=os.getenv("DB_PASSWORD"),
+                host=os.getenv("DB_HOST", "localhost"),
+                port=os.getenv("DB_PORT")
+            )
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, client_name, status, created_at FROM orders ORDER BY id DESC;")
+                orders = cur.fetchall()
+            conn.close()
+            logging.info("Данные из локальной БД успешно получены.")
 
         # Создаем Treeview для отображения данных
         columns = ('id', 'client_name', 'status', 'created_at')
@@ -137,9 +177,16 @@ file_menu.add_separator()
 file_menu.add_command(label="Выход", command=root.quit)
 menubar.add_cascade(label="Файл", menu=file_menu)
 
+# -- Меню "Режим подключения" --
+connection_menu = tk.Menu(menubar, tearoff=0)
+connection_menu.add_radiobutton(label="Локально (Docker)", variable=connection_mode, value='local')
+connection_menu.add_radiobutton(label="Удаленно (SSH)", variable=connection_mode, value='remote')
+menubar.add_cascade(label="Режим подключения", menu=connection_menu)
+
 # -- Меню "База данных" --
 db_menu = tk.Menu(menubar, tearoff=0)
-db_menu.add_command(label="Подключиться к БД", command=connect_and_show_orders)
+# Теперь команда вызывает функцию с учетом выбранного режима
+db_menu.add_command(label="Подключиться и показать заказы", command=lambda: connect_and_show_orders(mode=connection_mode.get()))
 menubar.add_cascade(label="База данных", menu=db_menu)
 
 # -- Меню "Справка" --
