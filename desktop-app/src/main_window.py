@@ -352,8 +352,14 @@ def open_print_management_window():
         if not selected_indices:
             messagebox.showwarning("Внимание", "Пожалуйста, выберите размер бумаги.", parent=print_window)
             return
-        # Извлекаем чистое имя формата из текста в списке
-        selected_paper_name = paper_listbox.get(selected_indices[0]).split(' ')[0]
+        
+        # --- ИСПРАВЛЕНИЕ: Более надежное извлечение имени формата ---
+        # Проблема: .split(' ')[0] не работает, если в имени формата есть пробел (например, "Tilda_58 40").
+        # Решение: Находим позицию скобки '(', которая отделяет имя от размеров,
+        # и берем всё, что находится до нее, убирая лишние пробелы по краям.
+        full_listbox_string = paper_listbox.get(selected_indices[0])
+        separator_pos = full_listbox_string.find(' (')
+        selected_paper_name = full_listbox_string[:separator_pos].strip() if separator_pos != -1 else full_listbox_string.strip()
 
         # --- НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ МЕТОД ПЕЧАТИ ЧЕРЕЗ GDI ---
         try:
