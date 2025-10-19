@@ -48,9 +48,9 @@ def connect_and_show_orders():
         tree.destroy()
 
     try:
-        # Загружаем переменные из .env файла в корне проекта app-portal
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        dotenv_path = os.path.join(project_root, '.env')
+        # Загружаем переменные из .env файла в папке desktop-app
+        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        dotenv_path = os.path.join(desktop_app_root, '.env')
         if os.path.exists(dotenv_path):
             load_dotenv(dotenv_path=dotenv_path)
         else:
