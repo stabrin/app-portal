@@ -321,9 +321,8 @@ def open_print_management_window():
                 # Это позволяет увидеть все кастомные форматы.
                 forms = win32print.EnumForms(h_server)
                 for form in forms:
-                    # Фильтруем только те форматы, которые начинаются с "Tilda_"
-                    if form['Name'].startswith('Tilda_'):
-                        paper_listbox.insert(tk.END, form['Name'])
+                    # Временно убираем фильтр, чтобы увидеть все доступные форматы
+                    paper_listbox.insert(tk.END, form['Name'])
             finally:
                 win32print.ClosePrinter(h_server) # Обязательно закрываем дескриптор
         except Exception as e:
