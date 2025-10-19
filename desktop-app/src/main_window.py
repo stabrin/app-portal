@@ -321,8 +321,9 @@ def open_print_management_window():
                 # Это позволяет увидеть все кастомные форматы.
                 forms = win32print.EnumForms(h_server)
                 for form in forms:
-                    # Временно убираем фильтр, чтобы увидеть все доступные форматы
-                    paper_listbox.insert(tk.END, form['Name'])
+                    # Возвращаем фильтрацию по префиксу "Tilda_"
+                    if form['Name'].startswith('Tilda_'):
+                        paper_listbox.insert(tk.END, form['Name'])
             finally:
                 win32print.ClosePrinter(h_server) # Обязательно закрываем дескриптор
         except Exception as e:
@@ -355,9 +356,13 @@ def open_print_management_window():
             messagebox.showinfo("Успех", f"Тестовая страница отправлена на принтер '{printer_name}'.", parent=print_window)
 
         except pywin_error as e:
-            messagebox.showerror("Ошибка печати", f"Ошибка Win32 API: {e}", parent=print_window)
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка печати (Win32 API): {e}\n{error_details}")
+            messagebox.showerror("Ошибка печати", f"Ошибка Win32 API.\nПодробности в файле app.log", parent=print_window)
         except Exception as e:
-            messagebox.showerror("Ошибка печати", f"Не удалось напечатать тестовую страницу:\n{e}", parent=print_window)
+            error_details = traceback.format_exc()
+            logging.error(f"Общая ошибка печати: {e}\n{error_details}")
+            messagebox.showerror("Ошибка печати", f"Не удалось напечатать тестовую страницу.\nПодробности в файле app.log", parent=print_window)
 
     # --- Виджеты окна ---
     main_frame = ttk.Frame(print_window, padding="10")
