@@ -340,8 +340,10 @@ def open_print_management_window():
 
         # --- НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ МЕТОД ПЕЧАТИ ЧЕРЕЗ GDI ---
         try:
-            # 1. Получаем хендл принтера
-            h_printer = win32print.OpenPrinter(printer_name, {"DesiredAccess": win32print.PRINTER_ALL_ACCESS})
+            # 1. Получаем хендл принтера, не запрашивая избыточных прав администратора.
+            # Это решает проблему "Отказано в доступе".
+            # Мы передаем None, чтобы использовать права доступа по умолчанию для текущего пользователя.
+            h_printer = win32print.OpenPrinter(printer_name, None)
 
             # 2. Создаем контекст устройства (DC) для этого принтера
             # Это как "холст", на котором мы будем рисовать
@@ -357,17 +359,19 @@ def open_print_management_window():
 
                 # 5. Настраиваем шрифт
                 font_data = {
-                    'name': 'Arial',
-                    'height': 40, # Размер шрифта
+                    'name': 'Arial', # Используем стандартный шрифт
+                    'height': 20, # Уменьшаем размер для маленькой этикетки
                     'weight': 400, # Нормальный вес
+                    'charset': 204, # Явно указываем кириллический набор символов
                 }
                 font = win32ui.CreateFont(font_data)
                 dc.SelectObject(font)
 
                 # 6. "Рисуем" текст на странице
-                # Координаты (x, y) в точках от левого верхнего угла
-                dc.TextOut(100, 100, "Тестовая печать из приложения 'ТильдаКод'.")
-                dc.TextOut(100, 160, "Если вы видите этот текст, принтер работает корректно.")
+                # Координаты (x, y) в точках (dots) от левого верхнего угла.
+                # Подбираем значения для небольшой этикетки.
+                dc.TextOut(50, 50, "Тестовая печать")
+                dc.TextOut(50, 80, "из 'ТильдаКод'")
 
                 # 7. Завершаем страницу и документ
                 dc.EndPage()
@@ -376,10 +380,8 @@ def open_print_management_window():
                 messagebox.showinfo("Успех", f"Тестовая страница отправлена на принтер '{printer_name}'.", parent=print_window)
 
             finally:
-                try:
-                    dc.DeleteDC() # Очищаем контекст устройства
-                finally:
-                    win32print.ClosePrinter(h_printer) # Закрываем принтер
+                dc.DeleteDC() # Очищаем контекст устройства
+                win32print.ClosePrinter(h_printer) # Закрываем принтер
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Общая ошибка печати: {e}\n{error_details}")
