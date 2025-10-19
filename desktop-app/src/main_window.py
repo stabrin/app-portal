@@ -504,6 +504,62 @@ def open_clients_management_window():
         client_id = clients_tree.item(selected_item)['values'][0]
         open_client_editor(client_id)
 
+    def add_new_user():
+        """Открывает окно для добавления нового пользователя к выбранному клиенту."""
+        selected_item = clients_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Внимание", "Сначала выберите клиента, которому хотите добавить пользователя.", parent=clients_window)
+            return
+        
+        client_id = clients_tree.item(selected_item)['values'][0]
+        client_name = clients_tree.item(selected_item)['values'][1]
+
+        user_editor_window = tk.Toplevel(clients_window)
+        user_editor_window.title(f"Новый пользователь для '{client_name}'")
+        user_editor_window.grab_set()
+
+        fields = ["Имя", "Логин", "Пароль", "Роль"]
+        entries = {}
+
+        for i, field in enumerate(fields):
+            ttk.Label(user_editor_window, text=field + ":").grid(row=i, column=0, padx=5, pady=5, sticky='w')
+            if field == "Роль":
+                widget = ttk.Combobox(user_editor_window, values=['пользователь', 'администратор', 'супервизор'], state="readonly")
+                widget.set('пользователь') # Значение по умолчанию
+            else:
+                widget = ttk.Entry(user_editor_window, width=40)
+            widget.grid(row=i, column=1, padx=5, pady=5)
+            entries[field] = widget
+
+        def save_user():
+            user_data = {
+                'name': entries['Имя'].get(),
+                'login': entries['Логин'].get(),
+                'password': entries['Пароль'].get(),
+                'role': entries['Роль'].get()
+            }
+
+            if not all(user_data.values()):
+                messagebox.showwarning("Внимание", "Все поля должны быть заполнены.", parent=user_editor_window)
+                return
+
+            try:
+                hashed_pass = bcrypt.hashpw(user_data['password'].encode('utf-8'), bcrypt.gensalt())
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, %s, %s)",
+                            (user_data['name'], user_data['login'], hashed_pass.decode('utf-8'), user_data['role'], client_id)
+                        )
+                    conn.commit()
+                load_users(client_id) # Обновляем список
+                user_editor_window.destroy()
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось сохранить пользователя: {e}", parent=user_editor_window)
+
+        ttk.Button(user_editor_window, text="Сохранить", command=save_user).grid(row=len(fields), column=1, sticky='e', padx=5, pady=10)
+        ttk.Button(user_editor_window, text="Отмена", command=user_editor_window.destroy).grid(row=len(fields), column=0, sticky='w', padx=5, pady=10)
+
     # --- Основное окно управления клиентами ---
     clients_window = tk.Toplevel(root)
     clients_window.title("Управление клиентами")
@@ -555,6 +611,7 @@ def open_clients_management_window():
 
     users_buttons_frame = ttk.Frame(users_frame)
     users_buttons_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
+    ttk.Button(users_buttons_frame, text="Добавить пользователя", command=add_new_user).pack(pady=2, fill=tk.X)
     ttk.Button(users_buttons_frame, text="Сменить пароль").pack(pady=2, fill=tk.X) # TODO
     ttk.Button(users_buttons_frame, text="Изменить роль").pack(pady=2, fill=tk.X) # TODO
     ttk.Button(users_buttons_frame, text="Вкл/Выкл").pack(pady=2, fill=tk.X) # TODO
