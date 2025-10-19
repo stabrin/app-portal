@@ -6,6 +6,12 @@ import subprocess
 import sys
 import os
 import logging
+
+# --- РЕШЕНИЕ ПРОБЛЕМЫ С ИМПОРТОМ ---
+# Добавляем корневую папку проекта в пути Python, чтобы импорты из `core` работали.
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
+
 import traceback
 import psycopg2
 from psycopg2 import sql
