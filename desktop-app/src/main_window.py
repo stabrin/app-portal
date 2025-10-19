@@ -294,6 +294,9 @@ def open_print_management_window():
     print_window.transient(root) # Окно будет поверх главного
     print_window.grab_set() # Модальное поведение
 
+    # Словарь для хранения размеров бумаги: {'ИмяФормы': (ширина_мм, высота_мм)}
+    paper_sizes_data = {}
+
     # --- Функции для работы с принтерами ---
     def load_printers():
         """Загружает список установленных принтеров в выпадающий список."""
@@ -313,6 +316,7 @@ def open_print_management_window():
             return
         
         paper_listbox.delete(0, tk.END)
+        paper_sizes_data.clear()
         try:
             # Получаем дескриптор локального сервера печати, передавая None в OpenPrinter
             h_server = win32print.OpenPrinter(None)
@@ -323,7 +327,12 @@ def open_print_management_window():
                 for form in forms:
                     # Возвращаем фильтрацию по префиксу "Tilda_"
                     if form['Name'].startswith('Tilda_'):
-                        paper_listbox.insert(tk.END, form['Name'])
+                        name = form['Name']
+                        # Размеры хранятся в 1/1000 мм, переводим в мм
+                        width_mm = form['Size']['cx'] / 1000.0
+                        height_mm = form['Size']['cy'] / 1000.0
+                        paper_sizes_data[name] = (width_mm, height_mm)
+                        paper_listbox.insert(tk.END, f"{name} ({width_mm} x {height_mm} мм)")
             finally:
                 win32print.ClosePrinter(h_server) # Обязательно закрываем дескриптор
         except Exception as e:
@@ -337,6 +346,14 @@ def open_print_management_window():
         if not printer_name:
             messagebox.showwarning("Внимание", "Пожалуйста, выберите принтер.", parent=print_window)
             return
+        
+        # Получаем имя выбранной бумаги из Listbox
+        selected_indices = paper_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Внимание", "Пожалуйста, выберите размер бумаги.", parent=print_window)
+            return
+        # Извлекаем чистое имя формата из текста в списке
+        selected_paper_name = paper_listbox.get(selected_indices[0]).split(' ')[0]
 
         # --- НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ МЕТОД ПЕЧАТИ ЧЕРЕЗ GDI ---
         try:
@@ -367,12 +384,33 @@ def open_print_management_window():
                 font = win32ui.CreateFont(font_data)
                 dc.SelectObject(font)
 
-                # 6. "Рисуем" текст на странице
-                # Координаты (x, y) в точках (dots) от левого верхнего угла.
-                # Уменьшаем координаты для термопринтеров и небольших этикеток,
-                # чтобы текст не выходил за пределы области печати.
-                dc.TextOut(10, 10, "Тестовая печать")
-                dc.TextOut(10, 40, "из 'ТильдаКод'")
+                # 6. Масштабирование и позиционирование текста
+                # Получаем разрешение принтера (точек на дюйм)
+                dpi_x = dc.GetDeviceCaps(88) # LOGPIXELSX
+                dpi_y = dc.GetDeviceCaps(90) # LOGPIXELSY
+                
+                # Переводим дюймы в миллиметры
+                dots_per_mm_x = dpi_x / 25.4
+                dots_per_mm_y = dpi_y / 25.4
+
+                # Получаем размеры бумаги в мм из нашего словаря
+                paper_width_mm, paper_height_mm = paper_sizes_data[selected_paper_name]
+
+                # Считаем размеры бумаги в точках (пикселях)
+                paper_width_dots = int(paper_width_mm * dots_per_mm_x)
+                paper_height_dots = int(paper_height_mm * dots_per_mm_y)
+
+                # Текст для печати
+                line1 = "Тестовая печать"
+                line2 = "из 'ТильдаКод'"
+
+                # Устанавливаем выравнивание по центру
+                dc.SetTextAlign(win32ui.TA_CENTER | win32ui.TA_TOP)
+
+                # "Рисуем" текст, позиционируя его по центру ширины этикетки
+                # и с небольшим отступом сверху
+                dc.TextOut(paper_width_dots // 2, 10, line1)
+                dc.TextOut(paper_width_dots // 2, 40, line2)
 
                 # 7. Завершаем страницу и документ
                 dc.EndPage()
