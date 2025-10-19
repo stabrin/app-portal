@@ -611,6 +611,32 @@ def open_supervisor_creator_window():
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать супервизора: {e}", parent=sup_window)
 
+    # --- Основное окно управления клиентами ---
+    clients_window = tk.Toplevel(root)
+    clients_window.title("Управление клиентами")
+    clients_window.geometry("800x600")
+
+    # Разделение окна на две части
+    paned_window = ttk.PanedWindow(clients_window, orient=tk.VERTICAL)
+    paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # --- Верхняя часть: Клиенты ---
+    clients_frame = ttk.LabelFrame(paned_window, text="Клиенты")
+    paned_window.add(clients_frame, weight=1)
+
+    clients_tree_frame = ttk.Frame(clients_frame)
+    clients_tree_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=5)
+
+    clients_cols = ('id', 'name', 'ssh_host', 'created_at')
+    clients_tree = ttk.Treeview(clients_tree_frame, columns=clients_cols, show='headings')
+    clients_tree.heading('id', text='ID')
+    clients_tree.heading('name', text='Имя клиента')
+    clients_tree.heading('ssh_host', text='SSH Хост')
+    clients_tree.heading('created_at', text='Дата создания')
+    clients_tree.column('id', width=40)
+    clients_tree.pack(fill=tk.BOTH, expand=True)
+    clients_tree.bind('<<TreeviewSelect>>', on_client_select)
+
     def edit_selected_client():
         selected_item = clients_tree.focus()
         if not selected_item:
@@ -674,32 +700,6 @@ def open_supervisor_creator_window():
 
         ttk.Button(user_editor_window, text="Сохранить", command=save_user).grid(row=len(fields), column=1, sticky='e', padx=5, pady=10)
         ttk.Button(user_editor_window, text="Отмена", command=user_editor_window.destroy).grid(row=len(fields), column=0, sticky='w', padx=5, pady=10)
-
-    # --- Основное окно управления клиентами ---
-    clients_window = tk.Toplevel(root)
-    clients_window.title("Управление клиентами")
-    clients_window.geometry("800x600")
-
-    # Разделение окна на две части
-    paned_window = ttk.PanedWindow(clients_window, orient=tk.VERTICAL)
-    paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-    # --- Верхняя часть: Клиенты ---
-    clients_frame = ttk.LabelFrame(paned_window, text="Клиенты")
-    paned_window.add(clients_frame, weight=1)
-
-    clients_tree_frame = ttk.Frame(clients_frame)
-    clients_tree_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=5)
-
-    clients_cols = ('id', 'name', 'ssh_host', 'created_at')
-    clients_tree = ttk.Treeview(clients_tree_frame, columns=clients_cols, show='headings')
-    clients_tree.heading('id', text='ID')
-    clients_tree.heading('name', text='Имя клиента')
-    clients_tree.heading('ssh_host', text='SSH Хост')
-    clients_tree.heading('created_at', text='Дата создания')
-    clients_tree.column('id', width=40)
-    clients_tree.pack(fill=tk.BOTH, expand=True)
-    clients_tree.bind('<<TreeviewSelect>>', on_client_select)
 
     clients_buttons_frame = ttk.Frame(clients_frame)
     clients_buttons_frame.pack(side=tk.RIGHT, fill=tk.Y, padx=5, pady=5)
