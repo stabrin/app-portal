@@ -53,8 +53,13 @@ class SshTunnelProcess:
 
     def __enter__(self):
         """Запускает SSH-туннель в фоновом процессе."""
+        ssh_executable = 'ssh'
+        # На Windows лучше указать полный путь к системному ssh.exe
+        if sys.platform == "win32":
+            ssh_executable = r'C:\Windows\System32\OpenSSH\ssh.exe'
+
         tunnel_command = [
-            'ssh',
+            ssh_executable,
             '-N',  # Не выполнять удаленную команду
             '-L', f'{self.local_host}:{self.local_port}:{self.remote_host}:{self.remote_port}',
             '-p', str(self.ssh_port),
@@ -72,12 +77,22 @@ class SshTunnelProcess:
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
-        self.process = subprocess.Popen(tunnel_command, startupinfo=startupinfo)
+        # Перенаправляем stderr в лог, чтобы видеть ошибки от ssh.exe
+        self.process = subprocess.Popen(
+            tunnel_command, 
+            startupinfo=startupinfo,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            encoding='utf-8'
+        )
         time.sleep(2)  # Даем время на установку соединения
         
         # Проверяем, не завершился ли процесс с ошибкой
         if self.process.poll() is not None:
-            raise ConnectionError("Не удалось запустить процесс SSH-туннеля. Проверьте параметры SSH и доступность хоста.")
+            error_output = self.process.stderr.read()
+            logging.error(f"Процесс ssh.exe завершился с ошибкой: {error_output.strip()}")
+            raise ConnectionError(f"Не удалось запустить SSH-туннель. Ошибка: {error_output.strip()}")
             
         return self
 
