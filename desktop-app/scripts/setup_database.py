@@ -39,7 +39,7 @@ REMOTE_DB_HOST = os.getenv('DB_HOST')
 REMOTE_DB_PORT = int(os.getenv('DB_PORT', 5432))
 DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
-NEW_DB_NAME = os.getenv('DB_NAME')
+MAIN_DB_NAME = os.getenv('TILDA_DB_NAME') # Используем новую переменную для главной БД
 
 def load_ssh_key():
     """
@@ -84,8 +84,11 @@ def main():
             local_port = tunnel.local_bind_port
             print(f"SSH-туннель успешно создан. Локальный порт: {local_port}.")
 
+            if not MAIN_DB_NAME:
+                raise ValueError("Переменная TILDA_DB_NAME не задана в .env файле.")
+
             # --- Этап 1: Создание базы данных ---
-            print(f"\nПодключаюсь к системной базе 'postgres' для создания '{NEW_DB_NAME}'...")
+            print(f"\nПодключаюсь к системной базе 'postgres' для создания '{MAIN_DB_NAME}'...")
             
             conn_system = psycopg2.connect(
                 host='127.0.0.1', port=local_port,
@@ -94,42 +97,72 @@ def main():
             conn_system.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             
             with conn_system.cursor() as cur:
-                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (NEW_DB_NAME,))
+                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
                 if cur.fetchone():
-                    print(f"База данных '{NEW_DB_NAME}' уже существует. Пропускаю создание.")
+                    print(f"База данных '{MAIN_DB_NAME}' уже существует. Пропускаю создание.")
                 else:
-                    print(f"Создаю базу данных '{NEW_DB_NAME}'...")
-                    cur.execute(f"CREATE DATABASE {NEW_DB_NAME}")
+                    print(f"Создаю базу данных '{MAIN_DB_NAME}'...")
+                    cur.execute(f"CREATE DATABASE {MAIN_DB_NAME}")
                     print("База данных успешно создана.")
             conn_system.close()
 
             # --- Этап 2: Создание таблиц в новой базе данных ---
-            print(f"\nПодключаюсь к '{NEW_DB_NAME}' для создания таблиц...")
+            print(f"\nПодключаюсь к '{MAIN_DB_NAME}' для создания таблиц...")
 
             conn_new_db = psycopg2.connect(
                 host='127.0.0.1', port=local_port,
-                user=DB_USER, password=DB_PASSWORD, dbname=NEW_DB_NAME
+                user=DB_USER, password=DB_PASSWORD, dbname=MAIN_DB_NAME
             )
             with conn_new_db.cursor() as cur:
-                print("Создаю таблицу 'clients'...")
+                # Создаем перечисляемый тип для ролей пользователей
+                print("Создаю тип 'user_role' (супервизор, администратор, пользователь)...")
+                cur.execute("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+                            CREATE TYPE user_role AS ENUM ('супервизор', 'администратор', 'пользователь');
+                        END IF;
+                    END$$;
+                """)
+
+                print("Создаю таблицу 'clients' для хранения настроек подключений...")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS clients (
                         id SERIAL PRIMARY KEY,
-                        name VARCHAR(255) NOT NULL
+                        name VARCHAR(255) UNIQUE NOT NULL,
+                        ssh_host VARCHAR(255),
+                        ssh_port INTEGER,
+                        ssh_user VARCHAR(100),
+                        ssh_private_key TEXT,
+                        db_host VARCHAR(255),
+                        db_port INTEGER,
+                        db_name VARCHAR(100),
+                        db_user VARCHAR(100),
+                        db_password VARCHAR(255),
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                     );
                 """)
                 
-                print("Создаю таблицу 'users'...")
+                print("Создаю таблицу 'users' со связью с 'clients'...")
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS users (
                         id SERIAL PRIMARY KEY,
-                        login VARCHAR(100) UNIQUE NOT NULL,
+                        name VARCHAR(255) NOT NULL,
+                        login VARCHAR(100) UNIQUE NOT NULL,                        
                         password_hash VARCHAR(255) NOT NULL,
-                        role VARCHAR(50) NOT NULL
+                        role user_role NOT NULL,
+                        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                        client_id INTEGER,
+                        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                        
+                        CONSTRAINT fk_client
+                            FOREIGN KEY(client_id) 
+                            REFERENCES clients(id)
+                            ON DELETE SET NULL
                     );
                 """)
             conn_new_db.commit()
-            print("Таблицы 'clients' и 'users' успешно созданы.")
+            print("Все таблицы и типы успешно созданы или уже существовали.")
             conn_new_db.close()
 
     except FileNotFoundError:
