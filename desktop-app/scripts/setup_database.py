@@ -1,7 +1,6 @@
 # scripts/setup_database.py
 
 import os
-import sys
 import psycopg2
 import logging
 import traceback
@@ -17,13 +16,24 @@ current_file_path = os.path.dirname(os.path.abspath(__file__))
 # Путь к корневой папке проекта (на уровень выше, чем scripts)
 project_root = os.path.abspath(os.path.join(current_file_path, '..'))
 
+# --- НАСТРОЙКА ЛОГИРОВАНИЯ (аналогично main_window.py) ---
+# Делаем это в самом начале, чтобы логгировать даже ошибки импорта.
+log_file_path = os.path.join(project_root, 'app.log')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - (setup_database) - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file_path, encoding='utf-8'),
+        logging.StreamHandler() # Вывод в консоль, чтобы видеть в черном окне
+    ]
+)
+
 # --- ИМПОРТ ИЗ ОСНОВНОГО ПРИЛОЖЕНИЯ ---
 # Добавляем папку 'src' в sys.path, чтобы импортировать SshTunnelProcess
+import sys
 src_path = os.path.join(project_root, 'src')
 sys.path.insert(0, src_path)
 from main_window import SshTunnelProcess
-
-sys.path.insert(0, project_root)
 
 # Загружаем переменные окружения из файла .env в корне проекта
 dotenv_path = os.path.join(project_root, '.env')
@@ -168,12 +178,11 @@ def main():
     except Exception as e:
         error_details = traceback.format_exc()
         logging.error(f"Произошла критическая ошибка: {e}\n{error_details}")
-    finally:
-        logging.info("--- Скрипт завершил работу. ---")        
 
 if __name__ == "__main__":
     try:
         main()
+        logging.info("--- Скрипт успешно завершил работу. ---")
     finally:
         # Эта строка не даст окну закрыться, чтобы можно было увидеть результат
         input("\nНажмите Enter для выхода...")
