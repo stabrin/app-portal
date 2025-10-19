@@ -5,8 +5,23 @@ from tkinter import ttk, messagebox
 import subprocess
 import sys
 import os
+import logging
+import traceback
 import psycopg2
 from dotenv import load_dotenv
+
+# --- Настройка логирования ---
+# Определяем путь к лог-файлу в корне папки desktop-app
+log_file_path = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), 'app.log')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file_path, encoding='utf-8'), # Запись в файл
+        logging.StreamHandler()  # Вывод в консоль
+    ]
+)
 
 # Глобальная переменная для хранения виджета таблицы, чтобы его можно было удалять
 tree = None
@@ -35,8 +50,9 @@ def run_db_setup():
         subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
 
     except Exception as e:
-        print(f"Не удалось запустить скрипт: {e}")
-        messagebox.showerror("Ошибка запуска", f"Не удалось запустить скрипт:\n{e}")
+        error_details = traceback.format_exc()
+        logging.error(f"Не удалось запустить скрипт 'setup_database.py': {e}\n{error_details}")
+        messagebox.showerror("Ошибка запуска", f"Произошла ошибка при запуске скрипта.\nПодробности в файле app.log")
 
 def connect_and_show_orders():
     """
@@ -96,7 +112,9 @@ def connect_and_show_orders():
         tree.pack(expand=True, fill='both')
 
     except Exception as e:
-        messagebox.showerror("Ошибка подключения к БД", f"Не удалось получить данные:\n{e}")
+        error_details = traceback.format_exc()
+        logging.error(f"Ошибка при подключении к БД или получении данных: {e}\n{error_details}")
+        messagebox.showerror("Ошибка подключения к БД", f"Не удалось получить данные.\nПодробности записаны в файл app.log")
 
 
 # 1. Создаем главное окно приложения
