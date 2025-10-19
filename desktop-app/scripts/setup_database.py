@@ -33,7 +33,8 @@ logging.basicConfig(
 import sys
 src_path = os.path.join(project_root, 'src')
 sys.path.insert(0, src_path)
-from main_window import SshTunnelProcess
+# Импортируем из нового центрального модуля
+from core.db_connector import SshTunnelProcess
 
 # Загружаем переменные окружения из файла .env в корне проекта
 dotenv_path = os.path.join(project_root, '.env')
