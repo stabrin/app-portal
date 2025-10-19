@@ -112,6 +112,10 @@ def main():
                 host='127.0.0.1', port=local_port,
                 user=DB_USER, password=DB_PASSWORD, dbname=MAIN_DB_NAME
             )
+            # --- РЕШЕНИЕ: Включаем автокоммит для создания таблиц ---
+            # Это гарантирует, что каждая команда CREATE TABLE будет выполнена и сохранена немедленно,
+            # избегая проблем с откатом транзакции при завершении скрипта.
+            conn_new_db.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             with conn_new_db.cursor() as cur:
                 # Создаем перечисляемый тип для ролей пользователей
                 logging.info("Создаю тип 'user_role' (супервизор, администратор, пользователь)...")
@@ -160,8 +164,8 @@ def main():
                             ON DELETE SET NULL
                     );
                 """)
-            conn_new_db.commit()
             logging.info("Все таблицы и типы успешно созданы или уже существовали.")
+            # conn_new_db.commit() больше не нужен при автокоммите.
             conn_new_db.close()
 
     except Exception as e:
