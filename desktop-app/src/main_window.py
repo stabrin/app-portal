@@ -27,8 +27,6 @@ logging.basicConfig(
 
 # Глобальная переменная для хранения виджета таблицы, чтобы его можно было удалять
 tree = None
-# Глобальная переменная для режима подключения ('local' или 'remote')
-connection_mode = tk.StringVar(value='local') 
 
 
 def run_db_setup():
@@ -159,6 +157,9 @@ def connect_and_show_orders(mode='local'):
 
 # 1. Создаем главное окно приложения
 root = tk.Tk()
+
+# Глобальная переменная для режима подключения ('local' или 'remote')
+connection_mode = tk.StringVar(value='local')
 
 # 2. Устанавливаем заголовок окна
 root.title("ТильдаКод")
