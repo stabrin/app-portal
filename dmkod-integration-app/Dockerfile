@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Команда для запуска приложения внутри контейнера
-CMD ["gunicorn", "--bind", "0.0.0.0:8002", "--timeout", "300", "run:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8002", "--timeout", "300", "--limit-request-body", "104857600", "run:app"]
