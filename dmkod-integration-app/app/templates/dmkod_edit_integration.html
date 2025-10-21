@@ -59,7 +59,7 @@
                 <br>Обязательные колонки: <code>DataMatrix</code>, <code>Barcode</code>, <code>StartDate</code>, <code>EndDate</code>, <code>BoxSSCC</code>, <code>PaletSSCC</code>.
             </p>
             <form method="POST" action="{{ url_for('dmkod_integration_app.edit_integration', order_id=order.id) }}" enctype="multipart/form-data">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <input type="hidden" name="action" value="upload_delta_csv">
                 
                 <div class="row g-3 align-items-end">

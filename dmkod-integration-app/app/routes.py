@@ -554,236 +554,242 @@ def edit_integration(order_id):
                         flash('CSV-файл с результатами "Дельта" не был выбран.', 'danger')
                         return redirect(url_for('.edit_integration', order_id=order_id))
 
-                    # 1. Валидация имени файла
-                    expected_filename_pattern = f"order_{order_id}.csv"
-                    if expected_filename_pattern not in delta_csv_file.filename:
-                        flash(f'Ошибка: Имя файла должно содержать "{expected_filename_pattern}", но получено "{delta_csv_file.filename}".', 'danger')
-                        return redirect(url_for('.edit_integration', order_id=order_id))
+                    try:
+                        # 1. Валидация имени файла
+                        expected_filename_pattern = f"order_{order_id}.csv"
+                        if expected_filename_pattern not in delta_csv_file.filename:
+                            flash(f'Ошибка: Имя файла должно содержать "{expected_filename_pattern}", но получено "{delta_csv_file.filename}".', 'danger')
+                            return redirect(url_for('.edit_integration', order_id=order_id))
 
-                    # --- ИЗМЕНЕНИЕ: Убираем вложенный try...except, чтобы использовать одну транзакцию ---
-                    # Читаем CSV-файл с помощью pandas
-                    # Используем BytesIO для обработки потока файла и указываем кодировку/разделитель
-                    file_content = delta_csv_file.read().decode('utf-8')
-                    # --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Сразу указываем pandas читать SSCC как строки ---
-                    # Это предотвращает их автоматическое преобразование в числа (float) и потерю точности.
-                    df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str, 
-                                                                              'BoxSSCC': str, 
-                                                                              'PaletSSCC': str})
-                    df.columns = df.columns.str.strip() # Очищаем пробелы в заголовках
+                        logging.info(f"[Delta CSV] Начало обработки файла '{delta_csv_file.filename}' для заказа #{order_id}.")
+                        # Читаем CSV-файл с помощью pandas
+                        # Используем BytesIO для обработки потока файла и указываем кодировку/разделитель
+                        file_content = delta_csv_file.read().decode('utf-8')
+                        # --- КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Сразу указываем pandas читать SSCC как строки ---
+                        # Это предотвращает их автоматическое преобразование в числа (float) и потерю точности.
+                        df = pd.read_csv(StringIO(file_content), sep='\t', dtype={'Barcode': str, 
+                                                                                  'BoxSSCC': str, 
+                                                                                  'PaletSSCC': str})
+                        df.columns = df.columns.str.strip() # Очищаем пробелы в заголовках
 
-                    # Проверяем наличие обязательных колонок
-                    required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
-                    if not all(col in df.columns for col in required_columns):
-                        flash(f'Ошибка: В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.', 'danger')
-                        return redirect(url_for('.edit_integration', order_id=order_id))
-                    
-                    # --- ИСПРАВЛЕННЫЙ БЛОК: Нормализация SSCC ---
-                    # Принудительно преобразуем колонки в строковый тип (StringDtype), чтобы избежать ошибки
-                    # Берем последние 18 символов, чтобы отсечь возможные префиксы от сканера.
-                    df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
-                    df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
-                    # Преобразуем даты в нужный формат
-                    df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-                    df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-
-                    # --- НОВЫЙ БЛОК: Создание записей в 'packages' ---
-                    # 1. Собираем все уникальные SSCC коробов и паллет
-                    unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
-                    unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
-
-                    logging.info(f"[Delta CSV] Найдено {len(unique_boxes)} уникальных коробов и {len(unique_pallets)} уникальных паллет в файле.")
-                    packages_to_insert = []
-                    # --- ИСПРАВЛЕНИЕ: Добавляем 'level' сразу при создании ---
-                    if not unique_boxes.empty:
-                        unique_boxes_with_level = unique_boxes.copy()
-                        unique_boxes_with_level['level'] = 1
-                        packages_to_insert.append(unique_boxes_with_level)
-
-                    if not unique_pallets.empty:
-                        unique_pallets_with_level = unique_pallets.copy()
-                        unique_pallets_with_level['level'] = 2
-                        packages_to_insert.append(unique_pallets_with_level)
-                    
-                    if packages_to_insert:
-                        all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
-                        all_packages_df['owner'] = 'delta' # Указываем владельца
-                        logging.info(f"[Delta CSV] Всего подготовлено к обработке {len(all_packages_df)} упаковок (короба и паллеты).")
-                        all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
-
-                        # 2. Определяем связи "короб-паллета"
-                        box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
+                        # Проверяем наличие обязательных колонок
+                        required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
+                        if not all(col in df.columns for col in required_columns):
+                            flash(f'Ошибка: В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.', 'danger')
+                            return redirect(url_for('.edit_integration', order_id=order_id))
                         
-                        # Создаем словарь {pallet_sscc: pallet_id}
-                        # Мы не знаем ID паллет заранее, поэтому используем сами SSCC как временные ID
-                        
-                        # Создаем словарь {box_sscc: pallet_sscc}
-                        box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
+                        # --- ИСПРАВЛЕННЫЙ БЛОК: Нормализация SSCC ---
+                        # Принудительно преобразуем колонки в строковый тип (StringDtype), чтобы избежать ошибки
+                        # Берем последние 18 символов, чтобы отсечь возможные префиксы от сканера.
+                        df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
+                        df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
+                        # Преобразуем даты в нужный формат
+                        df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+                        df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
 
-                        # Функция для поиска parent_id (SSCC паллеты)
-                        def find_parent_sscc(row):
-                            if row['level'] == 1:
-                                return box_to_pallet_sscc_map.get(row['sscc'])
-                            return None
+                        # --- НОВЫЙ БЛОК: Создание записей в 'packages' ---
+                        # 1. Собираем все уникальные SSCC коробов и паллет
+                        unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
+                        unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
 
-                        all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
+                        logging.info(f"[Delta CSV] Найдено {len(unique_boxes)} уникальных коробов и {len(unique_pallets)} уникальных паллет в файле.")
+                        packages_to_insert = []
+                        # --- ИСПРАВЛЕНИЕ: Добавляем 'level' сразу при создании ---
+                        if not unique_boxes.empty:
+                            unique_boxes_with_level = unique_boxes.copy()
+                            unique_boxes_with_level['level'] = 1
+                            packages_to_insert.append(unique_boxes_with_level)
 
-                        # 3. Вставляем в базу 'packages'
-                        packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
+                        if not unique_pallets.empty:
+                            unique_pallets_with_level = unique_pallets.copy()
+                            unique_pallets_with_level['level'] = 2
+                            packages_to_insert.append(unique_pallets_with_level)
                         
-                        # Сначала вставляем паллеты (уровень 2), чтобы они уже были в БД
-                        pallets_df = all_packages_df[all_packages_df['level'] == 2]
-                        if not pallets_df.empty:
-                            from .utils import upsert_data_to_db # Импортируем утилиту
-                            logging.info(f"[Delta CSV] DataFrame паллет для вставки (первые 5 строк):\n{pallets_df.head().to_string()}")
-                            logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
-                            # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                            upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc')
-                            logging.info(f"[Delta CSV] Запрос на вставку паллет выполнен. Затронуто строк: {cur.rowcount}.")
-                            flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
-                            logging.info(f"[Delta CSV] Вставка паллет завершена.")
+                        if packages_to_insert:
+                            all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
+                            all_packages_df['owner'] = 'delta' # Указываем владельца
+                            logging.info(f"[Delta CSV] Всего подготовлено к обработке {len(all_packages_df)} упаковок (короба и паллеты).")
+                            all_packages_df['parent_id'] = None # Родители будут определены на след. шаге
 
-                        # Теперь вставляем короба (уровень 1), указывая parent_sscc
-                        boxes_df = all_packages_df[all_packages_df['level'] == 1]
-                        if not boxes_df.empty:
-                            from .utils import upsert_data_to_db # Повторный импорт для ясности
-                            # Вставляем короба с parent_sscc, передавая имя переменной окружения
-                            logging.info(f"[Delta CSV] DataFrame коробов для вставки (первые 5 строк):\n{boxes_df.head().to_string()}")
-                            logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
-                            # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                            upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc')
-                            logging.info(f"[Delta CSV] Запрос на вставку коробов выполнен. Затронуто строк: {cur.rowcount}.")
-                            flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
-                            logging.info(f"[Delta CSV] Вставка коробов завершена.")
-                        
-                        # --- НОВЫЙ БЛОК: Обновление parent_id ---
-                        # После того как все короба и паллеты вставлены,
-                        # мы можем обновить parent_id для коробов, используя parent_sscc.
-                        update_parent_id_query = sql.SQL("""
-                            UPDATE {packages_table} p_child
-                            SET parent_id = p_parent.id
-                            FROM {packages_table} p_parent
-                            WHERE p_child.parent_sscc = p_parent.sscc
-                              AND p_child.parent_sscc IS NOT NULL
-                              AND p_child.parent_id IS NULL;
-                        """).format(packages_table=sql.Identifier(packages_table_name))
-                        
-                        logging.info("[Delta CSV] Выполняю запрос на обновление parent_id для связки коробов и паллет...")
-                        cur.execute(update_parent_id_query)
-                        updated_parents_count = cur.rowcount
-                        flash(f"Связи 'короб-паллета' обновлены для {updated_parents_count} записей.", 'info')
-                        logging.info(f"[Delta CSV] Обновлено {updated_parents_count} связей parent_id.")
-                        
-                        # Очищаем временное поле parent_sscc
-                        if updated_parents_count > 0:
-                            cleanup_query = sql.SQL("""
-                                UPDATE {packages_table} SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;
+                            # 2. Определяем связи "короб-паллета"
+                            box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
+                            
+                            # Создаем словарь {pallet_sscc: pallet_id}
+                            # Мы не знаем ID паллет заранее, поэтому используем сами SSCC как временные ID
+                            
+                            # Создаем словарь {box_sscc: pallet_sscc}
+                            box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
+
+                            # Функция для поиска parent_id (SSCC паллеты)
+                            def find_parent_sscc(row):
+                                if row['level'] == 1:
+                                    return box_to_pallet_sscc_map.get(row['sscc'])
+                                return None
+
+                            all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
+
+                            # 3. Вставляем в базу 'packages'
+                            packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
+                            
+                            # Сначала вставляем паллеты (уровень 2), чтобы они уже были в БД
+                            pallets_df = all_packages_df[all_packages_df['level'] == 2]
+                            if not pallets_df.empty:
+                                from .utils import upsert_data_to_db # Импортируем утилиту
+                                logging.info(f"[Delta CSV] DataFrame паллет для вставки (первые 5 строк):\n{pallets_df.head().to_string()}")
+                                logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
+                                # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
+                                upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc')
+                                logging.info(f"[Delta CSV] Запрос на вставку паллет выполнен. Затронуто строк: {cur.rowcount}.")
+                                flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
+                                logging.info(f"[Delta CSV] Вставка паллет завершена.")
+
+                            # Теперь вставляем короба (уровень 1), указывая parent_sscc
+                            boxes_df = all_packages_df[all_packages_df['level'] == 1]
+                            if not boxes_df.empty:
+                                from .utils import upsert_data_to_db # Повторный импорт для ясности
+                                # Вставляем короба с parent_sscc, передавая имя переменной окружения
+                                logging.info(f"[Delta CSV] DataFrame коробов для вставки (первые 5 строк):\n{boxes_df.head().to_string()}")
+                                logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
+                                # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
+                                upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc')
+                                logging.info(f"[Delta CSV] Запрос на вставку коробов выполнен. Затронуто строк: {cur.rowcount}.")
+                                flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
+                                logging.info(f"[Delta CSV] Вставка коробов завершена.")
+                            
+                            # --- НОВЫЙ БЛОК: Обновление parent_id ---
+                            # После того как все короба и паллеты вставлены,
+                            # мы можем обновить parent_id для коробов, используя parent_sscc.
+                            update_parent_id_query = sql.SQL("""
+                                UPDATE {packages_table} p_child
+                                SET parent_id = p_parent.id
+                                FROM {packages_table} p_parent
+                                WHERE p_child.parent_sscc = p_parent.sscc
+                                  AND p_child.parent_sscc IS NOT NULL
+                                  AND p_child.parent_id IS NULL;
                             """).format(packages_table=sql.Identifier(packages_table_name))
-                            cur.execute(cleanup_query)
-                            flash("Временные данные по связям очищены.", 'info')
+                            
+                            logging.info("[Delta CSV] Выполняю запрос на обновление parent_id для связки коробов и паллет...")
+                            cur.execute(update_parent_id_query)
+                            updated_parents_count = cur.rowcount
+                            flash(f"Связи 'короб-паллета' обновлены для {updated_parents_count} записей.", 'info')
+                            logging.info(f"[Delta CSV] Обновлено {updated_parents_count} связей parent_id.")
+                            
+                            # Очищаем временное поле parent_sscc
+                            if updated_parents_count > 0:
+                                cleanup_query = sql.SQL("""
+                                    UPDATE {packages_table} SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;
+                                """).format(packages_table=sql.Identifier(packages_table_name))
+                                cur.execute(cleanup_query)
+                                flash("Временные данные по связям очищены.", 'info')
 
-                    # --- КОНЕЦ НОВОГО БЛОКА ---
+                        # --- КОНЕЦ НОВОГО БЛОКА ---
 
-                    # --- НОВЫЙ БЛОК: Создание и загрузка записей в 'items' ---
-                    logging.info("[Delta CSV] Начинаю подготовку данных для таблицы 'items'.")
-                    # 1. Получаем карту {sscc: id} для только что созданных коробов
-                    packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
-                    box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
-                    # --- ИСПРАВЛЕНИЕ: Выполняем запрос, только если есть короба ---
-                    sscc_to_id_map = {}
-                    if box_ssccs_tuple:
+                        # --- НОВЫЙ БЛОК: Создание и загрузка записей в 'items' ---
+                        logging.info("[Delta CSV] Начинаю подготовку данных для таблицы 'items'.")
+                        # 1. Получаем карту {sscc: id} для только что созданных коробов
+                        packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
+                        box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
+                        # --- ИСПРАВЛЕНИЕ: Выполняем запрос, только если есть короба ---
+                        sscc_to_id_map = {}
+                        if box_ssccs_tuple:
+                            cur.execute(
+                                sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s").format(
+                                    table=sql.Identifier(packages_table_name)
+                                ),
+                                (box_ssccs_tuple,)
+                            )
+                            sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+
+                        logging.info(f"[Delta CSV] Создана карта SSCC->ID для {len(sscc_to_id_map)} коробов.")
+
+                        # 2. Создаем DataFrame для 'items' с использованием корректного парсера
+                        parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
+                        items_df = pd.DataFrame(parsed_dm_data)
+                        
+                        # Добавляем остальные нужные колонки
+                        items_df['order_id'] = order_id
+                        # BoxSSCC нужен для маппинга, берем его из исходного DataFrame
+                        items_df['BoxSSCC'] = df['BoxSSCC']
+                        
+                        # 3. Связываем с 'packages' через package_id
+                        if sscc_to_id_map:
+                            items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                        else:
+                            items_df['package_id'] = None
+
+                        # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None перед загрузкой в БД ---
+                        # Это предотвращает ошибку 'integer out of range' для кодов без короба.
+                        items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
+                        
+                        # 4. Убираем временные колонки и загружаем в БД
+                        # --- ИСПРАВЛЕНО: Добавлены недостающие колонки crypto_part ---
+                        columns_to_save = ['datamatrix', 'gtin', 'serial', 
+                                           'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 
+                                           'order_id', 'package_id']
+                        items_to_upload = items_df[columns_to_save]
+                        
+                        # Проверка на дубликаты в 'items' перед вставкой
+                        from .utils import upsert_data_to_db
+                        upsert_data_to_db(cur, 'TABLE_ITEMS', items_to_upload, 'datamatrix')
+                        
+                        total_codes_processed = len(items_to_upload)
+                        unlinked_codes_count = items_to_upload['package_id'].isna().sum()
+                        
+                        logging.info(f"[Delta CSV] Всего обработано {total_codes_processed} кодов. Из них не связано с коробами: {unlinked_codes_count}.")
+                        flash(f"Всего в систему загружено {total_codes_processed} кодов. Из них не связано с коробами: {unlinked_codes_count} шт.", 'success')
+
+                        # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
+                        # --- НОВАЯ ЛОГИКА: Группировка по printrun_id и дате производства ---
+                        df_for_json = df.copy()
+                        df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
+
+                        # 1. Получаем карту {gtin: printrun_id} из деталей заказа
                         cur.execute(
-                            sql.SQL("SELECT sscc, id FROM {table} WHERE sscc IN %s").format(
-                                table=sql.Identifier(packages_table_name)
-                            ),
-                            (box_ssccs_tuple,)
+                            "SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL",
+                            (order_id,)
                         )
-                        sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+                        gtin_to_printrun_map = {row['gtin']: row['api_id'] for row in cur.fetchall()}
+                        if not gtin_to_printrun_map:
+                            raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
 
-                    logging.info(f"[Delta CSV] Создана карта SSCC->ID для {len(sscc_to_id_map)} коробов.")
+                        # 2. Добавляем printrun_id в DataFrame
+                        df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
 
-                    # 2. Создаем DataFrame для 'items' с использованием корректного парсера
-                    parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
-                    items_df = pd.DataFrame(parsed_dm_data)
-                    
-                    # Добавляем остальные нужные колонки
-                    items_df['order_id'] = order_id
-                    # BoxSSCC нужен для маппинга, берем его из исходного DataFrame
-                    items_df['BoxSSCC'] = df['BoxSSCC']
-                    
-                    # 3. Связываем с 'packages' через package_id
-                    if sscc_to_id_map:
-                        items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
-                    else:
-                        items_df['package_id'] = None
+                        # 3. Группируем по printrun_id, дате производства и сроку годности
+                        grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date'])['DataMatrix'].apply(list).reset_index()
 
-                    # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None перед загрузкой в БД ---
-                    # Это предотвращает ошибку 'integer out of range' для кодов без короба.
-                    items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
-                    
-                    # 4. Убираем временные колонки и загружаем в БД
-                    # --- ИСПРАВЛЕНО: Добавлены недостающие колонки crypto_part ---
-                    columns_to_save = ['datamatrix', 'gtin', 'serial', 
-                                       'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 
-                                       'order_id', 'package_id']
-                    items_to_upload = items_df[columns_to_save]
-                    
-                    # Проверка на дубликаты в 'items' перед вставкой
-                    from .utils import upsert_data_to_db
-                    upsert_data_to_db(cur, 'TABLE_ITEMS', items_to_upload, 'datamatrix')
-                    
-                    total_codes_processed = len(items_to_upload)
-                    unlinked_codes_count = items_to_upload['package_id'].isna().sum()
-                    
-                    logging.info(f"[Delta CSV] Всего обработано {total_codes_processed} кодов. Из них не связано с коробами: {unlinked_codes_count}.")
-                    flash(f"Всего в систему загружено {total_codes_processed} кодов. Из них не связано с коробами: {unlinked_codes_count} шт.", 'success')
-
-                    # --- ВОССТАНОВЛЕННЫЙ БЛОК: Сохранение результатов в delta_result ---
-                    # --- НОВАЯ ЛОГИКА: Группировка по printrun_id и дате производства ---
-                    df_for_json = df.copy()
-                    df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
-
-                    # 1. Получаем карту {gtin: printrun_id} из деталей заказа
-                    cur.execute(
-                        "SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL",
-                        (order_id,)
-                    )
-                    gtin_to_printrun_map = {row['gtin']: row['api_id'] for row in cur.fetchall()}
-                    if not gtin_to_printrun_map:
-                        raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
-
-                    # 2. Добавляем printrun_id в DataFrame
-                    df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
-
-                    # 3. Группируем по printrun_id, дате производства и сроку годности
-                    grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date'])['DataMatrix'].apply(list).reset_index()
-
-                    # 4. Формируем DataFrame для upsert
-                    def create_payload(row):
-                        # --- ИЗМЕНЕНО: Формируем структуру JSON согласно новому требованию ---
-                        cleaned_codes = [code.replace(GS_SEPARATOR, '') for code in row['DataMatrix']]
-                        payload = {
-                            "include": [{"code": c} for c in cleaned_codes],
-                            "attributes": {
-                                "production_date": str(row['production_date']),
-                                "expiration_date": str(row['expiration_date'])
+                        # 4. Формируем DataFrame для upsert
+                        def create_payload(row):
+                            # --- ИЗМЕНЕНО: Формируем структуру JSON согласно новому требованию ---
+                            cleaned_codes = [code.replace(GS_SEPARATOR, '') for code in row['DataMatrix']]
+                            payload = {
+                                "include": [{"code": c} for c in cleaned_codes],
+                                "attributes": {
+                                    "production_date": str(row['production_date']),
+                                    "expiration_date": str(row['expiration_date'])
+                                }
                             }
-                        }
-                        return json.dumps(payload)
+                            return json.dumps(payload)
 
-                    grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
-                    grouped_for_api['order_id'] = order_id
-                    # Преобразуем printrun_id в integer для корректной вставки
-                    grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
-                    grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
+                        grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
+                        grouped_for_api['order_id'] = order_id
+                        # Преобразуем printrun_id в integer для корректной вставки
+                        grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
+                        grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
 
-                    # 5. Выбираем колонки и выполняем upsert
-                    delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
+                        # 5. Выбираем колонки и выполняем upsert
+                        delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
 
-                    # Используем upsert для атомарного добавления/обновления
-                    from .utils import upsert_data_to_db
-                    upsert_data_to_db(cur, 'TABLE_DELTA_RESULT', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
+                        # Используем upsert для атомарного добавления/обновления
+                        from .utils import upsert_data_to_db
+                        upsert_data_to_db(cur, 'TABLE_DELTA_RESULT', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
 
-                    flash('Результаты из CSV-файла "Дельта" успешно сохранены для дальнейшей отправки в API.', 'success')
+                        flash('Результаты из CSV-файла "Дельта" успешно сохранены для дальнейшей отправки в API.', 'success')
+
+                    except Exception as e:
+                        logging.error(f"Ошибка при обработке CSV-файла 'Дельта' для заказа #{order_id}", exc_info=True)
+                        flash(f'Произошла критическая ошибка при обработке файла: {e}', 'danger')
+                        return redirect(url_for('.edit_integration', order_id=order_id))
 
             conn.commit()
             return redirect(url_for('.edit_integration', order_id=order_id))
@@ -1483,7 +1489,7 @@ def integration_panel():
                 user_logs = []
                 try:
                     conn_local = get_db_connection()
-                    with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
+                    with conn_local.cursor() as cur:
                         # Получаем все необходимые данные одним запросом, объединяя таблицы
                         cur.execute(
                             """

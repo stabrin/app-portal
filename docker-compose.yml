@@ -90,7 +90,7 @@ services:
     restart: always
     ports:
       # Судя по логам, вы заходите на порт 8080
-      - "8080:80"
+      - "80:80"
     volumes:
       # Пробрасываем конфигурационный файл для Nginx
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
