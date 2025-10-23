@@ -25,7 +25,7 @@ def get_main_db_connection():
 
     # Подключаемся к БД напрямую с использованием SSL
     conn = psycopg2.connect(
-        dbname=os.getenv("TILDA_DB_NAME"),
+        dbname=os.getenv("DB_NAME"),
         user=os.getenv("DB_USER"),
         password=os.getenv("DB_PASSWORD"),
         host=os.getenv("DB_HOST"), # ВАЖНО: здесь должен быть внешний адрес сервера

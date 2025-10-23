@@ -104,7 +104,7 @@ def connect_and_show_orders():
         logging.info("Попытка подключения к удаленной БД через SSL...")
         
         with get_main_db_connection() as conn:
-            with connection.cursor() as cur:
+            with conn.cursor() as cur:
                 orders_table = os.getenv('TABLE_ORDERS', 'orders')
                 query = sql.SQL("SELECT id, client_name, status, created_at FROM {} ORDER BY id DESC;").format(sql.Identifier(orders_table))
                 cur.execute(query)

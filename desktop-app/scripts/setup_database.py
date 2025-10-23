@@ -61,7 +61,7 @@ def main():
             raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
 
         if not MAIN_DB_NAME:
-            raise ValueError("Переменная TILDA_DB_NAME не задана в .env файле.")
+            raise ValueError("Переменная DB_NAME не задана в .env файле.")
 
         # --- Этап 1: Создание базы данных ---
         logging.info(f"Подключаюсь к системной базе 'postgres' для создания '{MAIN_DB_NAME}'...")
