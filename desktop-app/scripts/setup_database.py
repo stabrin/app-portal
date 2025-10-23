@@ -44,7 +44,7 @@ DB_HOST = os.getenv('DB_HOST') # Внешний адрес сервера
 DB_PORT = int(os.getenv('DB_PORT', 5432))
 DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
-MAIN_DB_NAME = os.getenv('TILDA_DB_NAME') # Используем новую переменную для главной БД
+MAIN_DB_NAME = os.getenv('DB_NAME') # Используем новую переменную для главной БД
 
 def main():
     """
