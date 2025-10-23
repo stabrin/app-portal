@@ -115,8 +115,11 @@ def update_client_db_schema(conn):
             CREATE TABLE IF NOT EXISTS {users} ( id SERIAL PRIMARY KEY,
                                                   username VARCHAR(80) UNIQUE NOT NULL,
                                                   password_hash VARCHAR(255) NOT NULL,
-                                                  is_admin BOOLEAN DEFAULT FALSE NOT NULL );
+                                                  is_admin BOOLEAN DEFAULT FALSE NOT NULL,
+                                                  is_active BOOLEAN DEFAULT TRUE NOT NULL );
         """).format(users=sql.Identifier(users_table)),
+        # Добавляем колонку для обратной совместимости
+        sql.SQL("ALTER TABLE {users} ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE NOT NULL;").format(users=sql.Identifier(users_table)),
 
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS {products} ( gtin VARCHAR(14) PRIMARY KEY,

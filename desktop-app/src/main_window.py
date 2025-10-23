@@ -457,6 +457,183 @@ def open_clients_management_window():
                 if client_conn: client_conn.close()
                 if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
 
+        def sync_user_with_client_db(user_login, password_hash, is_admin, is_active):
+            """Синхронизирует данные пользователя с базой данных клиента."""
+            client_conn = None
+            temp_cert_file = None
+            try:
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
+                        db_data = cur.fetchone()
+                if not db_data: raise ValueError("Данные клиента не найдены.")
+
+                db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
+                ssl_params = {}
+                if db_ssl_cert:
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                        fp.write(db_ssl_cert)
+                        temp_cert_file = fp.name
+                    ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
+
+                client_conn = psycopg2.connect(host=db_host, port=db_port, dbname=db_name, user=db_user, password=db_password, **ssl_params)
+                with client_conn.cursor() as cur:
+                    # Используем INSERT ... ON CONFLICT для создания или обновления пользователя
+                    query = sql.SQL("""
+                        INSERT INTO users (username, password_hash, is_admin, is_active)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (username) DO UPDATE SET
+                            password_hash = EXCLUDED.password_hash,
+                            is_admin = EXCLUDED.is_admin,
+                            is_active = EXCLUDED.is_active;
+                    """)
+                    cur.execute(query, (user_login, password_hash, is_admin, is_active))
+                client_conn.commit()
+                logging.info(f"Пользователь '{user_login}' успешно синхронизирован с БД клиента '{db_name}'.")
+                return True
+            except Exception as e:
+                logging.error(f"Ошибка синхронизации пользователя с БД клиента: {e}")
+                if client_conn: client_conn.rollback()
+                messagebox.showerror("Ошибка синхронизации", f"Не удалось обновить данные в базе клиента: {e}", parent=editor_window)
+                return False
+            finally:
+                if client_conn: client_conn.close()
+                if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
+
+        def add_user():
+            """Открывает окно для добавления нового пользователя-администратора."""
+            if not client_id: return
+
+            user_window = tk.Toplevel(editor_window)
+            user_window.title("Новый администратор")
+            user_window.grab_set()
+
+            ttk.Label(user_window, text="Имя:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+            name_entry = ttk.Entry(user_window, width=30)
+            name_entry.grid(row=0, column=1, padx=5, pady=5)
+
+            ttk.Label(user_window, text="Логин:").grid(row=1, column=0, padx=5, pady=5, sticky='w')
+            login_entry = ttk.Entry(user_window, width=30)
+            login_entry.grid(row=1, column=1, padx=5, pady=5)
+
+            ttk.Label(user_window, text="Пароль:").grid(row=2, column=0, padx=5, pady=5, sticky='w')
+            pass_entry = ttk.Entry(user_window, width=30, show="*")
+            pass_entry.grid(row=2, column=1, padx=5, pady=5)
+
+            def save():
+                name, login, password = name_entry.get(), login_entry.get(), pass_entry.get()
+                if not all([name, login, password]):
+                    messagebox.showwarning("Внимание", "Все поля обязательны.", parent=user_window)
+                    return
+
+                try:
+                    hashed_pass = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                    with get_main_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            # 1. Сохраняем в главную базу
+                            cur.execute("INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, 'администратор', %s)",
+                                        (name, login, hashed_pass, client_id))
+                        conn.commit()
+                    
+                    # 2. Синхронизируем с базой клиента
+                    if sync_user_with_client_db(login, hashed_pass, True, True):
+                        messagebox.showinfo("Успех", "Пользователь успешно создан.", parent=user_window)
+                        load_users_for_editor(client_id)
+                        user_window.destroy()
+
+                except psycopg2.IntegrityError:
+                    messagebox.showerror("Ошибка", f"Пользователь с логином '{login}' уже существует.", parent=user_window)
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось создать пользователя: {e}", parent=user_window)
+
+            ttk.Button(user_window, text="Сохранить", command=save).grid(row=3, column=1, sticky='e', padx=5, pady=10)
+            ttk.Button(user_window, text="Отмена", command=user_window.destroy).grid(row=3, column=0, sticky='w', padx=5, pady=10)
+
+        def edit_user():
+            """Редактирует имя и пароль выбранного пользователя."""
+            selected_item = users_in_editor_tree.focus()
+            if not selected_item: return
+            user_id, name, login, _, _ = users_in_editor_tree.item(selected_item)['values']
+
+            user_window = tk.Toplevel(editor_window)
+            user_window.title(f"Редактор: {name}")
+            user_window.grab_set()
+
+            ttk.Label(user_window, text="Имя:").grid(row=0, column=0, padx=5, pady=5, sticky='w')
+            name_entry = ttk.Entry(user_window, width=30)
+            name_entry.insert(0, name)
+            name_entry.grid(row=0, column=1, padx=5, pady=5)
+
+            ttk.Label(user_window, text="Новый пароль:").grid(row=1, column=0, padx=5, pady=5, sticky='w')
+            pass_entry = ttk.Entry(user_window, width=30, show="*")
+            pass_entry.grid(row=1, column=1, padx=5, pady=5)
+            ttk.Label(user_window, text="(оставьте пустым, если не меняете)").grid(row=2, columnspan=2, padx=5)
+
+            def save():
+                new_name = name_entry.get()
+                new_password = pass_entry.get()
+                try:
+                    with get_main_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            if new_password:
+                                hashed_pass = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+                                cur.execute("UPDATE users SET name = %s, password_hash = %s WHERE id = %s", (new_name, hashed_pass, user_id))
+                                # Получаем is_active для синхронизации
+                                cur.execute("SELECT is_active FROM users WHERE id = %s", (user_id,))
+                                is_active = cur.fetchone()[0]
+                                sync_user_with_client_db(login, hashed_pass, True, is_active)
+                            else:
+                                cur.execute("UPDATE users SET name = %s WHERE id = %s", (new_name, user_id))
+                        conn.commit()
+                    messagebox.showinfo("Успех", "Данные пользователя обновлены.", parent=user_window)
+                    load_users_for_editor(client_id)
+                    user_window.destroy()
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось обновить пользователя: {e}", parent=user_window)
+
+            ttk.Button(user_window, text="Сохранить", command=save).grid(row=3, column=1, sticky='e', padx=5, pady=10)
+            ttk.Button(user_window, text="Отмена", command=user_window.destroy).grid(row=3, column=0, sticky='w', padx=5, pady=10)
+
+        def delete_user():
+            selected_item = users_in_editor_tree.focus()
+            if not selected_item: return
+            user_id, name, login, _, _ = users_in_editor_tree.item(selected_item)['values']
+
+            if not messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить пользователя '{name}' ({login})?\nЭто действие необратимо.", parent=editor_window):
+                return
+            
+            try:
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
+                    conn.commit()
+                # Синхронизируем удаление (устанавливаем is_active=False и пустой пароль)
+                sync_user_with_client_db(login, "deleted", False, False)
+                load_users_for_editor(client_id)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось удалить пользователя: {e}", parent=editor_window)
+
+        def toggle_user_activity():
+            selected_item = users_in_editor_tree.focus()
+            if not selected_item: return
+            user_id, _, login, _, is_active = users_in_editor_tree.item(selected_item)['values']
+            new_status = not is_active
+
+            try:
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE users SET is_active = %s WHERE id = %s", (new_status, user_id))
+                        # Получаем хэш пароля для синхронизации
+                        cur.execute("SELECT password_hash FROM users WHERE id = %s", (user_id,))
+                        password_hash = cur.fetchone()[0]
+                    conn.commit()
+                
+                sync_user_with_client_db(login, password_hash, True, new_status)
+                load_users_for_editor(client_id)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось изменить статус пользователя: {e}", parent=editor_window)
+
         # --- Блок управления пользователями ---
         users_management_frame = ttk.LabelFrame(main_editor_frame, text="Пользователи этого клиента")
         users_management_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -465,13 +642,13 @@ def open_clients_management_window():
         user_buttons_frame = ttk.Frame(users_management_frame)
         user_buttons_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        btn_add_user = ttk.Button(user_buttons_frame, text="Создать")
+        btn_add_user = ttk.Button(user_buttons_frame, text="Создать", command=add_user)
         btn_add_user.pack(side=tk.LEFT, padx=2)
-        btn_edit_user = ttk.Button(user_buttons_frame, text="Редактировать")
+        btn_edit_user = ttk.Button(user_buttons_frame, text="Редактировать", command=edit_user)
         btn_edit_user.pack(side=tk.LEFT, padx=2)
-        btn_delete_user = ttk.Button(user_buttons_frame, text="Удалить")
+        btn_delete_user = ttk.Button(user_buttons_frame, text="Удалить", command=delete_user)
         btn_delete_user.pack(side=tk.LEFT, padx=2)
-        btn_toggle_user = ttk.Button(user_buttons_frame, text="Вкл/Выкл")
+        btn_toggle_user = ttk.Button(user_buttons_frame, text="Вкл/Выкл", command=toggle_user_activity)
         btn_toggle_user.pack(side=tk.LEFT, padx=2)
 
         # Таблица пользователей
@@ -763,13 +940,13 @@ def open_clients_management_window():
         user_buttons_frame = ttk.Frame(users_management_frame)
         user_buttons_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        btn_add_user = ttk.Button(user_buttons_frame, text="Создать")
+        btn_add_user = ttk.Button(user_buttons_frame, text="Создать", command=add_user)
         btn_add_user.pack(side=tk.LEFT, padx=2)
-        btn_edit_user = ttk.Button(user_buttons_frame, text="Редактировать")
+        btn_edit_user = ttk.Button(user_buttons_frame, text="Редактировать", command=edit_user)
         btn_edit_user.pack(side=tk.LEFT, padx=2)
-        btn_delete_user = ttk.Button(user_buttons_frame, text="Удалить")
+        btn_delete_user = ttk.Button(user_buttons_frame, text="Удалить", command=delete_user)
         btn_delete_user.pack(side=tk.LEFT, padx=2)
-        btn_toggle_user = ttk.Button(user_buttons_frame, text="Вкл/Выкл")
+        btn_toggle_user = ttk.Button(user_buttons_frame, text="Вкл/Выкл", command=toggle_user_activity)
         btn_toggle_user.pack(side=tk.LEFT, padx=2)
 
         # Таблица пользователей
