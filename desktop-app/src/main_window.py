@@ -552,14 +552,21 @@ def open_clients_management_window():
                             client_id = new_client_id # Обновляем ID для текущего окна
                             
                             # Создаем пользователя по умолчанию
-                            default_login = f"admin@{data_to_save['name']}"
+                            default_login = f"admin@{data_to_save['db_name']}"
                             default_pass = "12345"
                             hashed_pass = bcrypt.hashpw(default_pass.encode('utf-8'), bcrypt.gensalt())
                             
+                            # Проверяем, не занят ли уже такой логин
+                            cur.execute("SELECT 1 FROM users WHERE login = %s", (default_login,))
+                            if cur.fetchone():
+                                # Если логин занят, откатываем транзакцию и сообщаем об ошибке
+                                raise psycopg2.IntegrityError(f"Пользователь с логином '{default_login}' уже существует. Имя базы данных клиента должно быть уникальным.")
+
                             cur.execute(
                                 "INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, %s, %s)",
                                 ("Администратор", default_login, hashed_pass.decode('utf-8'), 'администратор', new_client_id)
                             )
+                    # Если все прошло без ошибок, коммитим транзакцию
                     conn.commit()
                 
                 # После успешного сохранения:
@@ -843,14 +850,21 @@ def open_clients_management_window():
                             client_id = new_client_id # Обновляем ID для текущего окна
                             
                             # Создаем пользователя по умолчанию
-                            default_login = f"admin@{data_to_save['name']}"
+                            default_login = f"admin@{data_to_save['db_name']}"
                             default_pass = "12345"
                             hashed_pass = bcrypt.hashpw(default_pass.encode('utf-8'), bcrypt.gensalt())
                             
+                            # Проверяем, не занят ли уже такой логин
+                            cur.execute("SELECT 1 FROM users WHERE login = %s", (default_login,))
+                            if cur.fetchone():
+                                # Если логин занят, откатываем транзакцию и сообщаем об ошибке
+                                raise psycopg2.IntegrityError(f"Пользователь с логином '{default_login}' уже существует. Имя базы данных клиента должно быть уникальным.")
+
                             cur.execute(
                                 "INSERT INTO users (name, login, password_hash, role, client_id) VALUES (%s, %s, %s, %s, %s)",
                                 ("Администратор", default_login, hashed_pass.decode('utf-8'), 'администратор', new_client_id)
                             )
+                    # Если все прошло без ошибок, коммитим транзакцию
                     conn.commit()
                 
                 # После успешного сохранения:

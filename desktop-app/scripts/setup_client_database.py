@@ -40,6 +40,7 @@ def update_client_db_schema(conn):
     # Список всех SQL-команд для создания и обновления схемы
     sql_commands = [
         # === Блок из manual-aggregation-app ===
+        # Эта часть не имеет зависимостей от других таблиц, можно оставить в начале.
         sql.SQL('CREATE EXTENSION IF NOT EXISTS "pgcrypto";'),
 
         sql.SQL("""
@@ -91,7 +92,22 @@ def update_client_db_schema(conn):
         # Команда для обратной совместимости, если в старой базе было такое ограничение
         sql.SQL("ALTER TABLE {ma_aggregations} DROP CONSTRAINT IF EXISTS ma_aggregations_child_code_parent_code_key;").format(ma_aggregations=sql.Identifier(ma_aggregations_table)),
 
+        # === Блок из dmkod-integration-app (независимые таблицы) ===
+        # Таблица dmkod_product_groups должна быть создана ДО таблицы orders, т.к. orders на нее ссылается.
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS {pg_table} ( id SERIAL PRIMARY KEY,
+                                                     group_name VARCHAR(100) NOT NULL UNIQUE,
+                                                     display_name VARCHAR(255) NOT NULL,
+                                                     fias_required BOOLEAN NOT NULL DEFAULT FALSE,
+                                                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                                                     code_template TEXT,
+                                                     dm_template TEXT );
+        """).format(pg_table=sql.Identifier(product_groups_table)),
+        sql.SQL("CREATE INDEX IF NOT EXISTS idx_pg_group_name ON {pg_table}(group_name);").format(pg_table=sql.Identifier(product_groups_table)),
+
         # === Блок из datamatrix-app ===
+        # Эти таблицы также независимы или зависят только друг от друга, но не от dmkod.
+        # Их нужно создать до таблиц, которые на них ссылаются (items, aggregation_tasks и т.д.).
         sql.SQL("CREATE TABLE IF NOT EXISTS {counters} ( counter_name VARCHAR(50) PRIMARY KEY, current_value BIGINT NOT NULL );").format(counters=sql.Identifier(system_counters_table)),
         sql.SQL("INSERT INTO {counters} (counter_name, current_value) VALUES ('sscc_id', 93) ON CONFLICT (counter_name) DO NOTHING;").format(counters=sql.Identifier(system_counters_table)),
 
@@ -111,6 +127,7 @@ def update_client_db_schema(conn):
                                                      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() );
         """).format(products=sql.Identifier(products_table)),
 
+        # Теперь можно создавать таблицу orders, т.к. dmkod_product_groups уже существует.
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS {orders} ( id SERIAL PRIMARY KEY,
                                                    client_name VARCHAR(100) NOT NULL,
@@ -160,6 +177,7 @@ def update_client_db_schema(conn):
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_items_gtin ON {items}(gtin);").format(items=sql.Identifier(items_table)),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_items_order_id ON {items}(order_id);").format(items=sql.Identifier(items_table)),
 
+        # Таблицы, зависящие от orders
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS {agg_tasks} ( id SERIAL PRIMARY KEY,
                                                       order_id INTEGER NOT NULL REFERENCES {orders}(id) ON DELETE CASCADE,
@@ -173,18 +191,6 @@ def update_client_db_schema(conn):
             agg_tasks=sql.Identifier(aggregation_tasks_table),
             orders=sql.Identifier(orders_table)
         ),
-
-        # === Блок из dmkod-integration-app ===
-        sql.SQL("""
-            CREATE TABLE IF NOT EXISTS {pg_table} ( id SERIAL PRIMARY KEY,
-                                                     group_name VARCHAR(100) NOT NULL UNIQUE,
-                                                     display_name VARCHAR(255) NOT NULL,
-                                                     fias_required BOOLEAN NOT NULL DEFAULT FALSE,
-                                                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                                                     code_template TEXT,
-                                                     dm_template TEXT );
-        """).format(pg_table=sql.Identifier(product_groups_table)),
-        sql.SQL("CREATE INDEX IF NOT EXISTS idx_pg_group_name ON {pg_table}(group_name);").format(pg_table=sql.Identifier(product_groups_table)),
 
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS {agg_details} ( id SERIAL PRIMARY KEY,
