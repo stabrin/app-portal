@@ -115,6 +115,57 @@ def test_connection():
         logging.error(f"Ошибка при проверке подключения: {e}\n{error_details}")
         messagebox.showerror("Ошибка подключения", f"Не удалось подключиться.\nПодробности записаны в файл app.log")
 
+def test_ssl_connection():
+    """
+    Проверяет SSL-подключение к базе данных PostgreSQL через SSH-туннель.
+    """
+    try:
+        logging.info("Проверка SSL-подключения к удаленной БД...")
+
+        # 1. Находим путь к сертификату сервера
+        # project_root = desktop-app, '..' -> app-portal
+        app_portal_root = os.path.abspath(os.path.join(project_root, '..'))
+        cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
+
+        if not os.path.exists(cert_path):
+            raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
+        logging.info(f"Используется сертификат: {cert_path}")
+
+        # 2. Устанавливаем SSH-туннель
+        ssh_key_path = os.path.join(project_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
+        if not os.path.exists(ssh_key_path):
+            raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
+
+        with SshTunnelProcess(
+            ssh_host=os.getenv("SSH_HOST"),
+            ssh_port=int(os.getenv("SSH_PORT", 22)),
+            ssh_user=os.getenv("SSH_USER"),
+            ssh_key=ssh_key_path,
+            remote_host=os.getenv("DB_HOST"),
+            remote_port=int(os.getenv("DB_PORT"))
+        ) as tunnel:
+            logging.info(f"SSH-туннель для SSL-проверки создан. Локальный порт: {tunnel.local_port}")
+
+            # 3. Проверяем SSL-подключение к PostgreSQL
+            with psycopg2.connect(
+                dbname=os.getenv("DB_NAME"),
+                user=os.getenv("DB_USER"),
+                password=os.getenv("DB_PASSWORD"),
+                host=tunnel.local_host,
+                port=tunnel.local_port,
+                connect_timeout=5,
+                sslmode='verify-full', # Строгая проверка SSL
+                sslrootcert=cert_path
+            ) as conn:
+                ssl_info = conn.get_dsn_parameters().get('sslmode')
+                logging.info(f"SSL-соединение с PostgreSQL успешно установлено. Режим: {ssl_info}")
+
+        messagebox.showinfo("Проверка SSL", "SSL-подключение к базе данных успешно установлено!")
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logging.error(f"Ошибка при проверке SSL-подключения: {e}\n{error_details}")
+        messagebox.showerror("Ошибка SSL-подключения", f"Не удалось установить SSL-соединение.\nПодробности в файле app.log")
+
 def connect_and_show_orders():
     """
     Подключается к БД, считывает таблицу orders и отображает ее в главном окне.
@@ -979,6 +1030,7 @@ def main():
     # -- Меню "База данных" --
     db_menu = tk.Menu(menubar, tearoff=0)
     db_menu.add_command(label="Проверить подключение", command=test_connection)
+    db_menu.add_command(label="Проверить SSL-подключение", command=test_ssl_connection)
     db_menu.add_separator()
     db_menu.add_command(label="Показать заказы", command=connect_and_show_orders)
     menubar.add_cascade(label="База данных", menu=db_menu)
