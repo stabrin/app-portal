@@ -343,7 +343,7 @@ def open_clients_management_window():
         try:
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, name, ssh_host, created_at FROM clients ORDER BY name;")
+                    cur.execute("SELECT id, name, db_host, created_at FROM clients ORDER BY name;")
                     for row in cur.fetchall():
                         clients_tree.insert('', 'end', values=row)
         except Exception as e:
@@ -380,45 +380,29 @@ def open_clients_management_window():
         editor_window.title("Редактор клиента")
         editor_window.grab_set()
 
-        # --- Новая компоновка окна ---
-        # Основной фрейм с отступами
         main_editor_frame = ttk.Frame(editor_window, padding="10")
         main_editor_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Верхний фрейм для колонок
-        top_frame = ttk.Frame(main_editor_frame)
-        top_frame.pack(fill=tk.X, pady=5)
-
-        # Левая колонка (SSH)
-        ssh_frame = ttk.LabelFrame(top_frame, text="Параметры подключения SSH")
-        ssh_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        # Правая колонка (БД)
-        db_frame = ttk.LabelFrame(top_frame, text="Параметры подключения к базе")
-        db_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+        # Фрейм для полей ввода данных клиента
+        client_data_frame = ttk.LabelFrame(main_editor_frame, text="Данные клиента")
+        client_data_frame.pack(fill=tk.X, pady=5)
 
         entries = {}
-        ssh_fields = ["Имя", "SSH Хост", "SSH Порт", "SSH Пользователь"]
-        db_fields = ["DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль"]
+        # Поля "Имя" и все поля для подключения к БД
+        fields = ["Имя", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль"]
 
-        for i, field in enumerate(ssh_fields):
-            ttk.Label(ssh_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
-            entry = ttk.Entry(ssh_frame, width=40)
+        for i, field in enumerate(fields):
+            ttk.Label(client_data_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
+            entry = ttk.Entry(client_data_frame, width=40)
             entry.grid(row=i, column=1, padx=5, pady=2, sticky='ew')
             entries[field] = entry
+        client_data_frame.columnconfigure(1, weight=1)
 
-        for i, field in enumerate(db_fields):
-            ttk.Label(db_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
-            entry = ttk.Entry(db_frame, width=40)
-            entry.grid(row=i, column=1, padx=5, pady=2, sticky='ew')
-            entries[field] = entry
-
-        # Поле для SSH ключа
-        key_frame = ttk.LabelFrame(main_editor_frame, text="Приватный SSH ключ")
-        key_frame.pack(fill=tk.X, pady=5)
-        ssh_key_text = tk.Text(key_frame, height=8, width=80)
-        ssh_key_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
-        entries["SSH Ключ"] = ssh_key_text
+        # Поле для SSL сертификата
+        cert_frame = ttk.LabelFrame(main_editor_frame, text="SSL-сертификат для подключения к БД клиента")
+        cert_frame.pack(fill=tk.X, pady=5)
+        ssl_cert_text = tk.Text(cert_frame, height=8, width=80)
+        ssl_cert_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
 
         # --- Блок управления пользователями ---
         users_management_frame = ttk.LabelFrame(main_editor_frame, text="Пользователи этого клиента")
@@ -469,20 +453,18 @@ def open_clients_management_window():
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("SELECT name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key FROM clients WHERE id = %s", (client_id,))
+                        cur.execute("SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
                         client_data = cur.fetchone()
                 if client_data:
-                    # Объединяем все поля в один список для итерации
-                    all_fields = ssh_fields + db_fields + ["SSH Ключ"]
-                    for field in all_fields:
+                    for field in fields:
                         # Сопоставляем поля с данными из БД
-                        db_field_map = {"Имя": 0, "SSH Хост": 1, "SSH Порт": 2, "SSH Пользователь": 3, "DB Хост": 4, "DB Порт": 5, "DB Имя": 6, "DB Пользователь": 7, "DB Пароль": 8, "SSH Ключ": 9}
+                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "SSL_CERT": 6}
                         if field in db_field_map:
                             value = client_data[db_field_map[field]] if client_data[db_field_map[field]] is not None else ""
-                            if field == "SSH Ключ":
-                                entries[field].insert('1.0', value)
-                            else:
-                                entries[field].insert(0, str(value))
+                            entries[field].insert(0, str(value))
+                    # Заполняем поле сертификата
+                    ssl_cert_value = client_data[6] if client_data[6] is not None else ""
+                    ssl_cert_text.insert('1.0', ssl_cert_value)
                 load_users_for_editor(client_id)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить данные клиента: {e}", parent=editor_window)
@@ -495,25 +477,22 @@ def open_clients_management_window():
             """Сохраняет данные клиента в БД."""
             data_to_save = {
                 'name': entries['Имя'].get(),
-                'ssh_host': entries['SSH Хост'].get(),
-                'ssh_port': int(entries['SSH Порт'].get() or 0),
-                'ssh_user': entries['SSH Пользователь'].get(),
                 'db_host': entries['DB Хост'].get(),
                 'db_port': int(entries['DB Порт'].get() or 0),
                 'db_name': entries['DB Имя'].get(),
                 'db_user': entries['DB Пользователь'].get(),
                 'db_password': entries['DB Пароль'].get(),
-                'ssh_private_key': entries['SSH Ключ'].get('1.0', 'end-1c')
+                'db_ssl_cert': ssl_cert_text.get('1.0', 'end-1c')
             }
 
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
                         if client_id: # Обновление
-                            query = sql.SQL("UPDATE clients SET name=%s, ssh_host=%s, ssh_port=%s, ssh_user=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, ssh_private_key=%s WHERE id=%s")
+                            query = sql.SQL("UPDATE clients SET name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, db_ssl_cert=%s WHERE id=%s")
                             cur.execute(query, (*data_to_save.values(), client_id))
                         else: # Вставка нового клиента
-                            query = sql.SQL("INSERT INTO clients (name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
+                            query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id")
                             cur.execute(query, tuple(data_to_save.values()))
                             new_client_id = cur.fetchone()[0]
                             
@@ -590,7 +569,7 @@ def open_clients_management_window():
         try:
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, name, ssh_host, created_at FROM clients ORDER BY name;")
+                    cur.execute("SELECT id, name, db_host, created_at FROM clients ORDER BY name;")
                     for row in cur.fetchall():
                         clients_tree.insert('', 'end', values=row)
         except Exception as e:
@@ -627,45 +606,29 @@ def open_clients_management_window():
         editor_window.title("Редактор клиента")
         editor_window.grab_set()
 
-        # --- Новая компоновка окна ---
-        # Основной фрейм с отступами
         main_editor_frame = ttk.Frame(editor_window, padding="10")
         main_editor_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Верхний фрейм для колонок
-        top_frame = ttk.Frame(main_editor_frame)
-        top_frame.pack(fill=tk.X, pady=5)
-
-        # Левая колонка (SSH)
-        ssh_frame = ttk.LabelFrame(top_frame, text="Параметры подключения SSH")
-        ssh_frame.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-
-        # Правая колонка (БД)
-        db_frame = ttk.LabelFrame(top_frame, text="Параметры подключения к базе")
-        db_frame.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(5, 0))
+        # Фрейм для полей ввода данных клиента
+        client_data_frame = ttk.LabelFrame(main_editor_frame, text="Данные клиента")
+        client_data_frame.pack(fill=tk.X, pady=5)
 
         entries = {}
-        ssh_fields = ["Имя", "SSH Хост", "SSH Порт", "SSH Пользователь"]
-        db_fields = ["DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль"]
+        # Поля "Имя" и все поля для подключения к БД
+        fields = ["Имя", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль"]
 
-        for i, field in enumerate(ssh_fields):
-            ttk.Label(ssh_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
-            entry = ttk.Entry(ssh_frame, width=40)
+        for i, field in enumerate(fields):
+            ttk.Label(client_data_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
+            entry = ttk.Entry(client_data_frame, width=40)
             entry.grid(row=i, column=1, padx=5, pady=2, sticky='ew')
             entries[field] = entry
+        client_data_frame.columnconfigure(1, weight=1)
 
-        for i, field in enumerate(db_fields):
-            ttk.Label(db_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
-            entry = ttk.Entry(db_frame, width=40)
-            entry.grid(row=i, column=1, padx=5, pady=2, sticky='ew')
-            entries[field] = entry
-
-        # Поле для SSH ключа
-        key_frame = ttk.LabelFrame(main_editor_frame, text="Приватный SSH ключ")
-        key_frame.pack(fill=tk.X, pady=5)
-        ssh_key_text = tk.Text(key_frame, height=8, width=80)
-        ssh_key_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
-        entries["SSH Ключ"] = ssh_key_text
+        # Поле для SSL сертификата
+        cert_frame = ttk.LabelFrame(main_editor_frame, text="SSL-сертификат для подключения к БД клиента")
+        cert_frame.pack(fill=tk.X, pady=5)
+        ssl_cert_text = tk.Text(cert_frame, height=8, width=80)
+        ssl_cert_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
 
         # --- Блок управления пользователями ---
         users_management_frame = ttk.LabelFrame(main_editor_frame, text="Пользователи этого клиента")
@@ -716,19 +679,18 @@ def open_clients_management_window():
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("SELECT name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key FROM clients WHERE id = %s", (client_id,))
+                        cur.execute("SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
                         client_data = cur.fetchone()
                 if client_data:
-                    fields = list(entries.keys())
-                    for i, field in enumerate(fields):
+                    for field in fields:
                         # Сопоставляем поля с данными из БД
-                        db_field_map = {"Имя": 0, "SSH Хост": 1, "SSH Порт": 2, "SSH Пользователь": 3, "DB Хост": 4, "DB Порт": 5, "DB Имя": 6, "DB Пользователь": 7, "DB Пароль": 8, "SSH Ключ": 9}
+                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "SSL_CERT": 6}
                         if field in db_field_map:
                             value = client_data[db_field_map[field]] if client_data[db_field_map[field]] is not None else ""
-                            if field == "SSH Ключ":
-                                entries[field].insert('1.0', value)
-                            else:
-                                entries[field].insert(0, str(value))
+                            entries[field].insert(0, str(value))
+                    # Заполняем поле сертификата
+                    ssl_cert_value = client_data[6] if client_data[6] is not None else ""
+                    ssl_cert_text.insert('1.0', ssl_cert_value)
                 load_users_for_editor(client_id)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить данные клиента: {e}", parent=editor_window)
@@ -741,25 +703,22 @@ def open_clients_management_window():
             """Сохраняет данные клиента в БД."""
             data_to_save = {
                 'name': entries['Имя'].get(),
-                'ssh_host': entries['SSH Хост'].get(),
-                'ssh_port': int(entries['SSH Порт'].get() or 0),
-                'ssh_user': entries['SSH Пользователь'].get(),
                 'db_host': entries['DB Хост'].get(),
                 'db_port': int(entries['DB Порт'].get() or 0),
                 'db_name': entries['DB Имя'].get(),
                 'db_user': entries['DB Пользователь'].get(),
                 'db_password': entries['DB Пароль'].get(),
-                'ssh_private_key': entries['SSH Ключ'].get('1.0', 'end-1c')
+                'db_ssl_cert': ssl_cert_text.get('1.0', 'end-1c')
             }
 
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
                         if client_id: # Обновление
-                            query = sql.SQL("UPDATE clients SET name=%s, ssh_host=%s, ssh_port=%s, ssh_user=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, ssh_private_key=%s WHERE id=%s")
+                            query = sql.SQL("UPDATE clients SET name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, db_ssl_cert=%s WHERE id=%s")
                             cur.execute(query, (*data_to_save.values(), client_id))
                         else: # Вставка нового клиента
-                            query = sql.SQL("INSERT INTO clients (name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
+                            query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id")
                             cur.execute(query, tuple(data_to_save.values()))
                             new_client_id = cur.fetchone()[0]
                             
@@ -803,10 +762,10 @@ def open_clients_management_window():
     clients_tree_frame.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=5, pady=5)
 
     clients_cols = ('id', 'name', 'ssh_host', 'created_at')
-    clients_tree = ttk.Treeview(clients_tree_frame, columns=clients_cols, show='headings')
+    clients_tree = ttk.Treeview(clients_tree_frame, columns=clients_cols, show='headings', displaycolumns=('id', 'name', 'ssh_host', 'created_at'))
     clients_tree.heading('id', text='ID')
     clients_tree.heading('name', text='Имя клиента')
-    clients_tree.heading('ssh_host', text='SSH Хост')
+    clients_tree.heading('ssh_host', text='Хост БД')
     clients_tree.heading('created_at', text='Дата создания')
     clients_tree.column('id', width=40)
     clients_tree.pack(fill=tk.BOTH, expand=True)

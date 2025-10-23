@@ -113,12 +113,15 @@ def main():
                 cur.execute("""
                     -- Возвращаем проверку IF NOT EXISTS
                     CREATE TABLE IF NOT EXISTS clients (
-                        id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL, ssh_host VARCHAR(255),
-                        ssh_port INTEGER, ssh_user VARCHAR(100), ssh_private_key TEXT, db_host VARCHAR(255),
-                        db_port INTEGER, db_name VARCHAR(100), db_user VARCHAR(100), db_password VARCHAR(255),
+                        id SERIAL PRIMARY KEY, name VARCHAR(255) UNIQUE NOT NULL, 
+                        db_host VARCHAR(255), db_port INTEGER, db_name VARCHAR(100), 
+                        db_user VARCHAR(100), db_password VARCHAR(255),
+                        db_ssl_cert TEXT, -- Поле для хранения SSL сертификата БД клиента
                         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW() );
                 """)
                 logging.info("Таблица 'clients' создана или уже существует.")
+                # Добавляем колонку, если таблица уже была создана без нее (для обратной совместимости)
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS db_ssl_cert TEXT;")
                 
                 logging.info("Создаю таблицу 'users' со связью с 'clients'...")
                 cur.execute("""
