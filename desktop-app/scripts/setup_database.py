@@ -32,9 +32,6 @@ logging.basicConfig(
 # Добавляем папку 'src' в sys.path, чтобы импортировать SshTunnelProcess
 import sys
 src_path = os.path.join(project_root, 'src')
-sys.path.insert(0, src_path)
-# Импортируем из нового центрального модуля
-from db_connector import SshTunnelProcess
 
 # Загружаем переменные окружения из файла .env в корне проекта
 dotenv_path = os.path.join(project_root, '.env')
@@ -42,16 +39,9 @@ load_dotenv(dotenv_path=dotenv_path)
 
 # --- ЧТЕНИЕ КОНФИГУРАЦИИ ---
 
-# Параметры SSH
-SSH_HOST = os.getenv('SSH_HOST')
-SSH_PORT = int(os.getenv('SSH_PORT', 22))
-SSH_USER = os.getenv('SSH_USER')
-# Старый способ: имя файла в папке /keys
-SSH_KEY_FILENAME = os.getenv('SSH_KEY_FILENAME')
-
 # Параметры PostgreSQL
-REMOTE_DB_HOST = os.getenv('DB_HOST')
-REMOTE_DB_PORT = int(os.getenv('DB_PORT', 5432))
+DB_HOST = os.getenv('DB_HOST') # Внешний адрес сервера
+DB_PORT = int(os.getenv('DB_PORT', 5432))
 DB_USER = os.getenv('DB_USER')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 MAIN_DB_NAME = os.getenv('TILDA_DB_NAME') # Используем новую переменную для главной БД
@@ -61,71 +51,51 @@ def main():
     Главная функция, которая выполняет всю логику.
     """
     logging.info("--- Запуск скрипта инициализации базы данных ---")
-    logging.info(f"Попытка подключения к серверу {SSH_HOST}...")
+    logging.info(f"Попытка подключения к серверу {DB_HOST} по SSL...")
 
     try:
-        # --- Используем тот же метод, что и в main_window.py ---
-        if not SSH_KEY_FILENAME:
-            raise ValueError("Переменная SSH_KEY_FILENAME не задана в .env файле.")
+        # Находим путь к сертификату сервера
+        app_portal_root = os.path.abspath(os.path.join(project_root, '..'))
+        cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
+        if not os.path.exists(cert_path):
+            raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
+
+        if not MAIN_DB_NAME:
+            raise ValueError("Переменная TILDA_DB_NAME не задана в .env файле.")
+
+        # --- Этап 1: Создание базы данных ---
+        logging.info(f"Подключаюсь к системной базе 'postgres' для создания '{MAIN_DB_NAME}'...")
         
-        ssh_key_path = os.path.join(project_root, 'keys', SSH_KEY_FILENAME)
-        if not os.path.exists(ssh_key_path):
-            raise FileNotFoundError(f"Файл SSH-ключа не найден по пути: {ssh_key_path}")
-
-        with SshTunnelProcess(
-            ssh_host=SSH_HOST,
-            ssh_port=SSH_PORT,
-            ssh_user=SSH_USER,
-            ssh_key=ssh_key_path,
-            remote_host=REMOTE_DB_HOST,
-            remote_port=REMOTE_DB_PORT
-        ) as tunnel:
-            
-            local_port = tunnel.local_port # ИСПРАВЛЕНИЕ: Правильное имя атрибута
-            logging.info(f"SSH-туннель успешно создан. Локальный порт: {local_port}.")
-
-            if not MAIN_DB_NAME:
-                raise ValueError("Переменная TILDA_DB_NAME не задана в .env файле.")
-
-            # --- Этап 1: Создание базы данных ---
-            logging.info(f"Подключаюсь к системной базе 'postgres' для создания '{MAIN_DB_NAME}'...")
-            
-            conn_system = psycopg2.connect(
-                host='127.0.0.1', port=local_port,
-                user=DB_USER, password=DB_PASSWORD, dbname='postgres'
-            )
-            conn_system.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-            
-            with conn_system.cursor() as cur:
+        conn_system = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname='postgres',
+            sslmode='verify-full', sslrootcert=cert_path
+        )
+        conn_system.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        
+        with conn_system.cursor() as cur:
+            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
+            if cur.fetchone():
+                logging.info(f"База данных '{MAIN_DB_NAME}' уже существует. Пропускаю создание.")
+            else:
+                logging.info(f"Создаю базу данных '{MAIN_DB_NAME}'...")
+                cur.execute(f"CREATE DATABASE {MAIN_DB_NAME}")
                 cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
                 if cur.fetchone():
-                    logging.info(f"База данных '{MAIN_DB_NAME}' уже существует. Пропускаю создание.")
+                    logging.info(f"ПРОВЕРКА УСПЕШНА: База данных '{MAIN_DB_NAME}' теперь существует.")
                 else:
-                    logging.info(f"Создаю базу данных '{MAIN_DB_NAME}'...")
-                    cur.execute(f"CREATE DATABASE {MAIN_DB_NAME}")
-                    # --- ПРОВЕРКА 1: Убедимся, что база данных действительно создана ---
-                    cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
-                    if cur.fetchone():
-                        logging.info(f"ПРОВЕРКА УСПЕШНА: База данных '{MAIN_DB_NAME}' теперь существует.")
-                    else:
-                        # Если мы здесь, значит, команда CREATE DATABASE не сработала, хотя ошибки не было.
-                        # Это критическая ситуация, останавливаем выполнение.
-                        raise Exception(f"КРИТИЧЕСКАЯ ОШИБКА: Команда CREATE DATABASE для '{MAIN_DB_NAME}' выполнилась, но база данных не появилась.")
-            conn_system.close()
+                    raise Exception(f"КРИТИЧЕСКАЯ ОШИБКА: Команда CREATE DATABASE для '{MAIN_DB_NAME}' выполнилась, но база данных не появилась.")
+        conn_system.close()
 
-            # --- Этап 2: Создание таблиц в новой базе данных ---
-            logging.info(f"Подключаюсь к '{MAIN_DB_NAME}' для создания таблиц...")
+        # --- Этап 2: Создание таблиц в новой базе данных ---
+        logging.info(f"Подключаюсь к '{MAIN_DB_NAME}' для создания таблиц...")
 
-            conn_new_db = psycopg2.connect(
-                host='127.0.0.1', port=local_port,
-                user=DB_USER, password=DB_PASSWORD, dbname=MAIN_DB_NAME
-            )
-            # --- РЕШЕНИЕ: Включаем автокоммит для создания таблиц ---
-            # Это гарантирует, что каждая команда CREATE TABLE будет выполнена и сохранена немедленно,
-            # избегая проблем с откатом транзакции при завершении скрипта.
-            conn_new_db.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-            
-            with conn_new_db.cursor() as cur:
+        conn_new_db = psycopg2.connect(
+            host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=MAIN_DB_NAME,
+            sslmode='verify-full', sslrootcert=cert_path
+        )
+        conn_new_db.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+        
+        with conn_new_db.cursor() as cur:
                 # Создаем перечисляемый тип для ролей пользователей
                 logging.info("Создаю тип 'user_role' (супервизор, администратор, пользователь)...")
                 cur.execute("""
@@ -166,10 +136,9 @@ def main():
                 """)
                 logging.info("Таблица 'users' создана или уже существует.")
 
-            logging.info("Все объекты базы данных успешно созданы или уже существовали.")
-            # conn_new_db.commit() больше не нужен при автокоммите.
-            conn_new_db.close()
-
+        logging.info("Все объекты базы данных успешно созданы или уже существовали.")
+        conn_new_db.close()
+        
     except Exception as e:
         error_details = traceback.format_exc()
         logging.error(f"Произошла критическая ошибка: {e}\n{error_details}")

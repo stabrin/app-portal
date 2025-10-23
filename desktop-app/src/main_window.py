@@ -18,7 +18,7 @@ from psycopg2 import sql
 import bcrypt
 from dotenv import load_dotenv
 # Импортируем наши новые компоненты
-from db_connector import get_main_db_connection, SshTunnelProcess
+from db_connector import get_main_db_connection
 
 # --- Загрузка переменных окружения ---
 # Делаем это один раз при старте приложения
@@ -74,146 +74,41 @@ def run_db_setup():
 
 def test_connection():
     """
-    Устанавливает SSH-туннель и проверяет доступность PostgreSQL, не получая данных.
+    Проверяет SSL-подключение к базе данных PostgreSQL.
     """
     try:
-        logging.info("Проверка подключения к удаленной БД...")
+        logging.info("Проверка SSL-подключения к удаленной БД...")
 
-        # 1. Устанавливаем SSH подключение (туннель)
-        logging.info("Шаг 1: Установка SSH-туннеля...")
-        ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-        if not os.path.exists(ssh_key_path):
-            raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
-
-        with SshTunnelProcess(
-            ssh_host=os.getenv("SSH_HOST"),
-            ssh_port=int(os.getenv("SSH_PORT", 22)),
-            ssh_user=os.getenv("SSH_USER"),
-            ssh_key=ssh_key_path,
-            remote_host=os.getenv("DB_HOST"),
-            remote_port=int(os.getenv("DB_PORT"))
-        ) as tunnel:
-            logging.info(f"SSH-туннель успешно создан. Локальный порт: {tunnel.local_port}")
-            
-            # 2. Проверяем доступность постгреса
-            logging.info("Шаг 2: Проверка подключения к PostgreSQL через туннель...")
-            with psycopg2.connect(
-                dbname=os.getenv("DB_NAME"),
-                user=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASSWORD"),
-                host=tunnel.local_host,
-                port=tunnel.local_port,
-                connect_timeout=5  # Таймаут подключения 5 секунд
-            ) as conn:
-                # Просто проверяем, что соединение активно
-                logging.info(f"Соединение с PostgreSQL (версия {conn.server_version}) успешно установлено.")
+        # Используем централизованную функцию для получения соединения.
+        # Она уже содержит всю логику SSL.
+        with get_main_db_connection() as conn:
+            ssl_info = conn.get_dsn_parameters().get('sslmode')
+            logging.info(f"SSL-соединение с PostgreSQL (версия {conn.server_version}) успешно установлено. Режим: {ssl_info}")
         
-        messagebox.showinfo("Проверка подключения", "Подключение к удаленной базе данных успешно установлено!")
+        messagebox.showinfo("Проверка подключения", "SSL-подключение к базе данных успешно установлено!")
 
     except Exception as e:
         error_details = traceback.format_exc()
         logging.error(f"Ошибка при проверке подключения: {e}\n{error_details}")
         messagebox.showerror("Ошибка подключения", f"Не удалось подключиться.\nПодробности записаны в файл app.log")
 
-def test_ssl_connection():
-    """
-    Проверяет SSL-подключение к базе данных PostgreSQL через SSH-туннель.
-    """
-    try:
-        logging.info("Проверка SSL-подключения к удаленной БД...")
-
-        # 1. Находим путь к сертификату сервера
-        # project_root = desktop-app, '..' -> app-portal
-        app_portal_root = os.path.abspath(os.path.join(project_root, '..'))
-        cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
-
-        if not os.path.exists(cert_path):
-            raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
-        logging.info(f"Используется сертификат: {cert_path}")
-
-        # 2. Устанавливаем SSH-туннель
-        ssh_key_path = os.path.join(project_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-        if not os.path.exists(ssh_key_path):
-            raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
-
-        with SshTunnelProcess(
-            ssh_host=os.getenv("SSH_HOST"),
-            ssh_port=int(os.getenv("SSH_PORT", 22)),
-            ssh_user=os.getenv("SSH_USER"),
-            ssh_key=ssh_key_path,
-            remote_host=os.getenv("DB_HOST"),
-            remote_port=int(os.getenv("DB_PORT"))
-        ) as tunnel:
-            logging.info(f"SSH-туннель для SSL-проверки создан. Локальный порт: {tunnel.local_port}")
-
-            # 3. Проверяем SSL-подключение к PostgreSQL
-            with psycopg2.connect(
-                dbname=os.getenv("DB_NAME"),
-                user=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASSWORD"),
-                host=tunnel.local_host,
-                port=tunnel.local_port,
-                connect_timeout=5,
-                sslmode='verify-full', # Строгая проверка SSL
-                sslrootcert=cert_path
-            ) as conn:
-                ssl_info = conn.get_dsn_parameters().get('sslmode')
-                logging.info(f"SSL-соединение с PostgreSQL успешно установлено. Режим: {ssl_info}")
-
-        messagebox.showinfo("Проверка SSL", "SSL-подключение к базе данных успешно установлено!")
-    except Exception as e:
-        error_details = traceback.format_exc()
-        logging.error(f"Ошибка при проверке SSL-подключения: {e}\n{error_details}")
-        messagebox.showerror("Ошибка SSL-подключения", f"Не удалось установить SSL-соединение.\nПодробности в файле app.log")
-
 def connect_and_show_orders():
     """
     Подключается к БД, считывает таблицу orders и отображает ее в главном окне.
     """
     global tree
-    # Очищаем предыдущую таблицу, если она есть
     if tree:
         tree.destroy()
 
     try:
-        orders = []
-
-        def get_orders_from_db(connection):
-            """Внутренняя функция для выполнения запроса и получения данных."""
+        logging.info("Попытка подключения к удаленной БД через SSL...")
+        
+        with get_main_db_connection() as conn:
             with connection.cursor() as cur:
-                # Используем имя таблицы из .env для консистентности
                 orders_table = os.getenv('TABLE_ORDERS', 'orders')
                 query = sql.SQL("SELECT id, client_name, status, created_at FROM {} ORDER BY id DESC;").format(sql.Identifier(orders_table))
                 cur.execute(query)
-                return cur.fetchall()
-
-        logging.info("Попытка подключения к удаленной БД через SSH-туннель...")
-        
-        # Путь к ключу. Предполагаем, что папка 'keys' находится рядом с .env
-        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        ssh_key_path = os.path.join(desktop_app_root, 'keys', os.getenv("SSH_KEY_FILENAME"))
-        if not os.path.exists(ssh_key_path):
-            raise FileNotFoundError(f"SSH ключ не найден по пути: {ssh_key_path}")
-
-        # Создаем SSH туннель
-        with SshTunnelProcess(
-            ssh_host=os.getenv("SSH_HOST"),
-            ssh_port=int(os.getenv("SSH_PORT", 22)),
-            ssh_user=os.getenv("SSH_USER"),
-            ssh_key=ssh_key_path,
-            remote_host=os.getenv("DB_HOST"),
-            remote_port=int(os.getenv("DB_PORT"))
-        ) as tunnel:
-            logging.info(f"SSH туннель успешно создан. Локальный порт: {tunnel.local_port}")
-            # Подключаемся к БД через локальный порт туннеля
-            with psycopg2.connect(
-                dbname=os.getenv("DB_NAME"),
-                user=os.getenv("DB_USER"),
-                password=os.getenv("DB_PASSWORD"),
-                host=tunnel.local_host,
-                port=tunnel.local_port
-            ) as conn:
-                orders = get_orders_from_db(conn)
+                orders = cur.fetchall()
             logging.info("Данные из удаленной БД успешно получены.")
 
 
@@ -1030,7 +925,6 @@ def main():
     # -- Меню "База данных" --
     db_menu = tk.Menu(menubar, tearoff=0)
     db_menu.add_command(label="Проверить подключение", command=test_connection)
-    db_menu.add_command(label="Проверить SSL-подключение", command=test_ssl_connection)
     db_menu.add_separator()
     db_menu.add_command(label="Показать заказы", command=connect_and_show_orders)
     menubar.add_cascade(label="База данных", menu=db_menu)
