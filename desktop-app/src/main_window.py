@@ -19,6 +19,7 @@ import bcrypt
 from dotenv import load_dotenv
 # Импортируем наши новые компоненты
 from db_connector import get_main_db_connection
+from scripts.setup_client_database import update_client_db_schema
 
 # --- Загрузка переменных окружения ---
 # Делаем это один раз при старте приложения
@@ -404,6 +405,58 @@ def open_clients_management_window():
         ssl_cert_text = tk.Text(cert_frame, height=8, width=80)
         ssl_cert_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
 
+        def run_client_db_setup():
+            """
+            Запускает скрипт инициализации/обновления для базы данных клиента.
+            """
+            if not client_id:
+                messagebox.showwarning("Внимание", "Сначала сохраните клиента.", parent=editor_window)
+                return
+
+            if not messagebox.askyesno("Подтверждение", "Вы уверены, что хотите инициализировать/обновить схему для базы данных этого клиента?\n\nСуществующие данные не будут удалены, но будут созданы недостающие таблицы.", parent=editor_window):
+                return
+
+            client_conn = None
+            temp_cert_file = None
+            try:
+                # 1. Получаем данные для подключения к БД клиента
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
+                        db_data = cur.fetchone()
+                
+                if not db_data:
+                    raise ValueError("Не удалось найти данные для подключения к БД клиента.")
+
+                db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
+
+                # 2. Создаем временный файл для сертификата, если он есть
+                ssl_params = {}
+                if db_ssl_cert:
+                    import tempfile
+                    # Создаем временный файл с суффиксом .crt
+                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                        fp.write(db_ssl_cert)
+                        temp_cert_file = fp.name
+                    ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
+                    logging.info(f"Используется временный SSL-сертификат: {temp_cert_file}")
+
+                # 3. Подключаемся к БД клиента
+                logging.info(f"Подключаюсь к базе клиента '{db_name}' на {db_host}...")
+                client_conn = psycopg2.connect(host=db_host, port=db_port, dbname=db_name, user=db_user, password=db_password, **ssl_params)
+
+                # 4. Запускаем функцию обновления схемы
+                if update_client_db_schema(client_conn):
+                    messagebox.showinfo("Успех", "Схема базы данных клиента успешно обновлена.", parent=editor_window)
+                else:
+                    messagebox.showerror("Ошибка", "Произошла ошибка при обновлении схемы. Подробности в app.log.", parent=editor_window)
+
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось выполнить инициализацию: {e}", parent=editor_window)
+            finally:
+                if client_conn: client_conn.close()
+                if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
+
         # --- Блок управления пользователями ---
         users_management_frame = ttk.LabelFrame(main_editor_frame, text="Пользователи этого клиента")
         users_management_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -475,6 +528,7 @@ def open_clients_management_window():
 
         def save_client():
             """Сохраняет данные клиента в БД."""
+            nonlocal client_id # Позволяем изменять внешнюю переменную client_id
             data_to_save = {
                 'name': entries['Имя'].get(),
                 'db_host': entries['DB Хост'].get(),
@@ -495,6 +549,7 @@ def open_clients_management_window():
                             query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id")
                             cur.execute(query, tuple(data_to_save.values()))
                             new_client_id = cur.fetchone()[0]
+                            client_id = new_client_id # Обновляем ID для текущего окна
                             
                             # Создаем пользователя по умолчанию
                             default_login = f"admin@{data_to_save['name']}"
@@ -506,18 +561,29 @@ def open_clients_management_window():
                                 ("Администратор", default_login, hashed_pass.decode('utf-8'), 'администратор', new_client_id)
                             )
                     conn.commit()
-                load_clients()
-                editor_window.destroy()
+                
+                # После успешного сохранения:
+                load_clients() # Обновляем главный список
+                btn_init_db.config(state="normal") # Активируем кнопку инициализации
+                if not editor_window.title().startswith("Редактор"):
+                    editor_window.title(f"Редактор клиента: {data_to_save['name']}")
+
+                messagebox.showinfo("Успех", "Данные клиента успешно сохранены.", parent=editor_window)
+
             except Exception as e:
                 error_details = traceback.format_exc()
                 logging.error(f"Ошибка сохранения клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка", f"Не удалось сохранить клиента: {e}", parent=editor_window)
 
-        # Нижние кнопки Сохранить/Отмена
+        # Нижние кнопки
         bottom_buttons_frame = ttk.Frame(main_editor_frame)
         bottom_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        btn_init_db = ttk.Button(bottom_buttons_frame, text="Инициализировать/Обновить БД клиента", command=run_client_db_setup, state="disabled" if not client_id else "normal")
+        btn_init_db.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(bottom_buttons_frame, text="Закрыть", command=editor_window.destroy).pack(side=tk.RIGHT)
         ttk.Button(bottom_buttons_frame, text="Сохранить", command=save_client).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(bottom_buttons_frame, text="Отмена", command=editor_window.destroy).pack(side=tk.RIGHT)
 
 def open_supervisor_creator_window():
     """Открывает окно для создания супервизора."""
@@ -630,6 +696,58 @@ def open_clients_management_window():
         ssl_cert_text = tk.Text(cert_frame, height=8, width=80)
         ssl_cert_text.pack(fill=tk.X, expand=True, padx=5, pady=5)
 
+        def run_client_db_setup():
+            """
+            Запускает скрипт инициализации/обновления для базы данных клиента.
+            """
+            if not client_id:
+                messagebox.showwarning("Внимание", "Сначала сохраните клиента.", parent=editor_window)
+                return
+
+            if not messagebox.askyesno("Подтверждение", "Вы уверены, что хотите инициализировать/обновить схему для базы данных этого клиента?\n\nСуществующие данные не будут удалены, но будут созданы недостающие таблицы.", parent=editor_window):
+                return
+
+            client_conn = None
+            temp_cert_file = None
+            try:
+                # 1. Получаем данные для подключения к БД клиента
+                with get_main_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
+                        db_data = cur.fetchone()
+                
+                if not db_data:
+                    raise ValueError("Не удалось найти данные для подключения к БД клиента.")
+
+                db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
+
+                # 2. Создаем временный файл для сертификата, если он есть
+                ssl_params = {}
+                if db_ssl_cert:
+                    import tempfile
+                    # Создаем временный файл с суффиксом .crt
+                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                        fp.write(db_ssl_cert)
+                        temp_cert_file = fp.name
+                    ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
+                    logging.info(f"Используется временный SSL-сертификат: {temp_cert_file}")
+
+                # 3. Подключаемся к БД клиента
+                logging.info(f"Подключаюсь к базе клиента '{db_name}' на {db_host}...")
+                client_conn = psycopg2.connect(host=db_host, port=db_port, dbname=db_name, user=db_user, password=db_password, **ssl_params)
+
+                # 4. Запускаем функцию обновления схемы
+                if update_client_db_schema(client_conn):
+                    messagebox.showinfo("Успех", "Схема базы данных клиента успешно обновлена.", parent=editor_window)
+                else:
+                    messagebox.showerror("Ошибка", "Произошла ошибка при обновлении схемы. Подробности в app.log.", parent=editor_window)
+
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось выполнить инициализацию: {e}", parent=editor_window)
+            finally:
+                if client_conn: client_conn.close()
+                if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
+
         # --- Блок управления пользователями ---
         users_management_frame = ttk.LabelFrame(main_editor_frame, text="Пользователи этого клиента")
         users_management_frame.pack(fill=tk.BOTH, expand=True, pady=5)
@@ -701,6 +819,7 @@ def open_clients_management_window():
 
         def save_client():
             """Сохраняет данные клиента в БД."""
+            nonlocal client_id # Позволяем изменять внешнюю переменную client_id
             data_to_save = {
                 'name': entries['Имя'].get(),
                 'db_host': entries['DB Хост'].get(),
@@ -721,6 +840,7 @@ def open_clients_management_window():
                             query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id")
                             cur.execute(query, tuple(data_to_save.values()))
                             new_client_id = cur.fetchone()[0]
+                            client_id = new_client_id # Обновляем ID для текущего окна
                             
                             # Создаем пользователя по умолчанию
                             default_login = f"admin@{data_to_save['name']}"
@@ -732,18 +852,29 @@ def open_clients_management_window():
                                 ("Администратор", default_login, hashed_pass.decode('utf-8'), 'администратор', new_client_id)
                             )
                     conn.commit()
-                load_clients()
-                editor_window.destroy()
+                
+                # После успешного сохранения:
+                load_clients() # Обновляем главный список
+                btn_init_db.config(state="normal") # Активируем кнопку инициализации
+                if not editor_window.title().startswith("Редактор"):
+                    editor_window.title(f"Редактор клиента: {data_to_save['name']}")
+
+                messagebox.showinfo("Успех", "Данные клиента успешно сохранены.", parent=editor_window)
+
             except Exception as e:
                 error_details = traceback.format_exc()
                 logging.error(f"Ошибка сохранения клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка", f"Не удалось сохранить клиента: {e}", parent=editor_window)
 
-        # Нижние кнопки Сохранить/Отмена
+        # Нижние кнопки
         bottom_buttons_frame = ttk.Frame(main_editor_frame)
         bottom_buttons_frame.pack(fill=tk.X, pady=(10, 0))
+        
+        btn_init_db = ttk.Button(bottom_buttons_frame, text="Инициализировать/Обновить БД клиента", command=run_client_db_setup, state="disabled" if not client_id else "normal")
+        btn_init_db.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(bottom_buttons_frame, text="Закрыть", command=editor_window.destroy).pack(side=tk.RIGHT)
         ttk.Button(bottom_buttons_frame, text="Сохранить", command=save_client).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(bottom_buttons_frame, text="Отмена", command=editor_window.destroy).pack(side=tk.RIGHT)
 
     # --- Основное окно управления клиентами ---
     clients_window = tk.Toplevel(root)

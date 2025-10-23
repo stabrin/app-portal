@@ -288,20 +288,37 @@ if __name__ == '__main__':
     TEST_CLIENT_DB_NAME = os.getenv("TEST_CLIENT_DB_NAME")
     TEST_CLIENT_DB_USER = os.getenv("TEST_CLIENT_DB_USER")
     TEST_CLIENT_DB_PASSWORD = os.getenv("TEST_CLIENT_DB_PASSWORD")
+    # Переменная для содержимого сертификата (можно вставить прямо в .env)
+    TEST_CLIENT_DB_SSL_CERT = os.getenv("TEST_CLIENT_DB_SSL_CERT")
 
     if not TEST_CLIENT_DB_NAME:
         print("Для тестирования скрипта необходимо задать переменные TEST_CLIENT_DB_* в .env файле.")
     else:
         test_conn = None
+        temp_cert_file = None
         try:
             print(f"Подключаюсь к тестовой базе '{TEST_CLIENT_DB_NAME}' на {TEST_CLIENT_DB_HOST}...")
+            
+            ssl_params = {}
+            if TEST_CLIENT_DB_SSL_CERT:
+                import tempfile
+                print("Найден SSL сертификат, создаю временный файл...")
+                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                    fp.write(TEST_CLIENT_DB_SSL_CERT)
+                    temp_cert_file = fp.name
+                ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
+                print(f"Используется временный SSL-сертификат: {temp_cert_file}")
+
             test_conn = psycopg2.connect(
                 host=TEST_CLIENT_DB_HOST,
                 port=TEST_CLIENT_DB_PORT,
                 dbname=TEST_CLIENT_DB_NAME,
                 user=TEST_CLIENT_DB_USER,
-                password=TEST_CLIENT_DB_PASSWORD
+                password=TEST_CLIENT_DB_PASSWORD,
+                **ssl_params
             )
+            print("Подключение к тестовой базе успешно установлено.")
+
             # Настраиваем логирование для вывода в консоль
             logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
             
@@ -322,3 +339,6 @@ if __name__ == '__main__':
             if test_conn:
                 test_conn.close()
                 print("Соединение с тестовой базой закрыто.")
+            if temp_cert_file and os.path.exists(temp_cert_file):
+                os.remove(temp_cert_file)
+                print("Временный файл сертификата удален.")
