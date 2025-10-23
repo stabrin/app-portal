@@ -78,14 +78,29 @@ def test_connection():
     """
     try:
         logging.info("Проверка SSL-подключения к удаленной БД...")
+        
+        # Находим путь к сертификату сервера
+        app_portal_root = os.path.abspath(os.path.join(project_root, '..'))
+        cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
+        if not os.path.exists(cert_path):
+            raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
 
-        # Используем централизованную функцию для получения соединения.
-        # Она уже содержит всю логику SSL.
-        with get_main_db_connection() as conn:
+        # Для проверки подключения используем системную базу 'postgres', которая всегда существует.
+        # Это делает проверку независимой от наличия базы 'portal_db'.
+        with psycopg2.connect(
+            dbname='postgres', # Подключаемся к системной базе
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT"),
+            connect_timeout=5,
+            sslmode='verify-full',
+            sslrootcert=cert_path
+        ) as conn:
             ssl_info = conn.get_dsn_parameters().get('sslmode')
             logging.info(f"SSL-соединение с PostgreSQL (версия {conn.server_version}) успешно установлено. Режим: {ssl_info}")
         
-        messagebox.showinfo("Проверка подключения", "SSL-подключение к базе данных успешно установлено!")
+        messagebox.showinfo("Проверка подключения", "SSL-подключение к серверу PostgreSQL успешно установлено!")
 
     except Exception as e:
         error_details = traceback.format_exc()

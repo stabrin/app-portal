@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 def get_main_db_connection():
     """
     Контекстный менеджер, который возвращает готовое SSL-соединение
-    с ГЛАВНОЙ базой данных (tilda_db).
+    с ГЛАВНОЙ базой данных (portal_db).
     """
     # Загружаем переменные из .env файла
     desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
