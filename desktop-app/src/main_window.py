@@ -511,7 +511,9 @@ def open_clients_management_window():
                         cur.execute("SELECT name, ssh_host, ssh_port, ssh_user, db_host, db_port, db_name, db_user, db_password, ssh_private_key FROM clients WHERE id = %s", (client_id,))
                         client_data = cur.fetchone()
                 if client_data:
-                    for i, field in enumerate(fields):
+                    # Объединяем все поля в один список для итерации
+                    all_fields = ssh_fields + db_fields + ["SSH Ключ"]
+                    for field in all_fields:
                         # Сопоставляем поля с данными из БД
                         db_field_map = {"Имя": 0, "SSH Хост": 1, "SSH Порт": 2, "SSH Пользователь": 3, "DB Хост": 4, "DB Порт": 5, "DB Имя": 6, "DB Пользователь": 7, "DB Пароль": 8, "SSH Ключ": 9}
                         if field in db_field_map:

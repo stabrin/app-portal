@@ -1,30 +1,5 @@
-# Файл с секретными данными
+# Игнорируем файлы окружения, которые содержат секреты
 .env
 
-# Папки с виртуальными окружениями Python
-venv/
-*.venv
-env/
-
-# Кэш Python
-__pycache__/
-*.pyc
-
-# Файлы IDE (если вы их используете)
-.idea/
-.vscode/
-
-# Лог-файлы
-*.log
-
-# Медиа-файлы, которые загружают пользователи (если будут)
-/media/
-/uploads/
-
-# Кэш сборки Docker
-.dockerignore
-docker-compose.override.yml
-docker-compose.yml
-
-# Directory for API testing scripts
-api_tests/
+# Игнорируем папку со сгенерированными секретами (сертификаты, ключи)
+/secrets/
