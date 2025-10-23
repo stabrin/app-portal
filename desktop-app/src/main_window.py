@@ -687,10 +687,11 @@ def open_clients_management_window():
                         client_data = cur.fetchone()
                 if client_data:
                     for field in fields:
-                        # Сопоставляем поля с данными из БД
-                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "SSL_CERT": 6}
+                        # Сопоставляем поля с данными из БД по индексу
+                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5}
                         if field in db_field_map:
-                            value = client_data[db_field_map[field]] if client_data[db_field_map[field]] is not None else ""
+                            idx = db_field_map[field]
+                            value = client_data[idx] if client_data[idx] is not None else ""
                             entries[field].insert(0, str(value))
                     # Заполняем поле сертификата
                     ssl_cert_value = client_data[6] if client_data[6] is not None else ""
@@ -985,10 +986,11 @@ def open_clients_management_window():
                         client_data = cur.fetchone()
                 if client_data:
                     for field in fields:
-                        # Сопоставляем поля с данными из БД
-                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "SSL_CERT": 6}
+                        # Сопоставляем поля с данными из БД по индексу
+                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5}
                         if field in db_field_map:
-                            value = client_data[db_field_map[field]] if client_data[db_field_map[field]] is not None else ""
+                            idx = db_field_map[field]
+                            value = client_data[idx] if client_data[idx] is not None else ""
                             entries[field].insert(0, str(value))
                     # Заполняем поле сертификата
                     ssl_cert_value = client_data[6] if client_data[6] is not None else ""
