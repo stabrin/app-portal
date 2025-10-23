@@ -3,4 +3,3 @@
 
 # Игнорируем папку с файлами базы данных PostgreSQL
 /postgres/
-.secrets/
