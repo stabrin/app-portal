@@ -40,6 +40,9 @@ logging.basicConfig(
 
 # Глобальная переменная для хранения виджета таблицы, чтобы его можно было удалять
 tree = None
+# Глобальная переменная для хранения информации об авторизованном пользователе
+current_user = {"name": None, "role": None}
+
 
 def run_db_setup():
     """
@@ -338,6 +341,7 @@ def open_clients_management_window():
     """Открывает окно для управления клиентами и пользователями."""
     
     def load_clients():
+        nonlocal clients_tree
         """Загружает список клиентов из БД в Treeview."""
         for i in clients_tree.get_children():
             clients_tree.delete(i)
@@ -361,6 +365,7 @@ def open_clients_management_window():
         load_users(client_id)
 
     def load_users(client_id):
+        nonlocal users_tree
         """Загружает пользователей для указанного клиента."""
         for i in users_tree.get_children():
             users_tree.delete(i)
@@ -376,6 +381,7 @@ def open_clients_management_window():
             messagebox.showerror("Ошибка", "Не удалось загрузить список пользователей.", parent=clients_window)
 
     def open_client_editor(client_id=None):
+        nonlocal clients_window
         """Открывает окно для добавления или редактирования клиента."""
         editor_window = tk.Toplevel(clients_window)
         editor_window.title("Редактор клиента")
@@ -771,11 +777,12 @@ def open_clients_management_window():
         ttk.Button(bottom_buttons_frame, text="Сохранить", command=save_client).pack(side=tk.RIGHT, padx=5)
 
     # --- Создание основного окна и виджетов ---
-    clients_window = tk.Toplevel(root)
-    clients_window.title("Управление клиентами и пользователями")
-    clients_window.geometry("900x600")
-    clients_window.transient(root)
-    clients_window.grab_set()
+    # Изменено: теперь это не Toplevel, а фрейм внутри главного окна
+    clients_window = ttk.Frame(root)
+    # clients_window.title("Управление клиентами и пользователями")
+    # clients_window.geometry("900x600")
+    # clients_window.transient(root)
+    # clients_window.grab_set()
 
     # Разделитель окна
     paned_window = ttk.PanedWindow(clients_window, orient=tk.VERTICAL)
@@ -822,6 +829,9 @@ def open_clients_management_window():
 
     # Первоначальная загрузка данных
     load_clients()
+    
+    # Возвращаем главный фрейм, чтобы его можно было встроить в основное окно
+    return clients_window
 
 def open_supervisor_creator_window():
     """Открывает окно для создания супервизора."""
@@ -863,53 +873,126 @@ def open_supervisor_creator_window():
     ttk.Button(buttons_frame, text="Сохранить", command=save_supervisor).pack(side=tk.RIGHT, padx=5)
     ttk.Button(buttons_frame, text="Отмена", command=sup_window.destroy).pack(side=tk.RIGHT)
 
+def show_login_window(root, on_success_callback):
+    """Отображает окно входа и вызывает колбэк при успехе."""
+    login_window = tk.Toplevel(root)
+    login_window.title("Авторизация")
+    login_window.transient(root)
+    login_window.grab_set()
+    login_window.resizable(False, False)
+
+    def verify_login():
+        login = login_entry.get()
+        password = password_entry.get()
+
+        if not login or not password:
+            messagebox.showerror("Ошибка", "Логин и пароль не могут быть пустыми.", parent=login_window)
+            return
+
+        try:
+            with get_main_db_connection() as conn:
+                with conn.cursor() as cur:
+                    # Ищем пользователя с таким логином. Важно: ищем только супервизоров и администраторов
+                    cur.execute("SELECT name, password_hash, role FROM users WHERE login = %s AND (role = 'супервизор' OR role = 'администратор')", (login,))
+                    user_data = cur.fetchone()
+
+            if user_data:
+                user_name, hashed_password, user_role = user_data
+                if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                    logging.info(f"Пользователь '{user_name}' (роль: {user_role}) успешно вошел в систему.")
+                    # Сохраняем данные пользователя
+                    current_user["name"] = user_name
+                    current_user["role"] = user_role
+                    # Закрываем окно входа и вызываем колбэк
+                    login_window.destroy()
+                    on_success_callback(user_role)
+                else:
+                    messagebox.showerror("Ошибка", "Неверный пароль.", parent=login_window)
+            else:
+                messagebox.showerror("Ошибка", "Пользователь не найден или не имеет прав доступа.", parent=login_window)
+
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка авторизации: {e}\n{error_details}")
+            messagebox.showerror("Критическая ошибка", f"Ошибка подключения к базе данных.\nПодробности в app.log.", parent=login_window)
+
+    # Обработчик закрытия окна
+    def on_closing():
+        root.destroy() # Закрываем основное приложение, если закрыли окно входа
+
+    login_window.protocol("WM_DELETE_WINDOW", on_closing)
+    login_window.bind('<Return>', lambda event: verify_login())
+
+    frame = ttk.Frame(login_window, padding="20")
+    frame.pack()
+
+    ttk.Label(frame, text="Логин:").grid(row=0, column=0, sticky="w", pady=5)
+    login_entry = ttk.Entry(frame, width=30)
+    login_entry.grid(row=0, column=1, pady=5)
+    login_entry.focus_set()
+
+    ttk.Label(frame, text="Пароль:").grid(row=1, column=0, sticky="w", pady=5)
+    password_entry = ttk.Entry(frame, width=30, show="*")
+    password_entry.grid(row=1, column=1, pady=5)
+
+    ttk.Button(frame, text="Войти", command=verify_login).grid(row=2, columnspan=2, pady=10)
+
+def setup_main_window(role):
+    """Настраивает главное окно в зависимости от роли пользователя."""
+    root.deiconify() # Показываем главное окно
+    root.title(f"ТильдаКод [Пользователь: {current_user['name']}, Роль: {current_user['role']}]")
+
+    menubar = tk.Menu(root)
+    root.config(menu=menubar)
+
+    # --- Общие меню ---
+    file_menu = tk.Menu(menubar, tearoff=0)
+    file_menu.add_command(label="Выход", command=root.quit)
+    menubar.add_cascade(label="Файл", menu=file_menu)
+
+    help_menu = tk.Menu(menubar, tearoff=0)
+    help_menu.add_command(label="О программе")
+    menubar.add_cascade(label="Справка", menu=help_menu)
+
+    # --- Настройка в зависимости от роли ---
+    if role == 'супервизор':
+        root.geometry("900x600")
+        # Меню для супервизора
+        admin_menu = tk.Menu(menubar, tearoff=0)
+        admin_menu.add_command(label="Инициализация/Обновление главной БД", command=run_db_setup)
+        admin_menu.add_separator()
+        admin_menu.add_command(label="Создать супервизора", command=open_supervisor_creator_window)
+        menubar.add_cascade(label="Администрирование", menu=admin_menu)
+
+        # Основной контент - управление клиентами
+        client_management_frame = open_clients_management_window()
+        client_management_frame.pack(fill=tk.BOTH, expand=True)
+
+    elif role == 'администратор':
+        root.geometry("600x400")
+        # Для администратора пока простое окно с сообщением
+        label = ttk.Label(root, text="Добро пожаловать, Администратор!", font=("Arial", 14))
+        label.pack(expand=True)
+
+    else:
+        # На случай непредвиденной роли
+        root.geometry("400x200")
+        label = ttk.Label(root, text=f"Неизвестная роль: {role}", font=("Arial", 14))
+        label.pack(expand=True)
+
+
 def main():
     """Главная функция для создания и запуска GUI приложения."""
     global root # Делаем root глобальной, чтобы функции могли к ней обращаться
     # 1. Создаем главное окно приложения
     root = tk.Tk()
+    root.withdraw() # Скрываем главное окно до успешного входа
 
-    # 2. Устанавливаем заголовок окна
-    root.title("ТильдаКод")
+    # 2. Показываем окно входа. Передаем ему колбэк-функцию,
+    # которая будет вызвана после успешной авторизации.
+    show_login_window(root, setup_main_window)
 
-    # 3. Устанавливаем начальный размер окна (ширина x высота)
-    root.geometry("600x400")
-
-    # 4. Создаем главное меню
-    menubar = tk.Menu(root)
-    root.config(menu=menubar)
-
-    # -- Меню "Файл" --
-    file_menu = tk.Menu(menubar, tearoff=0)
-    file_menu.add_command(label="Инициализация БД", command=run_db_setup)
-    file_menu.add_separator()
-    file_menu.add_command(label="Выход", command=root.quit)
-    menubar.add_cascade(label="Файл", menu=file_menu)
-
-    # -- Меню "Печать" --
-    print_menu = tk.Menu(menubar, tearoff=0)
-    print_menu.add_command(label="Управление печатью", command=open_print_management_window)
-    menubar.add_cascade(label="Печать", menu=print_menu)
-
-    # -- Меню "База данных" --
-    db_menu = tk.Menu(menubar, tearoff=0)
-    db_menu.add_command(label="Проверить подключение", command=test_connection)
-    db_menu.add_separator()
-    db_menu.add_command(label="Показать заказы", command=connect_and_show_orders)
-    menubar.add_cascade(label="База данных", menu=db_menu)
-
-    # -- Меню "Администрирование" --
-    admin_menu = tk.Menu(menubar, tearoff=0)
-    admin_menu.add_command(label="Клиенты", command=open_clients_management_window)
-    admin_menu.add_command(label="Создать супервизора", command=open_supervisor_creator_window)
-    menubar.add_cascade(label="Администрирование", menu=admin_menu)
-
-    # -- Меню "Справка" --
-    help_menu = tk.Menu(menubar, tearoff=0)
-    help_menu.add_command(label="О программе") # Пока без функции
-    menubar.add_cascade(label="Справка", menu=help_menu)
-
-    # 6. Запускаем главный цикл приложения.
+    # 3. Запускаем главный цикл приложения.
     root.mainloop()
 
 if __name__ == "__main__":
