@@ -879,6 +879,7 @@ class LoginWindow(tk.Toplevel):
     При успешном входе вызывает callback-функцию, передавая в нее словарь с данными пользователя.
     """
     def __init__(self, parent, on_success_callback):
+        logging.info("LoginWindow __init__ started.")
         super().__init__(parent)
         self.on_success_callback = on_success_callback
         self.parent = parent
@@ -894,6 +895,7 @@ class LoginWindow(tk.Toplevel):
         self._create_widgets()
         self.lift() # Поднимаем окно на передний план
         self.focus_force() # Устанавливаем фокус
+        logging.info("LoginWindow configured and lifted.")
 
     def _create_widgets(self):
         frame = ttk.Frame(self, padding="20")
@@ -1011,6 +1013,7 @@ def setup_main_window(root, user_info):
     """
     Настраивает главное окно (root) в зависимости от роли пользователя.
     """
+    logging.info(f"setup_main_window called for role: {user_info.get('role')}")
     # Делаем главное окно видимым и возвращаем в нормальное состояние
     root.deiconify()
     root.state('normal')
@@ -1027,21 +1030,28 @@ def setup_main_window(root, user_info):
 
 def main():
     """Главная функция для создания и запуска GUI приложения."""
+    logging.info("Application main() function started.")
     # 1. Создаем временное невидимое корневое окно.
     # Оно нужно только для того, чтобы на его основе можно было создать модальное окно входа.
     dummy_root = tk.Tk()
+    logging.info("Dummy root window (tk.Tk) created.")
     dummy_root.withdraw()
+    logging.info("Dummy root window withdrawn.")
 
     # 2. Создаем и показываем окно входа.
     # Передаем ему callback-функцию `launch_app`, которая будет вызвана после успешного входа.
     # Используем lambda, чтобы передать `dummy_root` в наш callback.
-    login_window = LoginWindow(dummy_root, on_success_callback=lambda user_info: setup_main_window(dummy_root, user_info))
+    logging.info("Creating LoginWindow instance...")
+    LoginWindow(dummy_root, on_success_callback=lambda user_info: setup_main_window(dummy_root, user_info))
+    logging.info("LoginWindow instance created.")
 
     # 3. Запускаем главный цикл для временного окна.
     # Этот цикл будет работать, пока открыто окно входа.
     # После успешного входа и закрытия LoginWindow, `setup_main_window` настроит
     # это же окно `dummy_root`, и `mainloop` продолжит работать уже для него.
+    logging.info("Starting dummy_root.mainloop()...")
     dummy_root.mainloop()
+    logging.info("Application mainloop finished.")
 
 if __name__ == "__main__":
     main()
