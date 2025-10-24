@@ -1016,19 +1016,28 @@ def run_login_process():
     """
     Запускает процесс авторизации и возвращает данные пользователя в случае успеха.
     """
+    # 1. Создаем временное корневое окно. Оно будет служить только родителем для окна входа.
     login_root = tk.Tk()
+    # Скрываем его, чтобы оно не мелькало на экране.
     login_root.withdraw()
     
-    user_info_container = {} # Используем словарь для передачи данных из callback
+    # Используем контейнер (список), чтобы callback мог изменить внешнюю переменную.
+    user_info_container = [] 
 
     def on_login_success(user_info):
-        user_info_container['data'] = user_info
-        login_root.destroy()
+        user_info_container.append(user_info)
+        # Закрытие окна входа приведет к завершению wait_window.
+        # login_root.destroy() здесь не нужен, он будет уничтожен позже.
 
-    LoginWindow(login_root, on_login_success)
-    login_root.mainloop()
+    # 2. Создаем окно входа.
+    login_window = LoginWindow(login_root, on_login_success)
+    
+    # 3. Используем wait_window. Это блокирующая команда, которая ждет,
+    # пока окно login_window не будет уничтожено (например, через self.destroy() в нем).
+    login_root.wait_window(login_window)
+    login_root.destroy() # После завершения ожидания уничтожаем временного родителя.
 
-    return user_info_container.get('data')
+    return user_info_container[0] if user_info_container else None
 
 def main():
     """Главная функция для создания и запуска GUI приложения."""
