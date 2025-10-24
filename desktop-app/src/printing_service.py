@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import tempfile
+from typing import Dict, Any
 
 try:
     from reportlab.pdfgen import canvas
@@ -10,6 +11,9 @@ try:
     from reportlab.lib.units import mm
     from reportlab.lib.utils import ImageReader
     from reportlab.lib.colors import black
+    # Для штрихкодов
+    from reportlab.graphics.barcode import qr, code128, datamatrix
+    from reportlab.graphics.shapes import Drawing
 except ImportError:
     logging.warning("ReportLab not installed. PDF generation features will be limited. Install with: pip install reportlab")
     canvas = None # Mark as unavailable
@@ -42,6 +46,100 @@ class PrintingService:
     """
     Сервис для генерации и печати документов.
     """
+
+    @staticmethod
+    def generate_pdf_from_template(template_json: Dict[str, Any], data: Dict[str, Any]) -> io.BytesIO:
+        """
+        Генерирует PDF на основе JSON-шаблона и словаря с данными.
+
+        :param template_json: Словарь, представляющий JSON-структуру макета.
+        :param data: Словарь с данными для подстановки, например:
+                     {'packages.sscc_code': '12345...', 'orders.client_name': 'Client A'}
+        """
+        if canvas is None:
+            raise ImportError("Библиотека ReportLab не установлена.")
+
+        buffer = io.BytesIO()
+        
+        label_width = template_json.get("width_mm", 100) * mm
+        label_height = template_json.get("height_mm", 50) * mm
+
+        c = canvas.Canvas(buffer, pagesize=(label_width, label_height))
+        c.setFillColor(black)
+
+        for obj in template_json.get("objects", []):
+            try:
+                # Получаем данные из словаря по ключу из data_source
+                obj_data = data.get(obj["data_source"])
+                if obj_data is None:
+                    logging.warning(f"Источник данных '{obj['data_source']}' не найден в предоставленных данных. Пропуск объекта.")
+                    continue
+
+                x = obj["x_mm"] * mm
+                y = obj["y_mm"] * mm
+                width = obj["width_mm"] * mm
+                height = obj["height_mm"] * mm
+
+                if obj["type"] == "text":
+                    c.setFont(obj.get("font_name", "Helvetica"), obj.get("font_size", 10))
+                    c.drawString(x, y, str(obj_data))
+
+                elif obj["type"] == "image":
+                    # Предполагаем, что в obj_data находятся байты картинки
+                    if isinstance(obj_data, bytes):
+                        image_stream = io.BytesIO(obj_data)
+                        reportlab_img = ImageReader(image_stream)
+                        c.drawImage(reportlab_img, x, y, width=width, height=height, preserveAspectRatio=True)
+                    else:
+                        logging.warning(f"Источник данных для картинки '{obj['data_source']}' не является байтами.")
+
+                elif obj["type"] == "barcode":
+                    barcode_type = obj.get("barcode_type", "QR").upper()
+                    barcode_drawing = None
+
+                    if barcode_type == "QR":
+                        barcode = qr.QrCodeWidget(str(obj_data))
+                        bounds = barcode.getBounds()
+                        barcode_width = bounds[2] - bounds[0]
+                        barcode_height = bounds[3] - bounds[1]
+                        
+                        # Масштабируем виджет под заданные размеры
+                        scale_x = width / barcode_width if barcode_width else 1
+                        scale_y = height / barcode_height if barcode_height else 1
+                        transform = [min(scale_x, scale_y), 0, 0, min(scale_x, scale_y), x, y]
+                        
+                        barcode_drawing = Drawing(width, height, transform=transform)
+                        barcode_drawing.add(barcode)
+
+                    elif barcode_type == "SSCC": # SSCC обычно кодируют в Code128
+                        barcode = code128.Code128(str(obj_data), barHeight=height, barWidth=width / 100) # barWidth - примерный расчет
+                        barcode_drawing = Drawing(width, height)
+                        barcode_drawing.add(barcode)
+                        # Позиционирование для Code128 может требовать подстройки
+                        barcode_drawing.translate(x, y)
+
+                    elif barcode_type == "DATAMATRIX":
+                        barcode = datamatrix.DataMatrix(str(obj_data))
+                        # Логика масштабирования аналогична QR
+                        bounds = barcode.getBounds()
+                        barcode_width = bounds[2] - bounds[0]
+                        barcode_height = bounds[3] - bounds[1]
+                        scale = min(width / barcode_width, height / barcode_height)
+                        transform = [scale, 0, 0, scale, x, y]
+                        barcode_drawing = Drawing(width, height, transform=transform)
+                        barcode_drawing.add(barcode)
+
+                    if barcode_drawing:
+                        barcode_drawing.drawOn(c, 0, 0) # Рисуем на холсте
+
+            except Exception as e:
+                logging.error(f"Ошибка при рендеринге объекта {obj.get('type')}: {e}")
+
+        c.showPage()
+        c.save()
+        buffer.seek(0)
+        return buffer
+
 
     @staticmethod
     def generate_workplace_label_pdf(workplace_name: str, token: str) -> io.BytesIO:

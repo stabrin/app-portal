@@ -266,6 +266,17 @@ def update_client_db_schema(conn):
                 UNIQUE (warehouse_name, workplace_number)
             );
         """),
+        # Добавляем создание таблицы для шаблонов этикеток
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS label_templates (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                template_json JSONB NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE label_templates IS 'Шаблоны макетов этикеток в формате JSON';"),
     ]
 
     # === Блок для таблицы видимости приложений (из init_visibility.py) ===
