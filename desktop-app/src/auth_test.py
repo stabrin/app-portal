@@ -25,26 +25,22 @@ logging.basicConfig(
     ]
 )
 
-class StandaloneLoginWindow(tk.Toplevel):
+class StandaloneLoginWindow(tk.Tk):
     """
-    Автономное окно входа, которое после завершения вызывает callback
-    и передает в него результат (словарь с данными пользователя или None).
+    Автономное, самодостаточное окно входа.
+    После завершения работы (успех, ошибка, закрытие) вызывает callback и самоуничтожается.
     """
-    def __init__(self, parent, on_complete_callback):
-        super().__init__(parent)
+    def __init__(self, on_complete_callback):
+        super().__init__()
         self.on_complete_callback = on_complete_callback
 
         self.title("Тест Авторизации")
-        self.transient(parent)
-        self.grab_set()
         self.resizable(False, False)
 
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         self.bind('<Return>', lambda event: self._verify_login())
 
         self._create_widgets()
-        self.lift()
-        self.focus_force()
 
     def _create_widgets(self):
         frame = tk.Frame(self, padx=20, pady=10)
@@ -76,10 +72,11 @@ class StandaloneLoginWindow(tk.Toplevel):
                 user_name, hashed_password, user_role = user_data
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
-                    self.on_complete_callback(user_info)
+                    self.on_complete_callback(user_info) # Сначала вызываем callback
+                    self.destroy() # Затем уничтожаем окно
                 else:
                     messagebox.showerror("Ошибка", "Неверный пароль.", parent=self)
-                    # Не вызываем callback, чтобы процесс не завершился
+                    # Не закрываем окно, даем пользователю еще попытку
             else:
                 messagebox.showerror("Ошибка", "Пользователь не найден или не имеет прав доступа.", parent=self)
 
@@ -87,7 +84,8 @@ class StandaloneLoginWindow(tk.Toplevel):
             error_details = traceback.format_exc()
             logging.error(f"Ошибка авторизации: {e}\n{error_details}")
             messagebox.showerror("Критическая ошибка", f"Ошибка подключения к базе данных.\nПодробности в app.log.", parent=self)
-            self.on_complete_callback(None) # Завершаем при критической ошибке
+            self.on_complete_callback(None) # Сообщаем о провале
+            self.destroy() # И закрываемся
 
     def _on_closing(self):
         """При закрытии окна вызываем callback с None."""
@@ -99,24 +97,20 @@ def main():
     """
     logging.info("Запущен изолированный тест авторизации.")
     
-    # Создаем временный корневой элемент, который будет невидим.
-    # Он нужен только для того, чтобы на его основе создать Toplevel.
-    root = tk.Tk()
-    root.withdraw()
-
     def on_auth_complete(user_info):
-        """Callback, который будет вызван окном входа."""
+        """Callback, который будет вызван окном входа перед его закрытием."""
         if user_info:
             logging.info(f"Тест пройден. Успешный вход. Пользователь: {user_info['name']}, Роль: {user_info['role']}")
         else:
             logging.info("Тест завершен. Вход не выполнен (окно закрыто или ошибка).")
-        
-        # Уничтожаем корневое окно, что приводит к завершению скрипта.
-        root.destroy()
 
-    # Создаем и ждем завершения работы окна входа.
-    login_window = StandaloneLoginWindow(root, on_auth_complete)
-    root.mainloop()
+    # Создаем экземпляр нашего главного окна.
+    # Передаем ему функцию, которую он вызовет, когда закончит свою работу.
+    app = StandaloneLoginWindow(on_auth_complete)
+    
+    # Запускаем главный цикл приложения.
+    # Скрипт будет "висеть" здесь, пока окно `app` не будет уничтожено.
+    app.mainloop()
 
 if __name__ == "__main__":
     main()
