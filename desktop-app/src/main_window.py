@@ -945,14 +945,14 @@ class LoginWindow(tk.Toplevel):
         """При закрытии окна входа завершает все приложение."""
         self.parent.destroy()
 
-class SupervisorWindow(tk.Tk):
+class SupervisorWindow:
     """Главное окно для роли 'супервизор'."""
-    def __init__(self, user_info):
-        super().__init__()
+    def __init__(self, root, user_info):
+        self.root = root
         self.user_info = user_info
-        self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
-        self.geometry("900x600")
-
+        self.root.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
+        self.root.geometry("900x600")
+        
         self._create_menu()
         
         # Глобальная переменная root теперь не нужна, используем self
@@ -964,12 +964,12 @@ class SupervisorWindow(tk.Tk):
         client_management_frame.pack(fill=tk.BOTH, expand=True)
 
     def _create_menu(self):
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
 
         # --- Общие меню ---
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Выход", command=self.quit)
+        file_menu.add_command(label="Выход", command=self.root.quit)
         menubar.add_cascade(label="Файл", menu=file_menu)
 
         # --- Меню для супервизора ---
@@ -984,26 +984,26 @@ class SupervisorWindow(tk.Tk):
         help_menu.add_command(label="О программе")
         menubar.add_cascade(label="Справка", menu=help_menu)
 
-class AdminWindow(tk.Tk):
+class AdminWindow:
     """Главное окно для роли 'администратор'."""
-    def __init__(self, user_info):
-        super().__init__()
+    def __init__(self, root, user_info):
+        self.root = root
         self.user_info = user_info
-        self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
-        self.geometry("600x400")
+        self.root.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
+        self.root.geometry("600x400")
 
         self._create_menu()
 
-        label = ttk.Label(self, text="Добро пожаловать, Администратор!", font=("Arial", 14))
+        label = ttk.Label(self.root, text="Добро пожаловать, Администратор!", font=("Arial", 14))
         label.pack(expand=True)
 
     def _create_menu(self):
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
 
         # --- Общие меню ---
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Выход", command=self.quit)
+        file_menu.add_command(label="Выход", command=self.root.quit)
         menubar.add_cascade(label="Файл", menu=file_menu)
 
         # --- Меню Справка ---
@@ -1011,27 +1011,23 @@ class AdminWindow(tk.Tk):
         help_menu.add_command(label="О программе")
         menubar.add_cascade(label="Справка", menu=help_menu)
 
-def launch_app(user_info):
+def setup_main_window(root, user_info):
     """
-    Запускает соответствующее главное окно на основе роли пользователя.
+    Настраивает главное окно (root) в зависимости от роли пользователя.
     """
-    role = user_info.get("role")
-    app = None
-    if role == 'супервизор':
-        app = SupervisorWindow(user_info)
-    elif role == 'администратор':
-        app = AdminWindow(user_info)
-    else:
-        # Если роль неизвестна, создаем временное окно с ошибкой
-        # и не запускаем mainloop, чтобы приложение закрылось.
-        temp_root = tk.Tk()
-        temp_root.withdraw()
-        messagebox.showerror("Критическая ошибка", f"Неизвестная роль пользователя: {role}")
-        temp_root.destroy()
-        return
+    # Делаем главное окно видимым и возвращаем в нормальное состояние
+    root.deiconify()
+    root.state('normal')
 
-    if app:
-        app.mainloop()
+    role = user_info.get("role")
+    if role == 'супервизор':
+        SupervisorWindow(root, user_info)
+    elif role == 'администратор':
+        AdminWindow(root, user_info)
+    else:
+        # Если роль неизвестна, показываем ошибку и закрываем приложение
+        messagebox.showerror("Критическая ошибка", f"Неизвестная роль пользователя: {role}")
+        root.destroy()
 
 def main():
     """Главная функция для создания и запуска GUI приложения."""
@@ -1042,12 +1038,13 @@ def main():
 
     # 2. Создаем и показываем окно входа.
     # Передаем ему callback-функцию `launch_app`, которая будет вызвана после успешного входа.
-    login_window = LoginWindow(dummy_root, on_success_callback=launch_app)
+    # Используем lambda, чтобы передать `dummy_root` в наш callback.
+    login_window = LoginWindow(dummy_root, on_success_callback=lambda user_info: setup_main_window(dummy_root, user_info))
 
     # 3. Запускаем главный цикл для временного окна.
     # Этот цикл будет работать, пока открыто окно входа.
-    # Как только `launch_app` будет вызвана, она запустит свой собственный `mainloop`
-    # для уже нужного окна (Supervisor или Admin).
+    # После успешного входа и закрытия LoginWindow, `setup_main_window` настроит
+    # это же окно `dummy_root`, и `mainloop` продолжит работать уже для него.
     dummy_root.mainloop()
 
 if __name__ == "__main__":
