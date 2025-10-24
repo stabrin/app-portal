@@ -641,7 +641,9 @@ def edit_integration(order_id):
                             # 2. Получаем блок ID из последовательности
                             logging.info(f"[Delta CSV] Резервирую {num_packages} ID из последовательности '{sequence_name}'...")
                             cur.execute(sql.SQL("SELECT nextval('{seq}') FROM generate_series(1, %s)").format(seq=sql.Identifier(sequence_name)), (num_packages,))
-                            new_ids = [row[0] for row in cur.fetchall()]
+                            # --- ИСПРАВЛЕНИЕ: Используем доступ по ключу 'nextval' для RealDictCursor ---
+                            # Вместо row[0] используем row['nextval'], так как курсор возвращает словари.
+                            new_ids = [row['nextval'] for row in cur.fetchall()]
 
                             # 3. Присваиваем ID нашему DataFrame
                             all_packages_df['id'] = new_ids
