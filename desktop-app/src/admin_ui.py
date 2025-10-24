@@ -299,16 +299,27 @@ def open_user_management_window(parent_widget, user_info):
 
         # 1. Преобразуем в JSON и кодируем в байты
         json_bytes = json.dumps(auth_data, ensure_ascii=False).encode('utf-8')
-        # 2. Сжимаем байты
-        compressed_bytes = zlib.compress(json_bytes)
+        # 2. Сжимаем байты с максимальным уровнем сжатия
+        compressed_bytes = zlib.compress(json_bytes, level=9)
         # 3. Кодируем сжатые байты в Base64 для безопасной передачи
         base64_data = base64.b64encode(compressed_bytes).decode('ascii')
 
         qr_window = tk.Toplevel(users_window)
         qr_window.title(f"QR-код для: {name}")
         qr_window.grab_set()
-
-        img = qrcode.make(base64_data)
+        
+        # --- ИСПРАВЛЕНИЕ: Используем продвинутое создание QR-кода ---
+        # Создаем QR-код с минимальным уровнем коррекции ошибок (L),
+        # чтобы вместить больше данных.
+        qr = qrcode.QRCode(
+            version=None, # Автоматический подбор размера
+            error_correction=qrcode.constants.ERROR_CORRECT_L,
+            box_size=10,
+            border=4,
+        )
+        qr.add_data(base64_data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
         img = img.resize((300, 300))
         photo = ImageTk.PhotoImage(img)
 
