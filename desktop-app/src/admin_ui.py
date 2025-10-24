@@ -293,13 +293,22 @@ def open_user_management_window(parent_widget, user_info):
 
         # auth_data['password'] = "..." 
 
-        json_data = json.dumps(auth_data, ensure_ascii=False)
+        # --- ИСПРАВЛЕНИЕ: Сжимаем данные перед кодированием ---
+        import zlib
+        import base64
+
+        # 1. Преобразуем в JSON и кодируем в байты
+        json_bytes = json.dumps(auth_data, ensure_ascii=False).encode('utf-8')
+        # 2. Сжимаем байты
+        compressed_bytes = zlib.compress(json_bytes)
+        # 3. Кодируем сжатые байты в Base64 для безопасной передачи
+        base64_data = base64.b64encode(compressed_bytes).decode('ascii')
 
         qr_window = tk.Toplevel(users_window)
         qr_window.title(f"QR-код для: {name}")
         qr_window.grab_set()
 
-        img = qrcode.make(json_data)
+        img = qrcode.make(base64_data)
         img = img.resize((300, 300))
         photo = ImageTk.PhotoImage(img)
 
