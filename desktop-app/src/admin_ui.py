@@ -15,6 +15,20 @@ from printing_service import PrintingService
 
 import traceback
 
+def open_label_editor_window(parent_widget, user_info):
+    """
+    Открывает окно редактора макетов этикеток.
+    (Пока что это заглушка)
+    """
+    editor_window = tk.Toplevel(parent_widget)
+    editor_window.title("Редактор макетов этикеток")
+    editor_window.geometry("800x600")
+    editor_window.grab_set()
+
+    # TODO: Реализовать полноценный редактор макетов
+    label = ttk.Label(editor_window, text="Здесь будет редактор макетов.\nФункционал в разработке.", font=("Arial", 14), justify=tk.CENTER)
+    label.pack(expand=True)
+
 def open_print_management_window(parent_widget):
     """
     Открывает окно для управления печатью: выбор принтера, просмотр размеров бумаги и тестовая печать.
@@ -658,6 +672,8 @@ class AdminWindow(tk.Tk):
         # Меню для настройки рабочих мест
         setup_menu = tk.Menu(menubar, tearoff=0)
         setup_menu.add_command(label="Настройка рабочих мест", command=lambda: open_workplace_setup_window(self, self.user_info))
+        setup_menu.add_separator()
+        setup_menu.add_command(label="Редактор макетов", command=lambda: open_label_editor_window(self, self.user_info))
         menubar.add_cascade(label="Настройка", menu=setup_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
