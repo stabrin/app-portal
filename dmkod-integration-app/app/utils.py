@@ -25,6 +25,7 @@ def upsert_data_to_db(cursor, table_env_var, dataframe, pk_column):
     if isinstance(pk_column, list):
         # Составной ключ
         conflict_target = sql.SQL(', ').join(map(sql.Identifier, pk_column))
+        pk_list = pk_column
     else:
         # Одиночный ключ
         conflict_target = sql.Identifier(pk_column)
