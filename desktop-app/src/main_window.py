@@ -770,6 +770,59 @@ def open_clients_management_window():
         ttk.Button(bottom_buttons_frame, text="Закрыть", command=editor_window.destroy).pack(side=tk.RIGHT)
         ttk.Button(bottom_buttons_frame, text="Сохранить", command=save_client).pack(side=tk.RIGHT, padx=5)
 
+    # --- Создание основного окна и виджетов ---
+    clients_window = tk.Toplevel(root)
+    clients_window.title("Управление клиентами и пользователями")
+    clients_window.geometry("900x600")
+    clients_window.transient(root)
+    clients_window.grab_set()
+
+    # Разделитель окна
+    paned_window = ttk.PanedWindow(clients_window, orient=tk.VERTICAL)
+    paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    # --- Верхняя панель: Клиенты ---
+    clients_frame = ttk.LabelFrame(paned_window, text="Клиенты")
+    paned_window.add(clients_frame, weight=1)
+
+    # Кнопки управления клиентами
+    client_buttons_frame = ttk.Frame(clients_frame)
+    client_buttons_frame.pack(fill=tk.X, padx=5, pady=5)
+    ttk.Button(client_buttons_frame, text="Создать", command=lambda: open_client_editor()).pack(side=tk.LEFT, padx=2)
+    ttk.Button(client_buttons_frame, text="Редактировать", command=lambda: open_client_editor(clients_tree.item(clients_tree.focus())['values'][0]) if clients_tree.focus() else None).pack(side=tk.LEFT, padx=2)
+
+    # Таблица клиентов
+    clients_cols = ('id', 'name', 'db_host', 'created_at')
+    clients_tree = ttk.Treeview(clients_frame, columns=clients_cols, show='headings')
+    clients_tree.heading('id', text='ID')
+    clients_tree.heading('name', text='Имя клиента')
+    clients_tree.heading('db_host', text='Хост БД')
+    clients_tree.heading('created_at', text='Дата создания')
+    clients_tree.column('id', width=50, anchor=tk.CENTER)
+    clients_tree.column('name', width=250)
+    clients_tree.column('db_host', width=200)
+    clients_tree.column('created_at', width=150)
+    clients_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+    clients_tree.bind('<<TreeviewSelect>>', on_client_select)
+
+    # --- Нижняя панель: Пользователи ---
+    users_frame = ttk.LabelFrame(paned_window, text="Пользователи выбранного клиента")
+    paned_window.add(users_frame, weight=1)
+
+    # Таблица пользователей
+    users_cols = ('id', 'name', 'login', 'role', 'is_active')
+    users_tree = ttk.Treeview(users_frame, columns=users_cols, show='headings')
+    users_tree.heading('id', text='ID')
+    users_tree.heading('name', text='Имя')
+    users_tree.heading('login', text='Логин')
+    users_tree.heading('role', text='Роль')
+    users_tree.heading('is_active', text='Активен')
+    users_tree.column('id', width=50, anchor=tk.CENTER)
+    users_tree.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+    # Первоначальная загрузка данных
+    load_clients()
+
 def open_supervisor_creator_window():
     """Открывает окно для создания супервизора."""
     sup_window = tk.Toplevel(root)
