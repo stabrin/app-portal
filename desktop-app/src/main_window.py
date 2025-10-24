@@ -893,6 +893,10 @@ class LoginWindow(tk.Toplevel):
         self.bind('<Return>', lambda event: self._verify_login())
 
         self._create_widgets()
+        # --- ИСПРАВЛЕНИЕ ---
+        # Явно "разворачиваем" это окно. Это необходимо, чтобы оно стало видимым,
+        # так как его родительское окно (dummy_root) скрыто через withdraw().
+        self.deiconify()
         self.lift() # Поднимаем окно на передний план
         self.focus_force() # Устанавливаем фокус
         logging.info("LoginWindow configured and lifted.")
