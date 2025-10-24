@@ -13,10 +13,6 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from db_connector import get_main_db_connection
-# Импортируем наши новые классы интерфейсов
-from supervisor_ui import SupervisorWindow
-from admin_ui import AdminWindow
-
 
 # --- Настройка логирования (копируем из main_window.py) ---
 log_file_path = os.path.join(project_root, 'app.log')
@@ -70,8 +66,10 @@ class StandaloneLoginWindow(tk.Tk):
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
                     # Изменяем запрос, чтобы через LEFT JOIN получить имя базы данных клиента
+                    # и все данные для подключения к ней.
                     query = """
-                        SELECT u.name, u.password_hash, u.role, c.db_name
+                        SELECT u.name, u.password_hash, u.role, u.client_id,
+                               c.db_name, c.db_host, c.db_port, c.db_user, c.db_password, c.db_ssl_cert
                         FROM users u
                         LEFT JOIN clients c ON u.client_id = c.id
                         WHERE u.login = %s AND (u.role = 'супервизор' OR u.role = 'администратор')
@@ -80,12 +78,18 @@ class StandaloneLoginWindow(tk.Tk):
                     user_data = cur.fetchone()
 
             if user_data:
-                user_name, hashed_password, user_role, client_db_name = user_data
+                (user_name, hashed_password, user_role, client_id,
+                 db_name, db_host, db_port, db_user, db_password, db_ssl_cert) = user_data
+
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
-                    # Если это администратор, добавляем имя его базы данных
+                    # Если это администратор, добавляем всю информацию о его клиенте
                     if user_role == 'администратор':
-                        user_info['db_name'] = client_db_name
+                        user_info['client_id'] = client_id
+                        user_info['client_db_config'] = {
+                            "db_name": db_name, "db_host": db_host, "db_port": db_port,
+                            "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert
+                        }
                     self.on_complete_callback(user_info) # Сначала вызываем callback
                     self.destroy() # Затем уничтожаем окно
                 else:
@@ -109,40 +113,26 @@ def main():
     """
     Главная функция для запуска изолированного теста авторизации.
     """
-    logging.info("Application starting...")
+    logging.info("Запущен изолированный тест авторизации.")
     
-    # --- Этап 1: Авторизация ---
-    # Создаем временный root для окна входа
-    auth_root = tk.Tk()
-    auth_root.withdraw()
+    def on_auth_complete(user_info):
+        """Callback, который будет вызван окном входа перед его закрытием."""
+        if user_info:
+            log_message = f"Тест пройден. Успешный вход. Пользователь: {user_info['name']}, Роль: {user_info['role']}"
+            client_config = user_info.get('client_db_config')
+            if client_config:
+                log_message += f", База данных клиента: {client_config.get('db_name')}"
+            logging.info(log_message)
+        else:
+            logging.info("Тест завершен. Вход не выполнен (окно закрыто или ошибка).")
 
-    user_info_container = {}
-    def on_auth_complete(result):
-        user_info_container['result'] = result
-        auth_root.destroy()
-
-    StandaloneLoginWindow(on_auth_complete)
-    auth_root.mainloop()
-
-    user_info = user_info_container.get('result')
-
-    # --- Этап 2: Запуск основного интерфейса ---
-    if not user_info:
-        logging.info("Login failed or cancelled. Exiting application.")
-        return
+    # Создаем экземпляр нашего главного окна.
+    # Передаем ему функцию, которую он вызовет, когда закончит свою работу.
+    app = StandaloneLoginWindow(on_auth_complete)
     
-    role = user_info.get("role")
-    if role == 'супервизор':
-        app = SupervisorWindow(user_info)
-        app.mainloop()
-    elif role == 'администратор':
-        app = AdminWindow(user_info)
-        app.mainloop()
-    else:
-        logging.error(f"Unknown user role '{role}'. Cannot start application.")
-        messagebox.showerror("Критическая ошибка", f"Неизвестная роль пользователя: {role}")
-
-    logging.info("Application finished.")
+    # Запускаем главный цикл приложения.
+    # Скрипт будет "висеть" здесь, пока окно `app` не будет уничтожено.
+    app.mainloop()
 
 if __name__ == "__main__":
     main()

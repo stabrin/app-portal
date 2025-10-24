@@ -252,11 +252,28 @@ def update_client_db_schema(conn):
         sql.SQL("COMMENT ON TABLE {table} IS 'Рабочие сессии сотрудников ручной агрегации';").format(table=sql.Identifier(ma_work_sessions_table)),
         sql.SQL("COMMENT ON TABLE {table} IS 'Хранит иерархию вложений для ручной агрегации';").format(table=sql.Identifier(ma_aggregations_table)),
     ]
+    
+    # === Блок для таблицы видимости приложений (из init_visibility.py) ===
+    visibility_commands = [
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS app_visibility (
+                app_name VARCHAR(100) PRIMARY KEY,
+                visibility_rule TEXT NOT NULL
+            );
+        """),
+        # Заполняем начальными данными
+        sql.SQL("INSERT INTO app_visibility (app_name, visibility_rule) VALUES ('dmkod-integration-app', 'admin') ON CONFLICT (app_name) DO NOTHING;"),
+        sql.SQL("INSERT INTO app_visibility (app_name, visibility_rule) VALUES ('manual-aggregation-app', 'All') ON CONFLICT (app_name) DO NOTHING;"),
+        sql.SQL("INSERT INTO app_visibility (app_name, visibility_rule) VALUES ('datamatrix-app', 'All') ON CONFLICT (app_name) DO NOTHING;"),
+    ]
+
+    # Объединяем все команды
+    all_commands = sql_commands + visibility_commands
 
     try:
         with conn.cursor() as cur:
             logging.info("Начинаю обновление схемы базы данных клиента...")
-            for i, command in enumerate(sql_commands):
+            for i, command in enumerate(all_commands):
                 try:
                     # Для отладки можно распечатать команду
                     # logging.debug(f"Выполняю команду {i+1}/{len(sql_commands)}: {command.as_string(cur.connection)}")
