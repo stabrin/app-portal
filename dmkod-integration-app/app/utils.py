@@ -28,8 +28,13 @@ def upsert_data_to_db(cursor, table_env_var, dataframe, pk_column):
     else:
         # Одиночный ключ
         conflict_target = sql.Identifier(pk_column)
+        pk_list = [pk_column]
 
-    update_columns = [col for col in columns if col not in (pk_column if isinstance(pk_column, list) else [pk_column])]
+    # --- ИСПРАВЛЕНИЕ: Исключаем первичный ключ 'id' из списка обновляемых полей ---
+    # Это предотвратит ошибку "duplicate key value violates unique constraint" при UPSERT,
+    # так как мы не будем пытаться обновить сам первичный ключ.
+    # Также исключаем сам `pk_column`, по которому идет проверка конфликта.
+    update_columns = [col for col in columns if col not in pk_list and col != 'id']
     
     set_clause = sql.SQL(', ').join(
         sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col)) for col in update_columns
