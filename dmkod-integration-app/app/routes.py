@@ -637,8 +637,8 @@ def edit_integration(order_id):
                                 from .utils import upsert_data_to_db # Импортируем утилиту
                                 logging.info(f"[Delta CSV] DataFrame паллет для вставки (первые 5 строк):\n{pallets_df.head().to_string()}")
                                 logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
-                                # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                                upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level']], 'sscc')
+                                # Передаем только нужные колонки, чтобы избежать конфликтов с id и parent_id
+                                upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level', 'parent_id', 'parent_sscc']], 'sscc')
                                 logging.info(f"[Delta CSV] Запрос на вставку паллет выполнен. Затронуто строк: {cur.rowcount}.")
                                 flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
                                 logging.info(f"[Delta CSV] Вставка паллет завершена.")
