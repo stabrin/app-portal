@@ -951,34 +951,33 @@ class LoginWindow(tk.Toplevel):
         """При закрытии окна входа завершает все приложение."""
         self.parent.destroy()
 
-class SupervisorWindow:
+class SupervisorWindow(tk.Tk):
     """Главное окно для роли 'супервизор'."""
-    def __init__(self, root, user_info):
-        self.root = root
+    def __init__(self, user_info):
+        super().__init__()
         self.user_info = user_info
-        self.root.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
-        self.root.geometry("900x600")
+        self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
+        self.geometry("900x600")
         
         self._create_menu()
-        
         # Основной контент - управление клиентами
-        client_management_frame = open_clients_management_window(self.root)
+        client_management_frame = open_clients_management_window(self)
         client_management_frame.pack(fill=tk.BOTH, expand=True)
 
     def _create_menu(self):
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
 
         # --- Общие меню ---
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Выход", command=self.root.quit)
+        file_menu.add_command(label="Выход", command=self.quit)
         menubar.add_cascade(label="Файл", menu=file_menu)
 
         # --- Меню для супервизора ---
         admin_menu = tk.Menu(menubar, tearoff=0)
         admin_menu.add_command(label="Инициализация/Обновление главной БД", command=run_db_setup)
         admin_menu.add_separator()
-        admin_menu.add_command(label="Создать супервизора", command=lambda: open_supervisor_creator_window(self.root))
+        admin_menu.add_command(label="Создать супервизора", command=lambda: open_supervisor_creator_window(self))
         menubar.add_cascade(label="Администрирование", menu=admin_menu)
 
         # --- Меню Справка ---
@@ -986,26 +985,26 @@ class SupervisorWindow:
         help_menu.add_command(label="О программе")
         menubar.add_cascade(label="Справка", menu=help_menu)
 
-class AdminWindow:
+class AdminWindow(tk.Tk):
     """Главное окно для роли 'администратор'."""
-    def __init__(self, root, user_info):
-        self.root = root
+    def __init__(self, user_info):
+        super().__init__()
         self.user_info = user_info
-        self.root.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
-        self.root.geometry("600x400")
+        self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
+        self.geometry("600x400")
 
         self._create_menu()
 
-        label = ttk.Label(self.root, text="Добро пожаловать, Администратор!", font=("Arial", 14))
+        label = ttk.Label(self, text="Добро пожаловать, Администратор!", font=("Arial", 14))
         label.pack(expand=True)
 
     def _create_menu(self):
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
 
         # --- Общие меню ---
         file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Выход", command=self.root.quit)
+        file_menu.add_command(label="Выход", command=self.quit)
         menubar.add_cascade(label="Файл", menu=file_menu)
 
         # --- Меню Справка ---
@@ -1013,48 +1012,51 @@ class AdminWindow:
         help_menu.add_command(label="О программе")
         menubar.add_cascade(label="Справка", menu=help_menu)
 
-def setup_main_window(root, user_info):
+def run_login_process():
     """
-    Настраивает главное окно (root) в зависимости от роли пользователя.
+    Запускает процесс авторизации и возвращает данные пользователя в случае успеха.
     """
-    logging.info(f"setup_main_window called for role: {user_info.get('role')}")
-    # Делаем главное окно видимым и возвращаем в нормальное состояние
-    root.deiconify()
-    root.state('normal')
+    login_root = tk.Tk()
+    login_root.withdraw()
+    
+    user_info_container = {} # Используем словарь для передачи данных из callback
 
-    role = user_info.get("role")
-    if role == 'супервизор':
-        SupervisorWindow(root, user_info)
-    elif role == 'администратор':
-        AdminWindow(root, user_info)
-    else:
-        # Если роль неизвестна, показываем ошибку и закрываем приложение
-        messagebox.showerror("Критическая ошибка", f"Неизвестная роль пользователя: {role}")
-        root.destroy()
+    def on_login_success(user_info):
+        user_info_container['data'] = user_info
+        login_root.destroy()
+
+    LoginWindow(login_root, on_login_success)
+    login_root.mainloop()
+
+    return user_info_container.get('data')
 
 def main():
     """Главная функция для создания и запуска GUI приложения."""
     logging.info("Application main() function started.")
-    # 1. Создаем временное невидимое корневое окно.
-    # Оно нужно только для того, чтобы на его основе можно было создать модальное окно входа.
-    dummy_root = tk.Tk()
-    logging.info("Dummy root window (tk.Tk) created.")
-    dummy_root.withdraw()
-    logging.info("Dummy root window withdrawn.")
+    
+    # 1. Запускаем процесс авторизации. Он блокирует выполнение, пока не завершится.
+    user_info = run_login_process()
 
-    # 2. Создаем и показываем окно входа.
-    # Передаем ему callback-функцию `launch_app`, которая будет вызвана после успешного входа.
-    # Используем lambda, чтобы передать `dummy_root` в наш callback.
-    logging.info("Creating LoginWindow instance...")
-    LoginWindow(dummy_root, on_success_callback=lambda user_info: setup_main_window(dummy_root, user_info))
-    logging.info("LoginWindow instance created.")
+    # 2. Если авторизация не пройдена (окно закрыли), просто выходим.
+    if not user_info:
+        logging.info("Login failed or cancelled. Exiting application.")
+        return
 
-    # 3. Запускаем главный цикл для временного окна.
-    # Этот цикл будет работать, пока открыто окно входа.
-    # После успешного входа и закрытия LoginWindow, `setup_main_window` настроит
-    # это же окно `dummy_root`, и `mainloop` продолжит работать уже для него.
-    logging.info("Starting dummy_root.mainloop()...")
-    dummy_root.mainloop()
+    # 3. Если авторизация прошла успешно, создаем и запускаем основное окно приложения.
+    role = user_info.get("role")
+    app = None
+    if role == 'супервизор':
+        app = SupervisorWindow(user_info)
+    elif role == 'администратор':
+        app = AdminWindow(user_info)
+    
+    if app:
+        logging.info(f"Starting main application window for role: {role}")
+        app.mainloop()
+    else:
+        logging.error(f"Unknown user role '{role}'. Cannot start application.")
+        messagebox.showerror("Критическая ошибка", f"Неизвестная роль пользователя: {role}")
+
     logging.info("Application mainloop finished.")
 
 if __name__ == "__main__":
