@@ -253,6 +253,21 @@ def update_client_db_schema(conn):
         sql.SQL("COMMENT ON TABLE {table} IS 'Хранит иерархию вложений для ручной агрегации';").format(table=sql.Identifier(ma_aggregations_table)),
     ]
     
+    # === Блок для новых таблиц портала (префикс ap_) ===
+    ap_tables_commands = [
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_workplaces (
+                id SERIAL PRIMARY KEY,
+                warehouse_name VARCHAR(255) NOT NULL,
+                workplace_number INTEGER NOT NULL,
+                access_token UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                UNIQUE (warehouse_name, workplace_number)
+            );
+        """),
+    ]
+
     # === Блок для таблицы видимости приложений (из init_visibility.py) ===
     visibility_commands = [
         sql.SQL("""
@@ -268,7 +283,7 @@ def update_client_db_schema(conn):
     ]
 
     # Объединяем все команды
-    all_commands = sql_commands + visibility_commands
+    all_commands = sql_commands + ap_tables_commands + visibility_commands
 
     try:
         with conn.cursor() as cur:

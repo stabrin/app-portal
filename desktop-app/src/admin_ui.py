@@ -131,6 +131,215 @@ def open_print_management_window(parent_widget):
     ttk.Button(main_frame, text="Напечатать тестовую страницу", command=print_test_page).pack(fill="x", pady=(10, 2))
     load_printers()
 
+def open_workplace_setup_window(parent_widget, user_info):
+    """Открывает окно для настройки рабочих мест."""
+    setup_window = tk.Toplevel(parent_widget)
+    setup_window.title("Настройка рабочих мест")
+    setup_window.geometry("600x500")
+    setup_window.grab_set()
+
+    notebook = ttk.Notebook(setup_window)
+    notebook.pack(expand=True, fill="both", padx=10, pady=10)
+
+    # --- Вкладка 1: Генерация настроечного кода ---
+    config_frame = ttk.Frame(notebook, padding="10")
+    notebook.add(config_frame, text="Настроечный код")
+
+    ttk.Label(config_frame, text="Локальный адрес сервера:", font=("Arial", 10, "bold")).pack(anchor="w")
+    ttk.Label(config_frame, text="(например, http://192.168.1.100:8080)", wraplength=400).pack(anchor="w", pady=(0, 5))
+    server_address_entry = ttk.Entry(config_frame, width=60)
+    server_address_entry.pack(fill="x")
+
+    def generate_server_config_qr():
+        address = server_address_entry.get()
+        if not address:
+            messagebox.showwarning("Внимание", "Введите адрес сервера.", parent=setup_window)
+            return
+
+        try:
+            import qrcode
+            from PIL import Image, ImageTk
+            import zlib, base64
+        except ImportError:
+            messagebox.showerror("Ошибка", "Необходимые библиотеки не установлены.\nУстановите их: pip install qrcode pillow", parent=setup_window)
+            return
+
+        config_data = {"type": "server_config", "address": address}
+        json_bytes = json.dumps(config_data).encode('utf-8')
+        compressed_bytes = zlib.compress(json_bytes, level=9)
+        base64_data = base64.b64encode(compressed_bytes).decode('ascii')
+
+        chunk_size = 2500
+        chunks = [base64_data[i:i + chunk_size] for i in range(0, len(base64_data), chunk_size)]
+
+        display_qr_sequence(f"Настройка сервера: {address}", chunks, setup_window)
+
+    ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
+
+    # --- Вкладка 2: Генерация рабочих мест ---
+    workplaces_frame = ttk.Frame(notebook, padding="10")
+    notebook.add(workplaces_frame, text="Рабочие места")
+
+    ttk.Label(workplaces_frame, text="Название склада:", font=("Arial", 10, "bold")).pack(anchor="w")
+    warehouse_name_entry = ttk.Entry(workplaces_frame, width=40)
+    warehouse_name_entry.pack(fill="x", pady=(0, 10))
+
+    ttk.Label(workplaces_frame, text="Количество рабочих мест:", font=("Arial", 10, "bold")).pack(anchor="w")
+    workplaces_count_spinbox = ttk.Spinbox(workplaces_frame, from_=1, to=100, width=10)
+    workplaces_count_spinbox.pack(anchor="w")
+
+    def generate_workplaces():
+        warehouse_name = warehouse_name_entry.get()
+        try:
+            count = int(workplaces_count_spinbox.get())
+        except ValueError:
+            messagebox.showwarning("Внимание", "Укажите корректное количество рабочих мест.", parent=setup_window)
+            return
+
+        if not warehouse_name or count <= 0:
+            messagebox.showwarning("Внимание", "Заполните все поля.", parent=setup_window)
+            return
+
+        if not messagebox.askyesno("Подтверждение", f"Будет создано {count} рабочих мест для склада '{warehouse_name}'.\nПродолжить?", parent=setup_window):
+            return
+
+        client_db_config = user_info.get("client_db_config")
+        if not client_db_config:
+            messagebox.showerror("Ошибка", "Не найдены данные для подключения к базе клиента.", parent=setup_window)
+            return
+
+        generated_tokens = []
+        try:
+            # Подключаемся к базе клиента для сохранения токенов
+            conn_params = {k: v for k, v in client_db_config.items() if k not in ['db_ssl_cert']}
+            conn_params['dbname'] = conn_params.pop('db_name')
+            
+            with psycopg2.connect(**conn_params) as conn:
+                with conn.cursor() as cur:
+                    for i in range(1, count + 1):
+                        # Вставляем запись и получаем сгенерированный токен
+                        cur.execute(
+                            "INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s) RETURNING access_token",
+                            (warehouse_name, i)
+                        )
+                        token = cur.fetchone()[0]
+                        generated_tokens.append({"workplace": f"{warehouse_name} - Место {i}", "token": str(token)})
+                conn.commit()
+            
+            messagebox.showinfo("Успех", f"Успешно создано и сохранено {len(generated_tokens)} рабочих мест.", parent=setup_window)
+            display_workplace_qrs(generated_tokens, setup_window)
+
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка генерации рабочих мест: {e}\n{error_details}")
+            messagebox.showerror("Ошибка", f"Не удалось создать рабочие места. Подробности в app.log.", parent=setup_window)
+
+    ttk.Button(workplaces_frame, text="Сгенерировать и сохранить", command=generate_workplaces).pack(pady=20)
+
+def display_qr_sequence(title, chunks, parent):
+    """Вспомогательная функция для отображения серии QR-кодов."""
+    try:
+        import qrcode
+        from PIL import Image, ImageTk
+    except ImportError: return
+
+    qr_window = tk.Toplevel(parent)
+    qr_window.title(title)
+    qr_window.grab_set()
+
+    current_chunk_index = 0
+    
+    info_label = ttk.Label(qr_window, text="", font=("Arial", 12))
+    info_label.pack(pady=10)
+    qr_label = ttk.Label(qr_window)
+    qr_label.pack(padx=20, pady=10)
+    nav_frame = ttk.Frame(qr_window)
+    nav_frame.pack(pady=10)
+    prev_button = ttk.Button(nav_frame, text="<< Назад")
+    prev_button.pack(side=tk.LEFT, padx=10)
+    next_button = ttk.Button(nav_frame, text="Далее >>")
+    next_button.pack(side=tk.LEFT, padx=10)
+
+    def show_chunk(index):
+        nonlocal current_chunk_index
+        current_chunk_index = index
+        chunk_data = f"{index+1}/{len(chunks)}:{chunks[index]}"
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
+        qr.add_data(chunk_data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white").resize((350, 350))
+        photo = ImageTk.PhotoImage(img)
+        qr_label.config(image=photo)
+        qr_label.image = photo
+        info_label.config(text=f"Шаг {index + 1} из {len(chunks)}. Отсканируйте код.")
+        prev_button.config(state="normal" if index > 0 else "disabled")
+        next_button.config(state="normal" if index < len(chunks) - 1 else "disabled")
+
+    def show_next():
+        if current_chunk_index < len(chunks) - 1: show_chunk(current_chunk_index + 1)
+    def show_prev():
+        if current_chunk_index > 0: show_chunk(current_chunk_index - 1)
+
+    prev_button.config(command=show_prev)
+    next_button.config(command=show_next)
+    show_chunk(0)
+
+def display_workplace_qrs(tokens_info, parent):
+    """Отображает QR-коды для рабочих мест с возможностью печати."""
+    try:
+        import qrcode
+        from PIL import Image, ImageTk
+    except ImportError: return
+
+    # Используем ту же функцию, что и для серии QR, но с другой логикой
+    qr_window = tk.Toplevel(parent)
+    qr_window.title("QR-коды для рабочих мест")
+    qr_window.grab_set()
+
+    current_index = 0
+    
+    info_label = ttk.Label(qr_window, text="", font=("Arial", 12))
+    info_label.pack(pady=10)
+    qr_label = ttk.Label(qr_window)
+    qr_label.pack(padx=20, pady=10)
+    token_label = ttk.Label(qr_window, text="", font=("Courier", 10))
+    token_label.pack()
+
+    nav_frame = ttk.Frame(qr_window)
+    nav_frame.pack(pady=10)
+    prev_button = ttk.Button(nav_frame, text="<< Назад")
+    prev_button.pack(side=tk.LEFT, padx=10)
+    # TODO: Добавить кнопку "Печать"
+    # print_button = ttk.Button(nav_frame, text="Печать")
+    # print_button.pack(side=tk.LEFT, padx=10)
+    next_button = ttk.Button(nav_frame, text="Далее >>")
+    next_button.pack(side=tk.LEFT, padx=10)
+
+    def show_workplace(index):
+        nonlocal current_index
+        current_index = index
+        workplace_data = tokens_info[index]
+        token = workplace_data['token']
+        
+        qr_payload = json.dumps({"type": "workplace_token", "token": token})
+        img = qrcode.make(qr_payload).resize((300, 300))
+        photo = ImageTk.PhotoImage(img)
+        qr_label.config(image=photo)
+        qr_label.image = photo
+        info_label.config(text=f"Рабочее место: {workplace_data['workplace']} ({index+1}/{len(tokens_info)})")
+        token_label.config(text=f"Токен: {token}")
+        prev_button.config(state="normal" if index > 0 else "disabled")
+        next_button.config(state="normal" if index < len(tokens_info) - 1 else "disabled")
+
+    def show_next():
+        if current_index < len(tokens_info) - 1: show_workplace(current_index + 1)
+    def show_prev():
+        if current_index > 0: show_workplace(current_index - 1)
+
+    prev_button.config(command=show_prev)
+    next_button.config(command=show_next)
+    show_workplace(0)
+
 def open_user_management_window(parent_widget, user_info):
     """Открывает окно для управления пользователями клиента."""
     client_id = user_info.get('client_id')
@@ -285,6 +494,12 @@ def open_user_management_window(parent_widget, user_info):
             "client_db_config": user_info.get("client_db_config")
         }
         # Добавляем пароль, если он есть (для будущих реализаций)
+        try:
+            with get_main_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT password_hash FROM users WHERE id = %s", (user_id,))
+                    auth_data['password_hash'] = cur.fetchone()[0]
+        except Exception: pass # Не критично, если не удалось получить хэш
         
         # Проверка, что конфигурация БД клиента доступна
         if not auth_data["client_db_config"]:
@@ -302,31 +517,67 @@ def open_user_management_window(parent_widget, user_info):
         # 2. Сжимаем байты с максимальным уровнем сжатия
         compressed_bytes = zlib.compress(json_bytes, level=9)
         # 3. Кодируем сжатые байты в Base64 для безопасной передачи
-        base64_data = base64.b64encode(compressed_bytes).decode('ascii')
+        full_base64_data = base64.b64encode(compressed_bytes).decode('ascii')
 
-        qr_window = tk.Toplevel(users_window)
-        qr_window.title(f"QR-код для: {name}")
-        qr_window.grab_set()
+        # --- НОВАЯ ЛОГИКА: Разбиение на части, если данные слишком большие ---
+        # Максимальная емкость QR v40 с коррекцией L ~2953 байт.
+        # Возьмем с запасом 2500 символов на чанк.
+        chunk_size = 2500
+        chunks = [full_base64_data[i:i + chunk_size] for i in range(0, len(full_base64_data), chunk_size)]
+
+        # --- Отображение последовательности QR-кодов ---
+        qr_sequence_window = tk.Toplevel(users_window)
+        qr_sequence_window.title(f"Настройка для: {name}")
+        qr_sequence_window.grab_set()
+
+        current_chunk_index = 0
         
-        # --- ИСПРАВЛЕНИЕ: Используем продвинутое создание QR-кода ---
-        # Создаем QR-код с минимальным уровнем коррекции ошибок (L),
-        # чтобы вместить больше данных.
-        qr = qrcode.QRCode(
-            version=None, # Автоматический подбор размера
-            error_correction=qrcode.constants.ERROR_CORRECT_L,
-            box_size=10,
-            border=4,
-        )
-        qr.add_data(base64_data)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        img = img.resize((300, 300))
-        photo = ImageTk.PhotoImage(img)
+        info_label = ttk.Label(qr_sequence_window, text="", font=("Arial", 12))
+        info_label.pack(pady=10)
 
-        label = ttk.Label(qr_window, image=photo)
-        label.image = photo # Сохраняем ссылку на изображение
-        label.pack(padx=20, pady=20)
-        ttk.Label(qr_window, text="Отсканируйте этот код в мобильном приложении").pack(pady=(0, 10))
+        qr_label = ttk.Label(qr_sequence_window)
+        qr_label.pack(padx=20, pady=10)
+
+        nav_frame = ttk.Frame(qr_sequence_window)
+        nav_frame.pack(pady=10)
+        prev_button = ttk.Button(nav_frame, text="<< Назад")
+        prev_button.pack(side=tk.LEFT, padx=10)
+        next_button = ttk.Button(nav_frame, text="Далее >>")
+        next_button.pack(side=tk.LEFT, padx=10)
+
+        def show_chunk(index):
+            nonlocal current_chunk_index
+            current_chunk_index = index
+            
+            # Формируем данные для этой части: "chunk_index/total_chunks:data"
+            chunk_data = f"{index+1}/{len(chunks)}:{chunks[index]}"
+
+            qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
+            qr.add_data(chunk_data)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white").resize((350, 350))
+            
+            photo = ImageTk.PhotoImage(img)
+            qr_label.config(image=photo)
+            qr_label.image = photo
+
+            info_label.config(text=f"Шаг {index + 1} из {len(chunks)}. Отсканируйте код.")
+
+            prev_button.config(state="normal" if index > 0 else "disabled")
+            next_button.config(state="normal" if index < len(chunks) - 1 else "disabled")
+
+        def show_next():
+            if current_chunk_index < len(chunks) - 1:
+                show_chunk(current_chunk_index + 1)
+
+        def show_prev():
+            if current_chunk_index > 0:
+                show_chunk(current_chunk_index - 1)
+
+        prev_button.config(command=show_prev)
+        next_button.config(command=show_next)
+
+        show_chunk(0)
 
     # --- Виджеты окна ---
     main_frame = ttk.Frame(users_window, padding="10")
@@ -391,6 +642,11 @@ class AdminWindow(tk.Tk):
         users_menu = tk.Menu(menubar, tearoff=0)
         users_menu.add_command(label="Пользователи клиента", command=lambda: open_user_management_window(self, self.user_info))
         menubar.add_cascade(label="Пользователи", menu=users_menu)
+
+        # Меню для настройки рабочих мест
+        setup_menu = tk.Menu(menubar, tearoff=0)
+        setup_menu.add_command(label="Настройка рабочих мест", command=lambda: open_workplace_setup_window(self, self.user_info))
+        menubar.add_cascade(label="Настройка", menu=setup_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label="О программе")
