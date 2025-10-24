@@ -638,6 +638,15 @@ def edit_integration(order_id):
                             logging.info(f"[Delta CSV] Блокирую таблицу '{packages_table_name}' для безопасной вставки...")
                             cur.execute(sql.SQL("LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE").format(table=sql.Identifier(packages_table_name)))
 
+                            # --- НОВЫЙ ШАГ: Синхронизация счетчика перед получением ID ---
+                            # Это гарантирует, что sequence не отстает от реальных данных в таблице,
+                            # решая проблему UniqueViolation при конкурентном доступе.
+                            logging.info(f"[Delta CSV] Синхронизирую счетчик '{sequence_name}'...")
+                            cur.execute(sql.SQL("SELECT setval('{seq}', (SELECT MAX(id) FROM {tbl}), true)").format(
+                                seq=sql.Identifier(sequence_name),
+                                tbl=sql.Identifier(packages_table_name)
+                            ))
+
                             # 2. Получаем блок ID из последовательности
                             logging.info(f"[Delta CSV] Резервирую {num_packages} ID из последовательности '{sequence_name}'...")
                             cur.execute(sql.SQL("SELECT nextval('{seq}') FROM generate_series(1, %s)").format(seq=sql.Identifier(sequence_name)), (num_packages,))
