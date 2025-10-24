@@ -628,33 +628,39 @@ def edit_integration(order_id):
 
                             all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
 
-                            # 3. Вставляем в базу 'packages'
+                            # --- НОВАЯ ЛОГИКА: Блокировка таблицы и получение ID перед вставкой ---
+                            # Это решает проблему с гонкой состояний и ошибкой UniqueViolation.
                             packages_table_name = os.getenv('TABLE_PACKAGES', 'packages')
-                            
-                            # Сначала вставляем паллеты (уровень 2), чтобы они уже были в БД
-                            pallets_df = all_packages_df[all_packages_df['level'] == 2]
-                            if not pallets_df.empty:
-                                from .utils import upsert_data_to_db # Импортируем утилиту
-                                logging.info(f"[Delta CSV] DataFrame паллет для вставки (первые 5 строк):\n{pallets_df.head().to_string()}")
-                                logging.info(f"[Delta CSV] Подготовлено к вставке {len(pallets_df)} паллет (уровень 2).")
-                                # Передаем только нужные колонки, чтобы избежать конфликтов с id и parent_id
-                                upsert_data_to_db(cur, 'TABLE_PACKAGES', pallets_df[['sscc', 'owner', 'level', 'parent_id', 'parent_sscc']], 'sscc')
-                                logging.info(f"[Delta CSV] Запрос на вставку паллет выполнен. Затронуто строк: {cur.rowcount}.")
-                                flash(f"Создано/обновлено {len(pallets_df)} паллет в 'packages'.", 'info')
-                                logging.info(f"[Delta CSV] Вставка паллет завершена.")
+                            sequence_name = f"{packages_table_name}_id_seq"
+                            num_packages = len(all_packages_df)
 
-                            # Теперь вставляем короба (уровень 1), указывая parent_sscc
-                            boxes_df = all_packages_df[all_packages_df['level'] == 1]
-                            if not boxes_df.empty:
-                                from .utils import upsert_data_to_db # Повторный импорт для ясности
-                                # Вставляем короба с parent_sscc, передавая имя переменной окружения
-                                logging.info(f"[Delta CSV] DataFrame коробов для вставки (первые 5 строк):\n{boxes_df.head().to_string()}")
-                                logging.info(f"[Delta CSV] Подготовлено к вставке {len(boxes_df)} коробов (уровень 1) с parent_sscc.")
-                                # Убираем return_sql, т.к. функция его не поддерживает. Выполняем вставку напрямую.
-                                upsert_data_to_db(cur, 'TABLE_PACKAGES', boxes_df[['sscc', 'owner', 'level', 'parent_sscc']], 'sscc')
-                                logging.info(f"[Delta CSV] Запрос на вставку коробов выполнен. Затронуто строк: {cur.rowcount}.")
-                                flash(f"Создано/обновлено {len(boxes_df)} коробов в 'packages'.", 'info')
-                                logging.info(f"[Delta CSV] Вставка коробов завершена.")
+                            # 1. Блокируем таблицу в эксклюзивном режиме на время транзакции
+                            logging.info(f"[Delta CSV] Блокирую таблицу '{packages_table_name}' для безопасной вставки...")
+                            cur.execute(sql.SQL("LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE").format(table=sql.Identifier(packages_table_name)))
+
+                            # 2. Получаем блок ID из последовательности
+                            logging.info(f"[Delta CSV] Резервирую {num_packages} ID из последовательности '{sequence_name}'...")
+                            cur.execute(sql.SQL("SELECT nextval('{seq}') FROM generate_series(1, %s)").format(seq=sql.Identifier(sequence_name)), (num_packages,))
+                            new_ids = [row[0] for row in cur.fetchall()]
+
+                            # 3. Присваиваем ID нашему DataFrame
+                            all_packages_df['id'] = new_ids
+                            logging.info("[Delta CSV] ID успешно присвоены данным в памяти.")
+
+                            # 4. Выполняем обычную массовую вставку (не UPSERT)
+                            from psycopg2.extras import execute_values
+                            columns = all_packages_df.columns.tolist()
+                            data_tuples = [tuple(x) for x in all_packages_df.to_numpy()]
+                            
+                            insert_query = sql.SQL("INSERT INTO {table} ({cols}) VALUES %s").format(
+                                table=sql.Identifier(packages_table_name),
+                                cols=sql.SQL(', ').join(map(sql.Identifier, columns))
+                            )
+                            
+                            logging.info(f"[Delta CSV] Выполняю массовую вставку {len(data_tuples)} записей в '{packages_table_name}'...")
+                            execute_values(cur, insert_query, data_tuples, page_size=1000)
+                            flash(f"Создано {len(all_packages_df)} упаковок (короба и паллеты).", 'info')
+                            logging.info(f"[Delta CSV] Вставка упаковок завершена. Блокировка будет снята после коммита.")
                             
                             # --- НОВЫЙ БЛОК: Обновление parent_id ---
                             # После того как все короба и паллеты вставлены,
@@ -662,7 +668,7 @@ def edit_integration(order_id):
                             update_parent_id_query = sql.SQL("""
                                 UPDATE {packages_table} p_child
                                 SET parent_id = p_parent.id
-                                FROM {packages_table} p_parent
+                                FROM {packages_table} AS p_parent
                                 WHERE p_child.parent_sscc = p_parent.sscc
                                   AND p_child.parent_sscc IS NOT NULL
                                   AND p_child.parent_id IS NULL;
