@@ -13,6 +13,10 @@ project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
 from db_connector import get_main_db_connection
+# Импортируем наши новые классы интерфейсов
+from supervisor_ui import SupervisorWindow
+from admin_ui import AdminWindow
+
 
 # --- Настройка логирования (копируем из main_window.py) ---
 log_file_path = os.path.join(project_root, 'app.log')
@@ -111,28 +115,49 @@ class StandaloneLoginWindow(tk.Tk):
 
 def main():
     """
-    Главная функция для запуска изолированного теста авторизации.
+    Главная функция для запуска приложения.
     """
-    logging.info("Запущен изолированный тест авторизации.")
+    logging.info("Application starting...")
     
-    def on_auth_complete(user_info):
-        """Callback, который будет вызван окном входа перед его закрытием."""
-        if user_info:
-            log_message = f"Тест пройден. Успешный вход. Пользователь: {user_info['name']}, Роль: {user_info['role']}"
-            client_config = user_info.get('client_db_config')
-            if client_config:
-                log_message += f", База данных клиента: {client_config.get('db_name')}"
-            logging.info(log_message)
-        else:
-            logging.info("Тест завершен. Вход не выполнен (окно закрыто или ошибка).")
+    # --- Этап 1: Авторизация ---
+    user_info_container = {}
+    def on_auth_complete(result):
+        """Callback, который сохраняет результат и уничтожает окно входа."""
+        user_info_container['result'] = result
+        # Не нужно вызывать destroy() здесь, так как окно само себя уничтожает
 
-    # Создаем экземпляр нашего главного окна.
-    # Передаем ему функцию, которую он вызовет, когда закончит свою работу.
-    app = StandaloneLoginWindow(on_auth_complete)
+    # Создаем и запускаем окно входа.
+    # Его mainloop будет блокировать выполнение до закрытия окна.
+    login_app = StandaloneLoginWindow(on_auth_complete)
+    login_app.mainloop()
+
+    user_info = user_info_container.get('result')
+
+    # --- Этап 2: Запуск основного интерфейса ---
+    if not user_info:
+        logging.info("Login failed or cancelled. Exiting application.")
+        return
     
-    # Запускаем главный цикл приложения.
-    # Скрипт будет "висеть" здесь, пока окно `app` не будет уничтожено.
-    app.mainloop()
+    log_message = f"Login successful. User: {user_info['name']}, Role: {user_info['role']}"
+    if user_info.get('client_db_config'):
+        log_message += f", Client DB: {user_info['client_db_config'].get('db_name')}"
+    logging.info(log_message)
+
+    role = user_info.get("role")
+    app = None
+    if role == 'супервизор':
+        app = SupervisorWindow(user_info)
+    elif role == 'администратор':
+        app = AdminWindow(user_info)
+    
+    if app:
+        logging.info(f"Starting main application window for role: {role}")
+        app.mainloop()
+    else:
+        logging.error(f"Unknown user role '{role}'. Cannot start application.")
+        messagebox.showerror("Критическая ошибка", f"Неизвестная роль пользователя: {role}")
+
+    logging.info("Application finished.")
 
 if __name__ == "__main__":
     main()
