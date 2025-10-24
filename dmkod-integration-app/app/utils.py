@@ -1,5 +1,6 @@
 import os
 from psycopg2 import sql
+import logging
 from psycopg2.extras import execute_values
 
 def upsert_data_to_db(cursor, table_env_var, dataframe, pk_column):
@@ -14,7 +15,7 @@ def upsert_data_to_db(cursor, table_env_var, dataframe, pk_column):
     table_name = os.getenv(table_env_var)
     if not table_name:
         raise ValueError(f"Переменная окружения {table_env_var} не найдена в .env файле!")
-
+    
     if dataframe.empty:
         return
 
@@ -49,3 +50,19 @@ def upsert_data_to_db(cursor, table_env_var, dataframe, pk_column):
     )
 
     execute_values(cursor, query, data_tuples, page_size=1000)
+    
+    # --- НОВАЯ ЛОГИКА: Синхронизация счетчика первичного ключа ---
+    # Это решает проблему UniqueViolation при повторных загрузках, когда
+    # UPSERT не обновляет sequence для автоинкрементного поля 'id'.
+    try:
+        # 1. Формируем имя последовательности (обычно 'tablename_id_seq')
+        sequence_name = sql.Identifier(f"{table_name}_id_seq")
+        # 2. Формируем и выполняем запрос на обновление счетчика
+        sync_query = sql.SQL("SELECT setval('{seq}', (SELECT MAX(id) FROM {tbl}))").format(
+            seq=sequence_name,
+            tbl=sql.Identifier(table_name)
+        )
+        cursor.execute(sync_query)
+    except Exception as e:
+        # Логируем ошибку, но не прерываем выполнение, т.к. это вспомогательная операция.
+        logging.warning(f"Не удалось синхронизировать sequence для таблицы '{table_name}'. Ошибка: {e}")
