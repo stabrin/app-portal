@@ -337,7 +337,7 @@ def open_print_management_window():
     # --- Первоначальная загрузка данных ---
     load_printers()
 
-def open_clients_management_window():
+def open_clients_management_window(parent_widget):
     """Открывает окно для управления клиентами и пользователями."""
     
     def load_clients():
@@ -778,7 +778,7 @@ def open_clients_management_window():
 
     # --- Создание основного окна и виджетов ---
     # Изменено: теперь это не Toplevel, а фрейм внутри главного окна
-    clients_window = ttk.Frame(root)
+    clients_window = ttk.Frame(parent_widget)
     # clients_window.title("Управление клиентами и пользователями")
     # clients_window.geometry("900x600")
     # clients_window.transient(root)
@@ -833,9 +833,9 @@ def open_clients_management_window():
     # Возвращаем главный фрейм, чтобы его можно было встроить в основное окно
     return clients_window
 
-def open_supervisor_creator_window():
+def open_supervisor_creator_window(parent_widget):
     """Открывает окно для создания супервизора."""
-    sup_window = tk.Toplevel(root)
+    sup_window = tk.Toplevel(parent_widget)
     sup_window.title("Создание нового супервизора")
     sup_window.grab_set()
 
@@ -955,12 +955,8 @@ class SupervisorWindow:
         
         self._create_menu()
         
-        # Глобальная переменная root теперь не нужна, используем self
-        global root
-        root = self
-
         # Основной контент - управление клиентами
-        client_management_frame = open_clients_management_window()
+        client_management_frame = open_clients_management_window(self.root)
         client_management_frame.pack(fill=tk.BOTH, expand=True)
 
     def _create_menu(self):
@@ -976,7 +972,7 @@ class SupervisorWindow:
         admin_menu = tk.Menu(menubar, tearoff=0)
         admin_menu.add_command(label="Инициализация/Обновление главной БД", command=run_db_setup)
         admin_menu.add_separator()
-        admin_menu.add_command(label="Создать супервизора", command=open_supervisor_creator_window)
+        admin_menu.add_command(label="Создать супервизора", command=lambda: open_supervisor_creator_window(self.root))
         menubar.add_cascade(label="Администрирование", menu=admin_menu)
 
         # --- Меню Справка ---
