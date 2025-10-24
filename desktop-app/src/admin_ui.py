@@ -10,6 +10,9 @@ from db_connector import get_main_db_connection
 import bcrypt
 import psycopg2
 
+# Импортируем новый сервис печати
+from printing_service import PrintingService
+
 import traceback
 
 def open_print_management_window(parent_widget):
@@ -129,6 +132,7 @@ def open_print_management_window(parent_widget):
     paper_listbox = tk.Listbox(main_frame, height=10)
     paper_listbox.pack(expand=True, fill="both", pady=2)
     ttk.Button(main_frame, text="Напечатать тестовую страницу", command=print_test_page).pack(fill="x", pady=(10, 2))
+    # TODO: Переделать тестовую печать на использование PDF
     load_printers()
 
 def open_workplace_setup_window(parent_widget, user_info):
@@ -308,10 +312,18 @@ def display_workplace_qrs(tokens_info, parent):
     nav_frame = ttk.Frame(qr_window)
     nav_frame.pack(pady=10)
     prev_button = ttk.Button(nav_frame, text="<< Назад")
-    prev_button.pack(side=tk.LEFT, padx=10)
-    # TODO: Добавить кнопку "Печать"
-    # print_button = ttk.Button(nav_frame, text="Печать")
-    # print_button.pack(side=tk.LEFT, padx=10)
+    prev_button.pack(side=tk.LEFT, padx=5)
+    
+    def print_label():
+        workplace_data = tokens_info[current_index]
+        pdf_buffer = PrintingService.generate_workplace_label_pdf(workplace_data['workplace'], workplace_data['token'])
+        # TODO: Здесь нужно открыть диалог выбора принтера и размера бумаги
+        # и затем вызвать PrintingService.print_pdf(printer, pdf_buffer, paper)
+        messagebox.showinfo("Печать", "Функционал печати в разработке.\nPDF сгенерирован в памяти.", parent=qr_window)
+
+    print_button = ttk.Button(nav_frame, text="Печать", command=print_label)
+    print_button.pack(side=tk.LEFT, padx=5)
+
     next_button = ttk.Button(nav_frame, text="Далее >>")
     next_button.pack(side=tk.LEFT, padx=10)
 
