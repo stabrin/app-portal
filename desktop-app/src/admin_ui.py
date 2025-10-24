@@ -285,6 +285,12 @@ def open_user_management_window(parent_widget, user_info):
             "client_db_config": user_info.get("client_db_config")
         }
         # Добавляем пароль, если он есть (для будущих реализаций)
+        
+        # Проверка, что конфигурация БД клиента доступна
+        if not auth_data["client_db_config"]:
+            messagebox.showerror("Ошибка", "Не удалось найти конфигурацию базы данных клиента для генерации QR-кода.", parent=users_window)
+            return
+
         # auth_data['password'] = "..." 
 
         json_data = json.dumps(auth_data, ensure_ascii=False)
