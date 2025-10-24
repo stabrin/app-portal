@@ -873,26 +873,54 @@ def open_supervisor_creator_window():
     ttk.Button(buttons_frame, text="Сохранить", command=save_supervisor).pack(side=tk.RIGHT, padx=5)
     ttk.Button(buttons_frame, text="Отмена", command=sup_window.destroy).pack(side=tk.RIGHT)
 
-def show_login_window(root, on_success_callback):
-    """Отображает окно входа и вызывает колбэк при успехе."""
-    login_window = tk.Toplevel(root)
-    login_window.title("Авторизация")
-    login_window.transient(root)
-    login_window.grab_set()
-    login_window.resizable(False, False)
+class LoginWindow(tk.Toplevel):
+    """
+    Класс для окна авторизации.
+    При успешном входе вызывает callback-функцию, передавая в нее словарь с данными пользователя.
+    """
+    def __init__(self, parent, on_success_callback):
+        super().__init__(parent)
+        self.on_success_callback = on_success_callback
+        self.parent = parent
 
-    def verify_login():
-        login = login_entry.get()
-        password = password_entry.get()
+        self.title("Авторизация")
+        self.transient(parent)
+        self.grab_set()
+        self.resizable(False, False)
+
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+        self.bind('<Return>', lambda event: self._verify_login())
+
+        self._create_widgets()
+        self.lift() # Поднимаем окно на передний план
+        self.focus_force() # Устанавливаем фокус
+
+    def _create_widgets(self):
+        frame = ttk.Frame(self, padding="20")
+        frame.pack()
+
+        ttk.Label(frame, text="Логин:").grid(row=0, column=0, sticky="w", pady=5)
+        self.login_entry = ttk.Entry(frame, width=30)
+        self.login_entry.grid(row=0, column=1, pady=5)
+        self.login_entry.focus_set()
+
+        ttk.Label(frame, text="Пароль:").grid(row=1, column=0, sticky="w", pady=5)
+        self.password_entry = ttk.Entry(frame, width=30, show="*")
+        self.password_entry.grid(row=1, column=1, pady=5)
+
+        ttk.Button(frame, text="Войти", command=self._verify_login).grid(row=2, columnspan=2, pady=10)
+
+    def _verify_login(self):
+        login = self.login_entry.get()
+        password = self.password_entry.get()
 
         if not login or not password:
-            messagebox.showerror("Ошибка", "Логин и пароль не могут быть пустыми.", parent=login_window)
+            messagebox.showerror("Ошибка", "Логин и пароль не могут быть пустыми.", parent=self)
             return
 
         try:
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
-                    # Ищем пользователя с таким логином. Важно: ищем только супервизоров и администраторов
                     cur.execute("SELECT name, password_hash, role FROM users WHERE login = %s AND (role = 'супервизор' OR role = 'администратор')", (login,))
                     user_data = cur.fetchone()
 
@@ -900,106 +928,127 @@ def show_login_window(root, on_success_callback):
                 user_name, hashed_password, user_role = user_data
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     logging.info(f"Пользователь '{user_name}' (роль: {user_role}) успешно вошел в систему.")
-                    # Сохраняем данные пользователя
-                    current_user["name"] = user_name
-                    current_user["role"] = user_role
-                    # Закрываем окно входа и вызываем колбэк
-                    login_window.destroy()
-                    on_success_callback(user_role)
+                    user_info = {"name": user_name, "role": user_role}
+                    self.destroy()
+                    self.on_success_callback(user_info)
                 else:
-                    messagebox.showerror("Ошибка", "Неверный пароль.", parent=login_window)
+                    messagebox.showerror("Ошибка", "Неверный пароль.", parent=self)
             else:
-                messagebox.showerror("Ошибка", "Пользователь не найден или не имеет прав доступа.", parent=login_window)
+                messagebox.showerror("Ошибка", "Пользователь не найден или не имеет прав доступа.", parent=self)
 
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка авторизации: {e}\n{error_details}")
-            messagebox.showerror("Критическая ошибка", f"Ошибка подключения к базе данных.\nПодробности в app.log.", parent=login_window)
+            messagebox.showerror("Критическая ошибка", f"Ошибка подключения к базе данных.\nПодробности в app.log.", parent=self)
 
-    # Обработчик закрытия окна
-    def on_closing():
-        root.destroy() # Закрываем основное приложение, если закрыли окно входа
+    def _on_closing(self):
+        """При закрытии окна входа завершает все приложение."""
+        self.parent.destroy()
 
-    login_window.protocol("WM_DELETE_WINDOW", on_closing)
-    login_window.bind('<Return>', lambda event: verify_login())
+class SupervisorWindow(tk.Tk):
+    """Главное окно для роли 'супервизор'."""
+    def __init__(self, user_info):
+        super().__init__()
+        self.user_info = user_info
+        self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
+        self.geometry("900x600")
 
-    frame = ttk.Frame(login_window, padding="20")
-    frame.pack()
+        self._create_menu()
+        
+        # Глобальная переменная root теперь не нужна, используем self
+        global root
+        root = self
 
-    ttk.Label(frame, text="Логин:").grid(row=0, column=0, sticky="w", pady=5)
-    login_entry = ttk.Entry(frame, width=30)
-    login_entry.grid(row=0, column=1, pady=5)
-    login_entry.focus_set()
+        # Основной контент - управление клиентами
+        client_management_frame = open_clients_management_window()
+        client_management_frame.pack(fill=tk.BOTH, expand=True)
 
-    ttk.Label(frame, text="Пароль:").grid(row=1, column=0, sticky="w", pady=5)
-    password_entry = ttk.Entry(frame, width=30, show="*")
-    password_entry.grid(row=1, column=1, pady=5)
+    def _create_menu(self):
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
 
-    ttk.Button(frame, text="Войти", command=verify_login).grid(row=2, columnspan=2, pady=10)
+        # --- Общие меню ---
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Выход", command=self.quit)
+        menubar.add_cascade(label="Файл", menu=file_menu)
 
-def setup_main_window(role):
-    """Настраивает главное окно в зависимости от роли пользователя."""
-    # --- ИСПРАВЛЕНИЕ: Комбинация команд для гарантированного отображения окна ---
-    # 1. deiconify() "разворачивает" окно, если оно было свернуто (iconified).
-    root.deiconify()
-    # 2. state('normal') возвращает окно в обычное состояние из других (например, 'zoomed').
-    root.state('normal')
-    root.title(f"ТильдаКод [Пользователь: {current_user['name']}, Роль: {current_user['role']}]")
-
-    menubar = tk.Menu(root)
-    root.config(menu=menubar)
-
-    # --- Общие меню ---
-    file_menu = tk.Menu(menubar, tearoff=0)
-    file_menu.add_command(label="Выход", command=root.quit)
-    menubar.add_cascade(label="Файл", menu=file_menu)
-
-    help_menu = tk.Menu(menubar, tearoff=0)
-    help_menu.add_command(label="О программе")
-    menubar.add_cascade(label="Справка", menu=help_menu)
-
-    # --- Настройка в зависимости от роли ---
-    if role == 'супервизор':
-        root.geometry("900x600")
-        # Меню для супервизора
+        # --- Меню для супервизора ---
         admin_menu = tk.Menu(menubar, tearoff=0)
         admin_menu.add_command(label="Инициализация/Обновление главной БД", command=run_db_setup)
         admin_menu.add_separator()
         admin_menu.add_command(label="Создать супервизора", command=open_supervisor_creator_window)
         menubar.add_cascade(label="Администрирование", menu=admin_menu)
 
-        # Основной контент - управление клиентами
-        client_management_frame = open_clients_management_window()
-        client_management_frame.pack(fill=tk.BOTH, expand=True)
+        # --- Меню Справка ---
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="О программе")
+        menubar.add_cascade(label="Справка", menu=help_menu)
 
+class AdminWindow(tk.Tk):
+    """Главное окно для роли 'администратор'."""
+    def __init__(self, user_info):
+        super().__init__()
+        self.user_info = user_info
+        self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
+        self.geometry("600x400")
+
+        self._create_menu()
+
+        label = ttk.Label(self, text="Добро пожаловать, Администратор!", font=("Arial", 14))
+        label.pack(expand=True)
+
+    def _create_menu(self):
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
+
+        # --- Общие меню ---
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Выход", command=self.quit)
+        menubar.add_cascade(label="Файл", menu=file_menu)
+
+        # --- Меню Справка ---
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="О программе")
+        menubar.add_cascade(label="Справка", menu=help_menu)
+
+def launch_app(user_info):
+    """
+    Запускает соответствующее главное окно на основе роли пользователя.
+    """
+    role = user_info.get("role")
+    app = None
+    if role == 'супервизор':
+        app = SupervisorWindow(user_info)
     elif role == 'администратор':
-        root.geometry("600x400")
-        # Для администратора пока простое окно с сообщением
-        label = ttk.Label(root, text="Добро пожаловать, Администратор!", font=("Arial", 14))
-        label.pack(expand=True)
-
+        app = AdminWindow(user_info)
     else:
-        # На случай непредвиденной роли
-        root.geometry("400x200")
-        label = ttk.Label(root, text=f"Неизвестная роль: {role}", font=("Arial", 14))
-        label.pack(expand=True)
+        # Если роль неизвестна, создаем временное окно с ошибкой
+        # и не запускаем mainloop, чтобы приложение закрылось.
+        temp_root = tk.Tk()
+        temp_root.withdraw()
+        messagebox.showerror("Критическая ошибка", f"Неизвестная роль пользователя: {role}")
+        temp_root.destroy()
+        return
 
+    if app:
+        app.mainloop()
 
 def main():
     """Главная функция для создания и запуска GUI приложения."""
-    global root # Делаем root глобальной, чтобы функции могли к ней обращаться
-    # 1. Создаем главное окно приложения
-    root = tk.Tk()
-    # Скрываем главное окно до успешного входа.
-    # Это более надежный способ, чем withdraw(), который может вызывать проблемы.
-    root.geometry("0x0+9999+9999")
+    # 1. Создаем временное невидимое корневое окно.
+    # Оно нужно только для того, чтобы на его основе можно было создать модальное окно входа.
+    dummy_root = tk.Tk()
+    dummy_root.withdraw()
 
-    # 2. Показываем окно входа после того, как главный цикл будет готов.
-    # Это самый надежный способ избежать "зависаний" и проблем с отрисовкой.
-    root.after(0, lambda: show_login_window(root, setup_main_window))
-    
-    # 3. Запускаем главный цикл приложения.
-    root.mainloop()
+    # 2. Создаем и показываем окно входа.
+    # Передаем ему callback-функцию `launch_app`, которая будет вызвана после успешного входа.
+    login_window = LoginWindow(dummy_root, on_success_callback=launch_app)
+
+    # 3. Запускаем главный цикл для временного окна.
+    # Этот цикл будет работать, пока открыто окно входа.
+    # Как только `launch_app` будет вызвана, она запустит свой собственный `mainloop`
+    # для уже нужного окна (Supervisor или Admin).
+    dummy_root.mainloop()
 
 if __name__ == "__main__":
     main()
