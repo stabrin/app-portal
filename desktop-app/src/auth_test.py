@@ -65,13 +65,23 @@ class StandaloneLoginWindow(tk.Tk):
         try:
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT name, password_hash, role FROM users WHERE login = %s AND (role = 'супервизор' OR role = 'администратор')", (login,))
+                    # Изменяем запрос, чтобы через LEFT JOIN получить имя базы данных клиента
+                    query = """
+                        SELECT u.name, u.password_hash, u.role, c.db_name
+                        FROM users u
+                        LEFT JOIN clients c ON u.client_id = c.id
+                        WHERE u.login = %s AND (u.role = 'супервизор' OR u.role = 'администратор')
+                    """
+                    cur.execute(query, (login,))
                     user_data = cur.fetchone()
 
             if user_data:
-                user_name, hashed_password, user_role = user_data
+                user_name, hashed_password, user_role, client_db_name = user_data
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
+                    # Если это администратор, добавляем имя его базы данных
+                    if user_role == 'администратор':
+                        user_info['db_name'] = client_db_name
                     self.on_complete_callback(user_info) # Сначала вызываем callback
                     self.destroy() # Затем уничтожаем окно
                 else:
@@ -100,7 +110,11 @@ def main():
     def on_auth_complete(user_info):
         """Callback, который будет вызван окном входа перед его закрытием."""
         if user_info:
-            logging.info(f"Тест пройден. Успешный вход. Пользователь: {user_info['name']}, Роль: {user_info['role']}")
+            log_message = f"Тест пройден. Успешный вход. Пользователь: {user_info['name']}, Роль: {user_info['role']}"
+            # Добавляем в лог информацию о базе данных, если она есть
+            if user_info.get('db_name'):
+                log_message += f", База данных клиента: {user_info['db_name']}"
+            logging.info(log_message)
         else:
             logging.info("Тест завершен. Вход не выполнен (окно закрыто или ошибка).")
 
