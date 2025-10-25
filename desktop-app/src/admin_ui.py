@@ -698,53 +698,12 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             return
 
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("SELECT * FROM ap_workplaces WHERE warehouse_name = %s ORDER BY workplace_number", (self.warehouse_name,))
-                    workplaces_data = cur.fetchall()
-            
-            # --- НОВАЯ ЛОГИКА: Сначала генерируем изображения для предпросмотра ---
-            images_to_preview = []
-            all_items_data = [] # Сохраняем данные для последующей печати
-            for wp in workplaces_data:
-                # --- НОВАЯ ЛОГИКА: Формируем данные для подстановки в макет ---
-                item_data = {
-                    # Данные для текстовых полей
-                    "ap_workplaces.warehouse_name": wp['warehouse_name'],
-                    "ap_workplaces.workplace_number": wp['workplace_number'],
-                    
-                    # Данные для QR-кодов (ключи соответствуют значениям в Combobox)
-                    "QR: Конфигурация рабочего места": json.dumps({
-                        "type": "workplace_config",
-                        "warehouse": wp['warehouse_name'],
-                        "workplace": wp['workplace_number']
-                    }, ensure_ascii=False),
-                    
-                    # Заглушка для второго типа QR, если он вдруг окажется в макете
-                    "QR: Конфигурация сервера": json.dumps({"error": "This QR type is not for workplace labels"})
-                }
-
-                all_items_data.append(item_data)
-                
-                # Генерируем изображение для этого элемента
-            for item_data in all_items_data:
-                img = PrintingService.generate_label_image(selected_layout['json'], item_data)
-                images_to_preview.append(img)
-
-            if not images_to_preview:
-                messagebox.showwarning("Внимание", "Нет данных для генерации этикеток.", parent=self)
-                messagebox.showwarning("Внимание", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
-                return
-
-            # Функция, которая будет вызвана, если пользователь нажмет "Напечатать" в окне предпросмотра
-            def perform_actual_printing():
-                PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data)
-                PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data) # paper здесь для логов
-                messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
-                self.destroy()
-
-            # Открываем окно предпросмотра
-            PreviewLabelsDialog(self, images_to_preview, perform_actual_printing)
+            # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Прямая отправка на печать ---
+            # В PrintingService.print_labels_for_items теперь используется прямая печать, а не предпросмотр.
+            # Мы передаем ему все необходимые данные.
+            PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data)
+            messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
+            self.destroy() # Закрываем диалог после успешной отправки
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка печати этикеток рабочих мест: {e}\n{error_details}")
