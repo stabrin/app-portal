@@ -33,6 +33,7 @@ try:
     import win32print
     import win32api
     import win32con
+    import win32ui
     from pywintypes import error as pywin_error
 except ImportError:
     logging.warning("pywin32 not installed. Windows printing features will be limited. Install with: pip install pywin32")
@@ -40,6 +41,7 @@ except ImportError:
     win32api = None
     win32con = None
     pywin_error = None
+
 
 # Добавляем импорты для редактора
 try:
@@ -384,6 +386,123 @@ class PrintingService:
             raise RuntimeError(f"Ошибка предпросмотра: {e}")
 
     @staticmethod
+    def print_label_direct(printer_name: str, template_json: Dict[str, Any], data: Dict[str, Any]):
+        """
+        Генерирует и отправляет этикетку НАПРЯМУЮ на принтер, минуя PDF.
+        Использует GDI-команды pywin32 для отрисовки.
+        """
+        if win32print is None or win32ui is None:
+            raise ImportError("Библиотека pywin32 не установлена. Прямая печать невозможна.")
+
+        h_printer = None
+        dc = None
+        try:
+            # 1. Получаем хендл принтера и создаем Device Context (DC) - "холст" для рисования
+            h_printer = win32print.OpenPrinter(printer_name)
+            dc = win32ui.CreateDC()
+            dc.CreatePrinterDC(printer_name)
+
+            # 2. Получаем DPI принтера для перевода мм в точки (пиксели принтера)
+            dpi_x = dc.GetDeviceCaps(88) # LOGPIXELSX
+            dpi_y = dc.GetDeviceCaps(90) # LOGPIXELSY
+            dots_per_mm_x = dpi_x / 25.4
+            dots_per_mm_y = dpi_y / 25.4
+
+            # 3. Начинаем процесс печати
+            dc.StartDoc(f"Label from TildaKod: {template_json.get('name', 'N/A')}")
+            dc.StartPage()
+
+            # 4. Итерируемся по объектам в шаблоне и рисуем каждый
+            for obj in template_json.get("objects", []):
+                obj_data = data.get(obj["data_source"])
+                if obj_data is None:
+                    logging.warning(f"Источник данных '{obj['data_source']}' не найден. Пропуск объекта.")
+                    continue
+
+                # Конвертируем координаты и размеры из мм в точки
+                x = int(obj["x_mm"] * dots_per_mm_x)
+                y = int(obj["y_mm"] * dots_per_mm_y)
+                width = int(obj["width_mm"] * dots_per_mm_x)
+                height = int(obj["height_mm"] * dots_per_mm_y)
+
+                if obj["type"] == "text":
+                    text = str(obj_data)
+                    # TODO: Реализовать более сложную логику подбора шрифта и выравнивания
+                    # Пока используем простой TextOut
+                    font_height = -int(height * 0.8) # Примерный подбор высоты шрифта
+                    font = win32ui.CreateFont({
+                        'name': obj.get("font_name", "Arial"),
+                        'height': font_height,
+                        'weight': 400,
+                        'charset': 204 # RUSSIAN_CHARSET
+                    })
+                    dc.SelectObject(font)
+                    dc.TextOut(x, y, text)
+
+                elif obj["type"] == "barcode":
+                    # Для штрихкодов генерируем картинку в памяти и "впечатываем" ее на холст
+                    barcode_type = obj.get("barcode_type", "QR").upper()
+                    barcode_image = None
+
+                    if qrcode is None or Image is None:
+                        logging.warning("Библиотеки для генерации штрихкодов не установлены.")
+                        continue
+
+                    # Генерируем PIL Image
+                    if barcode_type == "QR":
+                        qr_gen = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=1)
+                        qr_gen.add_data(str(obj_data))
+                        qr_gen.make(fit=True)
+                        barcode_image = qr_gen.make_image(fill_color="black", back_color="white")
+                    # TODO: Добавить генерацию для других типов штрихкодов (SSCC, DataMatrix)
+                    # Потребуется библиотека python-barcode или аналоги
+                    else:
+                        logging.warning(f"Прямая печать для типа штрихкода '{barcode_type}' пока не реализована.")
+                        continue
+
+                    if barcode_image:
+                        # Конвертируем PIL Image в формат, понятный Windows GDI (DIB)
+                        dib = Image.core.fill("RGB", barcode_image.size, (255, 255, 255))
+                        dib.paste(barcode_image)
+                        
+                        # Создаем битмап для DC
+                        bmp = win32ui.CreateBitmap()
+                        bmp.CreateCompatibleBitmap(dc, width, height)
+                        
+                        # Создаем "вспомогательный" DC в памяти для масштабирования
+                        mem_dc = dc.CreateCompatibleDC()
+                        mem_dc.SelectObject(bmp)
+                        
+                        # Рисуем DIB в mem_dc с масштабированием
+                        # StretchBlt(dest_pos, dest_size, src_dc, src_pos, src_size, opcode)
+                        mem_dc.StretchBlt((0, 0), (width, height), dib, (0, 0), barcode_image.size, win32con.SRCCOPY)
+
+                        # Копируем итоговое изображение из памяти на "холст" принтера
+                        dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
+                        
+                        # Очищаем ресурсы
+                        mem_dc.DeleteDC()
+                        bmp.DeleteObject()
+
+            # 5. Завершаем печать
+            dc.EndPage()
+            dc.EndDoc()
+            logging.info(f"Этикетка успешно отправлена на принтер '{printer_name}' напрямую.")
+
+        except pywin_error as e:
+            logging.error(f"Ошибка Win32 API при прямой печати: {e}")
+            raise RuntimeError(f"Ошибка печати (Win32): {e.strerror}") from e
+        except Exception as e:
+            logging.error(f"Неизвестная ошибка при прямой печати: {e}")
+            raise RuntimeError(f"Неизвестная ошибка прямой печати: {e}")
+        finally:
+            # Гарантированно освобождаем ресурсы
+            if dc:
+                dc.DeleteDC()
+            if h_printer:
+                win32print.ClosePrinter(h_printer)
+
+    @staticmethod
     def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list):
         """
         Генерирует и печатает по одной этикетке для каждого элемента в списке.
@@ -404,20 +523,16 @@ class PrintingService:
 
         logging.info(f"Начало пакетной печати {len(items_data)} этикеток на принтер '{printer_name}'...")
 
-        # --- ИЗМЕНЕНИЕ: Вместо печати, генерируем и открываем первую этикетку для предпросмотра ---
-        first_item_data = items_data[0]
-        try:
-            logging.info(f"Генерация PDF для предпросмотра (элемент 1 из {len(items_data)})...")
-            pdf_buffer = PrintingService.generate_pdf_from_template(template_json, first_item_data)
-
-            logging.info("Открытие PDF для предпросмотра...")
-            PrintingService.preview_pdf(pdf_buffer)
-
-            messagebox.showinfo("Предпросмотр", f"Сгенерирована и открыта для предпросмотра первая этикетка из {len(items_data)}.\nОстальные этикетки не будут обработаны в режиме предпросмотра.")
-
-        except Exception as e:
-            logging.error(f"Ошибка при генерации предпросмотра для элемента: {first_item_data}. Ошибка: {e}")
-            raise RuntimeError(f"Ошибка при генерации предпросмотра. Процесс прерван.") from e
+        # --- НОВАЯ ЛОГИКА: Используем прямую печать для каждого элемента ---
+        for i, item_data in enumerate(items_data):
+            try:
+                logging.info(f"Прямая печать этикетки {i+1}/{len(items_data)}...")
+                # Вызываем новый метод прямой печати
+                PrintingService.print_label_direct(printer_name, template_json, item_data)
+            except Exception as e:
+                logging.error(f"Ошибка при прямой печати этикетки для элемента {i+1}: {item_data}. Ошибка: {e}")
+                # Прерываем выполнение и пробрасываем ошибку наверх, чтобы пользователь увидел сообщение
+                raise RuntimeError(f"Ошибка при печати этикетки №{i+1}. Процесс печати прерван.") from e
 
 
 # --- Класс визуального редактора макетов ---
