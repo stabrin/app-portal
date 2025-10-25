@@ -192,76 +192,265 @@ def open_workplace_setup_window(parent_widget, user_info):
 
     ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
 
-def display_workplace_qrs(tokens_info, parent):
-    """Отображает QR-коды для рабочих мест с возможностью печати."""
+    # --- Вкладка 2: Рабочие места ---
+    workplaces_frame = ttk.Frame(notebook, padding="10")
+    notebook.add(workplaces_frame, text="Рабочие места")
+
+    # --- НОВАЯ ЛОГИКА ДЛЯ ВКЛАДКИ "РАБОЧИЕ МЕСТА" ---
+
+    def get_client_db_connection():
+        """Вспомогательная функция для подключения к БД клиента."""
+        client_db_config = user_info.get("client_db_config")
+        if not client_db_config:
+            messagebox.showerror("Ошибка", "Не найдены данные для подключения к базе клиента.", parent=setup_window)
+            return None
+        
+        conn_params = {
+            'host': client_db_config.get('db_host'), 'port': client_db_config.get('db_port'),
+            'dbname': client_db_config.get('db_name'), 'user': client_db_config.get('db_user'),
+            'password': client_db_config.get('db_password')
+        }
+        # SSL пока не используется для этой операции, можно добавить при необходимости
+        return psycopg2.connect(**conn_params)
+
+    def load_warehouses():
+        """Загружает и отображает склады и количество рабочих мест в них."""
+        for i in warehouses_tree.get_children():
+            warehouses_tree.delete(i)
+        
+        try:
+            with get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT warehouse_name, COUNT(*) as workplace_count
+                        FROM ap_workplaces
+                        GROUP BY warehouse_name
+                        ORDER BY warehouse_name;
+                    """)
+                    for row in cur.fetchall():
+                        warehouses_tree.insert('', 'end', values=row)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить список складов: {e}", parent=setup_window)
+
+    def create_new_warehouse():
+        """Открывает диалог для создания нового склада."""
+        name = tk.simpledialog.askstring("Новый склад", "Введите название нового склада:", parent=setup_window)
+        if not name: return
+
+        count = tk.simpledialog.askinteger("Количество мест", "Введите количество рабочих мест:", parent=setup_window, minvalue=1)
+        if not count: return
+
+        try:
+            with get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    # Проверка на существование
+                    cur.execute("SELECT 1 FROM ap_workplaces WHERE warehouse_name = %s LIMIT 1", (name,))
+                    if cur.fetchone():
+                        messagebox.showerror("Ошибка", f"Склад с названием '{name}' уже существует.", parent=setup_window)
+                        return
+
+                    for i in range(1, count + 1):
+                        cur.execute(
+                            "INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)",
+                            (name, i)
+                        )
+                conn.commit()
+            messagebox.showinfo("Успех", f"Склад '{name}' с {count} рабочими местами успешно создан.", parent=setup_window)
+            load_warehouses()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать склад: {e}", parent=setup_window)
+
+    def change_workplace_count():
+        """Изменяет количество рабочих мест для выбранного склада."""
+        selected_item = warehouses_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Внимание", "Выберите склад из списка.", parent=setup_window)
+            return
+
+        warehouse_name, current_count = warehouses_tree.item(selected_item)['values']
+        
+        new_count = tk.simpledialog.askinteger(
+            "Изменить количество",
+            f"Введите новое общее количество мест для склада '{warehouse_name}':",
+            parent=setup_window,
+            initialvalue=current_count,
+            minvalue=0
+        )
+
+        if new_count is None or new_count == current_count:
+            return
+
+        try:
+            with get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    if new_count > current_count:
+                        # Добавляем новые места
+                        to_add = new_count - current_count
+                        cur.execute("SELECT COALESCE(MAX(workplace_number), 0) FROM ap_workplaces WHERE warehouse_name = %s", (warehouse_name,))
+                        max_num = cur.fetchone()[0]
+                        for i in range(1, to_add + 1):
+                            cur.execute(
+                                "INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)",
+                                (warehouse_name, max_num + i)
+                            )
+                        msg = f"Добавлено {to_add} новых рабочих мест."
+                    else: # new_count < current_count
+                        # Удаляем лишние места
+                        to_delete = current_count - new_count
+                        if not messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить {to_delete} рабочих мест со склада '{warehouse_name}'?\nБудут удалены места с наибольшими номерами.", parent=setup_window):
+                            return
+                        
+                        # Удаляем записи, начиная с самых больших номеров
+                        cur.execute("""
+                            DELETE FROM ap_workplaces
+                            WHERE id IN (
+                                SELECT id FROM ap_workplaces
+                                WHERE warehouse_name = %s
+                                ORDER BY workplace_number DESC
+                                LIMIT %s
+                            )
+                        """, (warehouse_name, to_delete))
+                        msg = f"Удалено {to_delete} рабочих мест."
+                conn.commit()
+            messagebox.showinfo("Успех", msg, parent=setup_window)
+            load_warehouses()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось изменить количество мест: {e}", parent=setup_window)
+
+    def open_workplace_printing_dialog():
+        """Открывает диалог для печати этикеток рабочих мест."""
+        selected_item = warehouses_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Внимание", "Выберите склад для печати этикеток.", parent=setup_window)
+            return
+        
+        warehouse_name = warehouses_tree.item(selected_item)['values'][0]
+        
+        # Запускаем новый класс диалога
+        PrintWorkplaceLabelsDialog(setup_window, user_info, warehouse_name)
+
+    # --- Виджеты для новой вкладки ---
+    
+    # Панель с кнопками управления
+    controls_frame = ttk.Frame(workplaces_frame)
+    controls_frame.pack(fill=tk.X, pady=5)
+    ttk.Button(controls_frame, text="Создать склад", command=create_new_warehouse).pack(side=tk.LEFT, padx=2)
+    ttk.Button(controls_frame, text="Изменить кол-во", command=change_workplace_count).pack(side=tk.LEFT, padx=2)
+    ttk.Button(controls_frame, text="Печать этикеток", command=open_workplace_printing_dialog).pack(side=tk.LEFT, padx=2)
+
+    # Таблица со складами
+    tree_frame = ttk.Frame(workplaces_frame)
+    tree_frame.pack(expand=True, fill="both", pady=5)
+
+    warehouses_tree = ttk.Treeview(tree_frame, columns=('name', 'count'), show='headings')
+    warehouses_tree.heading('name', text='Название склада')
+    warehouses_tree.heading('count', text='Кол-во рабочих мест')
+    warehouses_tree.column('name', width=300)
+    warehouses_tree.column('count', width=150, anchor=tk.CENTER)
+    warehouses_tree.pack(side=tk.LEFT, expand=True, fill="both")
+
+    scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=warehouses_tree.yview)
+    warehouses_tree.configure(yscrollcommand=scrollbar.set)
+    scrollbar.pack(side="right", fill="y")
+
+    # Загружаем данные при открытии
+    load_warehouses()
+
+def display_qr_sequence(title, chunks, parent):
+    """Вспомогательная функция для отображения серии QR-кодов."""
     try:
         import qrcode
         from PIL import Image, ImageTk
     except ImportError: return
 
-    # Используем ту же функцию, что и для серии QR, но с другой логикой
     qr_window = tk.Toplevel(parent)
-    qr_window.title("QR-коды для рабочих мест")
+    qr_window.title(title)
     qr_window.grab_set()
 
-    current_index = 0
+    current_chunk_index = 0
     
     info_label = ttk.Label(qr_window, text="", font=("Arial", 12))
     info_label.pack(pady=10)
     qr_label = ttk.Label(qr_window)
     qr_label.pack(padx=20, pady=10)
-    token_label = ttk.Label(qr_window, text="", font=("Courier", 10))
-    token_label.pack()
-
     nav_frame = ttk.Frame(qr_window)
     nav_frame.pack(pady=10)
     prev_button = ttk.Button(nav_frame, text="<< Назад")
-    prev_button.pack(side=tk.LEFT, padx=5)
-    
-    def print_label():
-        workplace_data = tokens_info[current_index]
-        # Используем старую функцию для генерации PDF, но она может быть заменена на новую
-        # с использованием макетов. Для демонстрации оставим так.
-        pdf_buffer = PrintingService.generate_workplace_label_pdf(workplace_data['workplace'], workplace_data['token']) 
-        PrintingService.print_pdf(None, pdf_buffer) # None - принтер по умолчанию
-
-    print_button = ttk.Button(nav_frame, text="Печать", command=print_label)
-    print_button.pack(side=tk.LEFT, padx=5)
-
+    prev_button.pack(side=tk.LEFT, padx=10)
     next_button = ttk.Button(nav_frame, text="Далее >>")
     next_button.pack(side=tk.LEFT, padx=10)
 
-    def show_workplace(index):
-        nonlocal current_index
-        current_index = index
-        workplace_data = tokens_info[index]
-        token = workplace_data['token']
-        
-        # Обновленный формат данных для QR-кода рабочего места
-        qr_payload_data = {
-            "type": "workplace_setup", # Тип для распознавания сканером
-            "token": token,
-            "warehouse": workplace_data['workplace'].split(' - ')[0],
-            "workplace_no": int(workplace_data['workplace'].split(' - Место ')[1])
-        }
-        qr_payload = json.dumps(qr_payload_data)
-        img = qrcode.make(qr_payload).resize((300, 300))
+    def show_chunk(index):
+        nonlocal current_chunk_index
+        current_chunk_index = index
+        chunk_data = f"{index+1}/{len(chunks)}:{chunks[index]}"
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
+        qr.add_data(chunk_data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white").resize((350, 350))
         photo = ImageTk.PhotoImage(img)
         qr_label.config(image=photo)
         qr_label.image = photo
-        info_label.config(text=f"Рабочее место: {workplace_data['workplace']} ({index+1}/{len(tokens_info)})")
-        token_label.config(text=f"Токен: {token}")
+        info_label.config(text=f"Шаг {index + 1} из {len(chunks)}. Отсканируйте код.")
         prev_button.config(state="normal" if index > 0 else "disabled")
-        next_button.config(state="normal" if index < len(tokens_info) - 1 else "disabled")
+        next_button.config(state="normal" if index < len(chunks) - 1 else "disabled")
 
     def show_next():
-        if current_index < len(tokens_info) - 1: show_workplace(current_index + 1)
+        if current_chunk_index < len(chunks) - 1: show_chunk(current_chunk_index + 1)
     def show_prev():
-        if current_index > 0: show_workplace(current_index - 1)
+        if current_chunk_index > 0: show_chunk(current_chunk_index - 1)
 
     prev_button.config(command=show_prev)
     next_button.config(command=show_next)
-    show_workplace(0)
+    show_chunk(0)
+
+def display_qr_sequence(title, chunks, parent):
+    """Вспомогательная функция для отображения серии QR-кодов."""
+    try:
+        import qrcode
+        from PIL import Image, ImageTk
+    except ImportError: return
+
+    qr_window = tk.Toplevel(parent)
+    qr_window.title(title)
+    qr_window.grab_set()
+
+    current_chunk_index = 0
+    
+    info_label = ttk.Label(qr_window, text="", font=("Arial", 12))
+    info_label.pack(pady=10)
+    qr_label = ttk.Label(qr_window)
+    qr_label.pack(padx=20, pady=10)
+    nav_frame = ttk.Frame(qr_window)
+    nav_frame.pack(pady=10)
+    prev_button = ttk.Button(nav_frame, text="<< Назад")
+    prev_button.pack(side=tk.LEFT, padx=10)
+    next_button = ttk.Button(nav_frame, text="Далее >>")
+    next_button.pack(side=tk.LEFT, padx=10)
+
+    def show_chunk(index):
+        nonlocal current_chunk_index
+        current_chunk_index = index
+        chunk_data = f"{index+1}/{len(chunks)}:{chunks[index]}"
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
+        qr.add_data(chunk_data)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white").resize((350, 350))
+        photo = ImageTk.PhotoImage(img)
+        qr_label.config(image=photo)
+        qr_label.image = photo
+        info_label.config(text=f"Шаг {index + 1} из {len(chunks)}. Отсканируйте код.")
+        prev_button.config(state="normal" if index > 0 else "disabled")
+        next_button.config(state="normal" if index < len(chunks) - 1 else "disabled")
+
+    def show_next():
+        if current_chunk_index < len(chunks) - 1: show_chunk(current_chunk_index + 1)
+    def show_prev():
+        if current_chunk_index > 0: show_chunk(current_chunk_index - 1)
+
+    prev_button.config(command=show_prev)
+    next_button.config(command=show_next)
+    show_chunk(0)
 
 class PrintWorkplaceLabelsDialog(tk.Toplevel):
     """Диалог для выбора параметров печати этикеток рабочих мест."""
