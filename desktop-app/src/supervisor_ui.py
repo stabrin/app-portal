@@ -19,14 +19,20 @@ def run_db_setup():
     Запускает скрипт setup_database.py в новом окне терминала.
     """
     try:
+        # Определяем путь к корневой папке приложения
         desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        # Формируем путь к скрипту
         script_path = os.path.join(desktop_app_root, 'scripts', 'setup_database.py')
+        # --- ИСПРАВЛЕНИЕ: Явно указываем путь к Python внутри виртуального окружения ---
+        # Это гарантирует, что скрипт будет запущен с правильными библиотеками,
+        # независимо от того, как было запущено основное GUI-приложение.
+        python_executable = os.path.join(desktop_app_root, '.venv', 'Scripts', 'python.exe')
 
-        if not os.path.exists(script_path):
-            tk.messagebox.showerror("Ошибка", f"Скрипт не найден:\n{script_path}")
+        if not os.path.exists(python_executable) or not os.path.exists(script_path):
+            tk.messagebox.showerror("Ошибка", f"Не найден исполняемый файл Python или скрипт:\n{python_executable}\n{script_path}")
             return
 
-        command = [sys.executable, script_path]
+        command = [python_executable, script_path]
 
         if sys.platform == "win32":
             subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
