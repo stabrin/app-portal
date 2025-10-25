@@ -5,6 +5,12 @@ from tkinter import ttk, messagebox
 import logging
 import json
 
+# --- ИСПРАВЛЕНИЕ: Добавляем глобальный импорт Pillow ---
+try:
+    from PIL import Image, ImageTk
+except ImportError:
+    Image = None # Помечаем как недоступный, если Pillow не установлен
+
 # Импорты для работы с БД и QR-кодами
 from db_connector import get_main_db_connection
 import bcrypt
@@ -505,7 +511,6 @@ class PreviewLabelsDialog(tk.Toplevel):
         ratio = min(max_w / img_w, max_h / img_h)
         new_size = (int(img_w * ratio), int(img_h * ratio))
         
-        from PIL import ImageTk
         resized_image = image.resize(new_size, Image.Resampling.LANCZOS)
         photo = ImageTk.PhotoImage(resized_image)
 
