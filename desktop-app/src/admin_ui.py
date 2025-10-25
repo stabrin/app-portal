@@ -227,8 +227,16 @@ def open_workplace_setup_window(parent_widget, user_info):
         generated_tokens = []
         try:
             # Подключаемся к базе клиента для сохранения токенов
-            conn_params = {k: v for k, v in client_db_config.items() if k not in ['db_ssl_cert']}
-            conn_params['dbname'] = conn_params.pop('db_name')
+            # --- ИСПРАВЛЕНИЕ: Используем правильные имена ключей для psycopg2 ---
+            conn_params = {
+                'host': client_db_config.get('db_host'),
+                'port': client_db_config.get('db_port'),
+                'dbname': client_db_config.get('db_name'),
+                'user': client_db_config.get('db_user'),
+                'password': client_db_config.get('db_password')
+            }
+            # SSL-сертификат здесь не используется, так как предполагается,
+            # что рабочие места создаются для локальной сети.
             
             with psycopg2.connect(**conn_params) as conn:
                 with conn.cursor() as cur:
