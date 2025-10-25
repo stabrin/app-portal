@@ -220,21 +220,21 @@ class PrintingService:
                         mem_dc = dc.CreateCompatibleDC()
                         mem_dc.SelectObject(bmp)
 
-                        # 3. Конвертируем изображение в режим RGB, если оно в другом формате.
-                        if barcode_image.mode != "RGB":
-                            barcode_image = barcode_image.convert("RGB")
+                        # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ: Используем SetBitmapBits ---
+                        # 3. Масштабируем изображение до нужных размеров печати.
+                        scaled_image = barcode_image.resize((width, height), Image.Resampling.LANCZOS)
                         
-                        # 4. Преобразуем данные изображения в формат DIB (Device Independent Bitmap).
-                        # 'raw' - это формат, 'RGB' - порядок цветов.
-                        dib_data = barcode_image.tobytes('raw', 'RGB')
+                        # 4. Конвертируем изображение в формат, совместимый с SetBitmapBits.
+                        # 'BGRX' - это 32-битный формат, который хорошо работает с pywin32.
+                        if scaled_image.mode != 'RGB':
+                            scaled_image = scaled_image.convert('RGB')
+                        image_data = scaled_image.tobytes('raw', 'BGRX')
                         
-                        # 5. Рисуем DIB в mem_dc с масштабированием (StretchBlt).
-                        # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ: Используем StretchDIBits ---
-                        # Эта функция специально предназначена для отрисовки DIB (Device-Independent Bitmap) из данных в памяти.
-                        # Она принимает правильное количество аргументов.
-                        mem_dc.StretchDIBits((0, 0), (width, height), (0, 0), (barcode_image.width, barcode_image.height), dib_data, barcode_image.info.get('dib'), win32con.SRCCOPY)
+                        # 5. Загружаем данные изображения в битмап.
+                        bmp.SetBitmapBits(True, image_data)
                         
-                        # 6. Копируем итоговое масштабированное изображение из памяти на "холст" принтера.
+                        # 6. Копируем готовый битмап из памяти на "холст" принтера.
+                        # Теперь не нужно масштабирование, так как изображение уже нужного размера.
                         dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
                         
                         # Очищаем ресурсы
