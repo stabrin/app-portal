@@ -121,23 +121,27 @@ class PrintingService:
                         continue
 
                     if barcode_image:
-                        # Конвертируем PIL Image в формат, понятный Windows GDI (DIB)
-                        dib = Image.core.fill("RGB", barcode_image.size, (255, 255, 255))
-                        dib.paste(barcode_image)
+                        # --- ИСПРАВЛЕНИЕ: Используем более надежный способ конвертации PIL Image в DIB ---
+                        # 1. Конвертируем изображение в режим RGB, если оно в другом формате.
+                        if barcode_image.mode != "RGB":
+                            barcode_image = barcode_image.convert("RGB")
                         
-                        # Создаем битмап для DC
+                        # 2. Создаем битмап (DIB) из данных изображения.
+                        dib = win32ui.CreateBitmap()
+                        dib.CreateFromHandle(barcode_image.tobitmap())
+
+                        # 3. Создаем битмап-контейнер нужного размера для холста принтера.
                         bmp = win32ui.CreateBitmap()
                         bmp.CreateCompatibleBitmap(dc, width, height)
                         
-                        # Создаем "вспомогательный" DC в памяти для масштабирования
+                        # 4. Создаем "вспомогательный" DC в памяти для масштабирования.
                         mem_dc = dc.CreateCompatibleDC()
                         mem_dc.SelectObject(bmp)
                         
-                        # Рисуем DIB в mem_dc с масштабированием
-                        # StretchBlt(dest_pos, dest_size, src_dc, src_pos, src_size, opcode)
-                        mem_dc.StretchBlt((0, 0), (width, height), dib, (0, 0), barcode_image.size, win32con.SRCCOPY)
+                        # 5. Рисуем DIB в mem_dc с масштабированием.
+                        dib.Paint(mem_dc, (0, 0, width, height), (0, 0, barcode_image.width, barcode_image.height), win32con.SRCCOPY)
 
-                        # Копируем итоговое изображение из памяти на "холст" принтера
+                        # 6. Копируем итоговое изображение из памяти на "холст" принтера.
                         dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
                         
                         # Очищаем ресурсы
