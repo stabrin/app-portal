@@ -800,20 +800,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             logging.info(f"Свойства объекта {self.selected_object_id} обновлены.")
         except ValueError:
             messagebox.showerror("Ошибка", "Значения геометрических свойств должны быть числами.", parent=self)
-        }
-
-        for key, text in prop_fields.items():
-            frame = ttk.Frame(self.properties_frame)
-            frame.pack(fill=tk.X, padx=5, pady=2)
-            ttk.Label(frame, text=text, width=12).pack(side=tk.LEFT)
-            entry = ttk.Entry(frame)
-            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            self.prop_entries[key] = entry
-
-        self.apply_props_button = ttk.Button(self.properties_frame, text="Применить", command=self._apply_properties)
-        self.apply_props_button.pack(pady=5)
-
-        # --- Правая панель редактора (холст) ---
         canvas_frame = ttk.Frame(paned_window)
         paned_window.add(canvas_frame, weight=4)
 
