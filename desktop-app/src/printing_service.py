@@ -663,7 +663,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         if obj_type == "text":
             new_object = {
                 "type": "text",
-                "data_source": "ap_workplaces.workplace_number", # Более осмысленный пример по умолчанию
+                "data_source": "ap_workplaces.warehouse_name", # ИСПРАВЛЕНИЕ: Используем значение из списка available_text_sources
                 "x_mm": 10,
                 "y_mm": 10,
                 "width_mm": 40,
@@ -674,7 +674,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             new_object = {
                 "type": "barcode",
                 "barcode_type": obj_type, # obj_type здесь это 'QR', 'SSCC' и т.д.
-                "data_source": "QR: Конфигурация рабочего места", # ИСПРАВЛЕНИЕ: Используем новый, правильный источник данных по умолчанию
+                "data_source": "QR: Конфигурация рабочего места", # Используем значение из списка available_qr_sources
                 "x_mm": 10,
                 "y_mm": 10,
                 "width_mm": 30,
