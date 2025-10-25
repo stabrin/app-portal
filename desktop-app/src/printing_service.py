@@ -430,12 +430,15 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         }
 
         # Определяем возможные источники данных
-        self.available_data_sources = [
+        self.available_text_sources = [
             "ap_workplaces.warehouse_name",
             "ap_workplaces.workplace_number",
-            "ap_workplaces.access_token",
             "orders.client_name", # Пример для других макетов
             "packages.sscc_code"  # Пример для других макетов
+        ]
+        self.available_qr_sources = [
+            "QR: Конфигурация рабочего места",
+            "QR: Конфигурация сервера"
         ]
 
         # Создаем текстовые поля
@@ -451,7 +454,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         ds_frame = ttk.Frame(self.properties_frame)
         ds_frame.pack(fill=tk.X, padx=5, pady=2)
         ttk.Label(ds_frame, text="Источник данных:", width=15).pack(side=tk.LEFT)
-        self.data_source_combo = ttk.Combobox(ds_frame, values=self.available_data_sources, state="readonly")
+        self.data_source_combo = ttk.Combobox(ds_frame, state="readonly")
         self.data_source_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         # Добавляем его в общий словарь для удобства
         self.prop_entries["data_source"] = self.data_source_combo
@@ -740,6 +743,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         if object_id is not None:
             self._toggle_properties_panel(True)
             self._update_properties_panel()
+            
+            # --- НОВАЯ ЛОГИКА: Обновляем список источников данных в зависимости от типа объекта ---
+            obj_data = self.template['objects'][object_id]
+            if obj_data['type'] == 'text':
+                self.data_source_combo['values'] = self.available_text_sources
+            elif obj_data['type'] == 'barcode':
+                self.data_source_combo['values'] = self.available_qr_sources
+
         else:
             self._toggle_properties_panel(False)
 
@@ -790,11 +801,16 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         try:
             for key, widget in self.prop_entries.items():
                 # --- ИЗМЕНЕНИЕ: Получаем значение из Combobox или Entry ---
-                if isinstance(widget, ttk.Combobox):
-                    self.template['objects'][self.selected_object_id][key] = widget.get()
-                else: # Это ttk.Entry
-                    value = float(widget.get())
-                    self.template['objects'][self.selected_object_id][key] = value
+                value_str = widget.get()
+                if key == 'data_source':
+                    self.template['objects'][self.selected_object_id][key] = value_str
+                else:
+                    # Для всех остальных полей (x, y, width, height) преобразуем в число
+                    try:
+                        self.template['objects'][self.selected_object_id][key] = float(value_str)
+                    except ValueError:
+                        messagebox.showerror("Ошибка", f"Значение для поля '{key}' должно быть числом.", parent=self)
+                        return # Прерываем применение свойств
             
             self._draw_canvas_background() # Перерисовываем холст с новыми данными
             logging.info(f"Свойства объекта {self.selected_object_id} обновлены.")

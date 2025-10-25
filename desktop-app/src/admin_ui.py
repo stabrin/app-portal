@@ -660,18 +660,23 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             images_to_preview = []
             all_items_data = [] # Сохраняем данные для последующей печати
             for wp in workplaces_data:
-                # --- ИЗМЕНЕНИЕ: Формируем данные для QR-кода, как вы просили ---
-                qr_payload = {
-                    "type": "workplace_config",
-                    "warehouse": wp['warehouse_name'],
-                    "workplace": wp['workplace_number']
-                }
+                # --- НОВАЯ ЛОГИКА: Формируем данные для подстановки в макет ---
                 item_data = {
+                    # Данные для текстовых полей
                     "ap_workplaces.warehouse_name": wp['warehouse_name'],
                     "ap_workplaces.workplace_number": wp['workplace_number'],
-                    # Теперь источник данных для QR-кода будет содержать JSON
-                    "ap_workplaces.access_token": json.dumps(qr_payload, ensure_ascii=False)
+                    
+                    # Данные для QR-кодов (ключи соответствуют значениям в Combobox)
+                    "QR: Конфигурация рабочего места": json.dumps({
+                        "type": "workplace_config",
+                        "warehouse": wp['warehouse_name'],
+                        "workplace": wp['workplace_number']
+                    }, ensure_ascii=False),
+                    
+                    # Заглушка для второго типа QR, если он вдруг окажется в макете
+                    "QR: Конфигурация сервера": json.dumps({"error": "This QR type is not for workplace labels"})
                 }
+
                 all_items_data.append(item_data)
                 
                 # Генерируем изображение для этого элемента
