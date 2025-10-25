@@ -440,6 +440,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             "QR: Конфигурация рабочего места",
             "QR: Конфигурация сервера"
         ]
+        self.available_sscc_sources = [
+            "packages.sscc_code"
+        ]
+        self.available_datamatrix_sources = [
+            "items.datamatrix"
+        ]
 
         # Создаем текстовые поля
         for key, text in prop_fields.items():
@@ -450,14 +456,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
             self.prop_entries[key] = entry
 
-        # Создаем выпадающий список для data_source отдельно
-        ds_frame = ttk.Frame(self.properties_frame)
-        ds_frame.pack(fill=tk.X, padx=5, pady=2)
-        ttk.Label(ds_frame, text="Источник данных:", width=15).pack(side=tk.LEFT)
-        self.data_source_combo = ttk.Combobox(ds_frame, state="readonly")
-        self.data_source_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        # Добавляем его в общий словарь для удобства
-        self.prop_entries["data_source"] = self.data_source_combo
+        # --- ИЗМЕНЕНИЕ: Создаем фрейм-контейнер для динамического виджета data_source ---
+        self.data_source_container_frame = ttk.Frame(self.properties_frame)
+        self.data_source_container_frame.pack(fill=tk.X, padx=5, pady=2)
+        ttk.Label(self.data_source_container_frame, text="Источник данных:", width=15).pack(side=tk.LEFT)
+        self.prop_entries["data_source"] = None # Инициализируем как None, будет заполнено динамически
 
         self.apply_props_button = ttk.Button(self.properties_frame, text="Применить", command=self._apply_properties)
         self.apply_props_button.pack(pady=5)
@@ -801,11 +804,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         try:
             for key, widget in self.prop_entries.items():
                 # --- ИЗМЕНЕНИЕ: Получаем значение из Combobox или Entry ---
-                value_str = widget.get()
                 if key == 'data_source':
-                    self.template['objects'][self.selected_object_id][key] = value_str
+                    # Для data_source получаем значение из динамически созданного виджета
+                    self.template['objects'][self.selected_object_id][key] = widget.get()
                 else:
-                    # Для всех остальных полей (x, y, width, height) преобразуем в число
+                    value_str = widget.get()
                     try:
                         self.template['objects'][self.selected_object_id][key] = float(value_str)
                     except ValueError:
@@ -1002,7 +1005,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         if obj_type == "text":
             new_object = {
                 "type": "text",
-                "data_source": "orders.client_name", # Пример
+                "data_source": "orders.client_name", # Значение по умолчанию для текста
                 "x_mm": 10,
                 "y_mm": 10,
                 "width_mm": 40,
@@ -1013,12 +1016,18 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             new_object = {
                 "type": "barcode",
                 "barcode_type": obj_type, # obj_type здесь это 'QR', 'SSCC' и т.д.
-                "data_source": "packages.sscc_code", # Пример
+                "data_source": "", # Будет установлено ниже в зависимости от barcode_type
                 "x_mm": 10,
                 "y_mm": 10,
                 "width_mm": 30,
                 "height_mm": 30
             }
+            if obj_type == "QR":
+                new_object["data_source"] = "QR: Конфигурация рабочего места"
+            elif obj_type == "SSCC":
+                new_object["data_source"] = "packages.sscc_code"
+            elif obj_type == "DataMatrix":
+                new_object["data_source"] = "items.datamatrix"
         
         # Добавляем объект в список и получаем его индекс (ID)
         object_id = len(self.template["objects"])
@@ -1085,21 +1094,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         else:
             self._toggle_properties_panel(False)
 
-    def _toggle_properties_panel(self, active: bool):
-        """Включает или выключает панель свойств."""
-        state = "normal" if active else "disabled"
-        for widget in self.properties_frame.winfo_children():
-            # ttk.Entry и ttk.Button не имеют метода configure для state в некоторых случаях
-            try:
-                widget.config(state=state)
-            except tk.TclError:
-                if isinstance(widget, (ttk.Entry, ttk.Button)):
-                    widget.state([state] if state == "normal" else [state])
-                elif isinstance(widget, ttk.Frame): # Рекурсивно для вложенных фреймов
-                    for sub_widget in widget.winfo_children():
-                         try: sub_widget.config(state=state)
-                         except tk.TclError: pass
-
     def _toggle_tools_panel(self, active: bool):
         """Включает или выключает панель инструментов."""
         state = "normal" if active else "disabled"
@@ -1110,18 +1104,72 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                  if isinstance(widget, ttk.Button):
                     widget.state([state] if state == "normal" else [state])
 
-
-
-
     def _update_properties_panel(self):
         """Заполняет панель свойств данными выделенного объекта."""
         if self.selected_object_id is None:
             return
 
         obj_data = self.template['objects'][self.selected_object_id]
-        for key, entry in self.prop_entries.items():
-            entry.delete(0, tk.END)
-            entry.insert(0, str(obj_data.get(key, '')))
+        
+        # Обновляем статические свойства (x, y, width, height)
+        for key in ["x_mm", "y_mm", "width_mm", "height_mm"]:
+            entry_widget = self.prop_entries[key]
+            entry_widget.delete(0, tk.END)
+            entry_widget.insert(0, str(obj_data.get(key, '')))
+
+        # --- ИЗМЕНЕНИЕ: Динамическое создание/обновление виджета data_source ---
+        # Сначала удаляем предыдущий виджет data_source из контейнера
+        for widget in self.data_source_container_frame.winfo_children():
+            if widget != self.data_source_container_frame.winfo_children()[0]: # Сохраняем Label
+                widget.destroy()
+
+        obj_type = obj_data['type']
+        current_data_source = obj_data.get('data_source', '')
+        data_source_widget = None
+
+        if obj_type == 'text':
+            # Для текста используем обычное поле ввода для ручного ввода
+            data_source_widget = ttk.Entry(self.data_source_container_frame)
+            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            data_source_widget.insert(0, current_data_source)
+        elif obj_type == 'barcode':
+            barcode_type = obj_data.get('barcode_type', '').upper()
+            values = []
+            if barcode_type == 'QR':
+                values = self.available_qr_sources
+            elif barcode_type == 'SSCC':
+                values = self.available_sscc_sources
+            elif barcode_type == 'DATAMATRIX':
+                values = self.available_datamatrix_sources
+            
+            data_source_widget = ttk.Combobox(self.data_source_container_frame, values=values, state="readonly")
+            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            data_source_widget.set(current_data_source)
+        else:
+            # Заглушка для неизвестных типов объектов
+            data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
+            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            data_source_widget.insert(0, "Неизвестный тип объекта")
+
+        self.prop_entries["data_source"] = data_source_widget # Обновляем ссылку на виджет
+
+    def _toggle_properties_panel(self, active: bool):
+        """Включает или выключает панель свойств."""
+        state = "normal" if active else "disabled"
+        # Проходим по всем дочерним элементам properties_frame
+        for child_widget in self.properties_frame.winfo_children():
+            # Если это фрейм (например, data_source_container_frame или фреймы для x,y,w,h)
+            if isinstance(child_widget, ttk.Frame):
+                for grand_child_widget in child_widget.winfo_children():
+                    try: grand_child_widget.config(state=state)
+                    except tk.TclError: # Combobox/Entry могут требовать .state()
+                        if isinstance(grand_child_widget, (ttk.Entry, ttk.Combobox)):
+                            grand_child_widget.state([state] if state == "normal" else [state])
+            else: # Для виджетов напрямую в properties_frame (например, apply_props_button)
+                try: child_widget.config(state=state)
+                except tk.TclError:
+                    if isinstance(child_widget, ttk.Button):
+                        child_widget.state([state] if state == "normal" else [state])
 
     def _apply_properties(self):
         """Применяет изменения из панели свойств к объекту."""
