@@ -279,6 +279,7 @@ class PrintingService:
         if win32api is None:
             logging.error("Невозможно выполнить печать: отсутствуют библиотеки pywin32.")
             raise RuntimeError("pywin32 libraries are not installed.")
+        import time
 
         temp_pdf_path = None
         try:
@@ -344,6 +345,10 @@ class PrintingService:
             raise RuntimeError(f"Неизвестная ошибка печати: {e}")
         finally:
             if temp_pdf_path and os.path.exists(temp_pdf_path):
+                # --- ИСПРАВЛЕНИЕ ---
+                # Добавляем небольшую задержку перед удалением файла.
+                # ShellExecute("printto") работает асинхронно, и программе для чтения PDF нужно время, чтобы открыть файл.
+                time.sleep(5) # 5 секунд должно быть достаточно
                 try:
                     os.remove(temp_pdf_path)
                     logging.info(f"Временный PDF файл удален: {temp_pdf_path}")
