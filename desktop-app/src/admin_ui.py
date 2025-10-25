@@ -169,6 +169,9 @@ def open_workplace_setup_window(parent_widget, user_info):
     server_address_entry.pack(fill="x")
 
     def generate_server_config_qr():
+        """
+        Новая логика: вместо отображения QR на экране, открывает диалог печати.
+        """
         address = server_address_entry.get()
         if not address:
             messagebox.showwarning("Внимание", "Введите адрес сервера.", parent=setup_window)
@@ -180,6 +183,7 @@ def open_workplace_setup_window(parent_widget, user_info):
             import base64
         except ImportError:
             messagebox.showerror("Ошибка", "Необходимые библиотеки не установлены.\nУстановите их: pip install qrcode pillow", parent=setup_window)
+            messagebox.showerror("Ошибка", "Необходимые библиотеки для сжатия не установлены.", parent=setup_window)
             return
 
         # --- НОВАЯ ЛОГИКА: Получаем SSL-сертификат из БД ---
@@ -200,11 +204,16 @@ def open_workplace_setup_window(parent_widget, user_info):
         json_bytes = json.dumps(config_data).encode('utf-8')
         compressed_bytes = zlib.compress(json_bytes, level=9) # Максимальное сжатие
         full_base64_data = base64.b64encode(compressed_bytes).decode('ascii')
+        # Формируем данные для подстановки в макет.
+        # Это имитирует структуру данных, как при печати этикеток рабочих мест.
+        item_data_for_printing = {
+            "QR: Конфигурация сервера": json.dumps(config_data, ensure_ascii=False)
+        }
 
         chunk_size = 2500
         chunks = [full_base64_data[i:i + chunk_size] for i in range(0, len(full_base64_data), chunk_size)]
-
-        display_qr_sequence(f"Настройка сервера: {address}", chunks, setup_window)
+        # Открываем новый диалог печати, передавая ему данные для единственной этикетки.
+        PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {address}", [item_data_for_printing])
 
     ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
 
@@ -542,12 +551,16 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
     # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
     def __init__(self, parent, user_info, warehouse_name):
+    def __init__(self, parent, user_info, title_name, items_to_print=None):
         super().__init__(parent)
         self.title(f"Печать этикеток для '{warehouse_name}'")
+        self.title(f"Печать: '{title_name}'")
         self.geometry("500x400")
         self.transient(parent)
         self.grab_set()
 
+        self.items_to_print = items_to_print # Если данные переданы, используем их
+        self.warehouse_name = title_name if items_to_print is None else None # Для обратной совместимости
         self.user_info = user_info
         self.warehouse_name = warehouse_name
         self.layouts = [] # Список загруженных макетов
@@ -655,6 +668,38 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             messagebox.showerror("Ошибка", "Выбранный макет не найден.", parent=self)
             return
 
+        all_items_data = []
+        # Если данные для печати не были переданы напрямую (старый сценарий для рабочих мест)
+        if self.items_to_print is None and self.warehouse_name:
+            try:
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("SELECT * FROM ap_workplaces WHERE warehouse_name = %s ORDER BY workplace_number", (self.warehouse_name,))
+                        workplaces_data = cur.fetchall()
+                
+                for wp in workplaces_data:
+                    item_data = {
+                        "ap_workplaces.warehouse_name": wp['warehouse_name'],
+                        "ap_workplaces.workplace_number": wp['workplace_number'],
+                        "QR: Конфигурация рабочего места": json.dumps({
+                            "type": "workplace_config",
+                            "warehouse": wp['warehouse_name'],
+                            "workplace": wp['workplace_number']
+                        }, ensure_ascii=False),
+                        "QR: Конфигурация сервера": json.dumps({"error": "This QR type is not for workplace labels"})
+                    }
+                    all_items_data.append(item_data)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить данные о рабочих местах: {e}", parent=self)
+                return
+        # Если данные были переданы при создании окна (новый сценарий для QR-кода сервера)
+        elif self.items_to_print is not None:
+            all_items_data = self.items_to_print
+        
+        if not all_items_data:
+            messagebox.showwarning("Внимание", "Нет данных для генерации этикеток.", parent=self)
+            return
+
         try:
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -685,16 +730,19 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
                 all_items_data.append(item_data)
                 
                 # Генерируем изображение для этого элемента
+            for item_data in all_items_data:
                 img = PrintingService.generate_label_image(selected_layout['json'], item_data)
                 images_to_preview.append(img)
 
             if not images_to_preview:
                 messagebox.showwarning("Внимание", "Нет данных для генерации этикеток.", parent=self)
+                messagebox.showwarning("Внимание", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
                 return
 
             # Функция, которая будет вызвана, если пользователь нажмет "Напечатать" в окне предпросмотра
             def perform_actual_printing():
                 PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data)
+                PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data) # paper здесь для логов
                 messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
                 self.destroy()
 
