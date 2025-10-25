@@ -273,20 +273,17 @@ class PrintingService:
 
         logging.info(f"Начало пакетной печати {len(items_data)} этикеток на принтер '{printer_name}'...")
 
-        # --- НОВАЯ ЛОГИКА: Вместо печати, генерируем и открываем первую этикетку для предпросмотра ---
-        first_item_data = items_data[0]
-        try:
-            logging.info(f"Генерация изображения для предпросмотра (элемент 1 из {len(items_data)})...")
-            label_image = PrintingService.generate_label_image(template_json, first_item_data)
-
-            logging.info("Открытие окна предпросмотра...")
-            PrintingService.preview_image(label_image)
-
-            messagebox.showinfo("Предпросмотр", f"Сгенерирована и открыта для предпросмотра первая этикетка из {len(items_data)}.\nОстальные этикетки не будут обработаны в режиме предпросмотра.")
-
-        except Exception as e:
-            logging.error(f"Ошибка при генерации предпросмотра для элемента: {first_item_data}. Ошибка: {e}")
-            raise RuntimeError(f"Ошибка при генерации предпросмотра. Процесс прерван.") from e
+        # --- ИСПРАВЛЕНИЕ: Возвращаем логику прямой печати для каждого элемента ---
+        # Этот метод теперь отвечает только за печать, а не за предпросмотр.
+        for i, item_data in enumerate(items_data):
+            try:
+                logging.info(f"Отправка на печать этикетки {i+1}/{len(items_data)}...")
+                # Используем метод прямой печати для каждого элемента
+                PrintingService.print_label_direct(printer_name, template_json, item_data)
+            except Exception as e:
+                logging.error(f"Ошибка при печати элемента {i+1}: {item_data}. Ошибка: {e}")
+                # В зависимости от требований, можно либо прервать, либо продолжить печать
+                raise RuntimeError(f"Ошибка при печати этикетки {i+1}. Процесс прерван.") from e
 
 # --- Класс визуального редактора макетов ---
 

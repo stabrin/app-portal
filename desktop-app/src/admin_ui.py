@@ -698,12 +698,33 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             return
 
         try:
-            # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Прямая отправка на печать ---
-            # В PrintingService.print_labels_for_items теперь используется прямая печать, а не предпросмотр.
-            # Мы передаем ему все необходимые данные.
-            PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data)
-            messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
-            self.destroy() # Закрываем диалог после успешной отправки
+            # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Сначала генерируем изображения для предпросмотра ---
+            images_to_preview = []
+            for item_data in all_items_data:
+                try:
+                    img = PrintingService.generate_label_image(selected_layout['json'], item_data)
+                    images_to_preview.append(img)
+                except Exception as e:
+                    logging.error(f"Ошибка генерации изображения для предпросмотра: {e}")
+                    # Можно продолжить или прервать
+
+            if not images_to_preview:
+                messagebox.showwarning("Внимание", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
+                return
+
+            # Функция, которая будет вызвана, если пользователь нажмет "Напечатать" в окне предпросмотра
+            def perform_actual_printing():
+                try:
+                    PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data)
+                    messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
+                    self.destroy() # Закрываем диалог печати после успешной отправки
+                except Exception as e_print:
+                    error_details = traceback.format_exc()
+                    logging.error(f"Ошибка при фактической печати: {e_print}\n{error_details}")
+                    messagebox.showerror("Ошибка печати", f"Произошла ошибка: {e_print}\nПодробности в app.log.", parent=self)
+
+            # Открываем окно предпросмотра
+            PreviewLabelsDialog(self, images_to_preview, perform_actual_printing)
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка печати этикеток рабочих мест: {e}\n{error_details}")
