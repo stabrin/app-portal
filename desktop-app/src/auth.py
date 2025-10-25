@@ -66,6 +66,20 @@ class StandaloneLoginWindow(tk.Tk):
             messagebox.showerror("Ошибка", "Логин и пароль не могут быть пустыми.", parent=self)
             return
 
+        # --- НОВАЯ ЛОГИКА: Заранее читаем содержимое SSL-сертификата ---
+        # Это необходимо, чтобы передать его в конфигурацию для QR-кодов.
+        ssl_cert_content = None
+        try:
+            app_portal_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+            cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
+            if os.path.exists(cert_path):
+                with open(cert_path, 'r', encoding='utf-8') as f:
+                    ssl_cert_content = f.read()
+            else:
+                logging.warning(f"Файл сертификата не найден по пути: {cert_path}")
+        except Exception as e:
+            logging.error(f"Ошибка при чтении файла SSL-сертификата: {e}")
+
         try:
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -94,7 +108,7 @@ class StandaloneLoginWindow(tk.Tk):
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
                             "db_user": db_user, "db_password": db_password,
-                            "db_ssl_cert": conn.info.ssl_root_cert # Получаем содержимое сертификата
+                            "db_ssl_cert": ssl_cert_content # Используем прочитанное содержимое
                         }
                     self.on_complete_callback(user_info) # Сначала вызываем callback
                     self.destroy() # Затем уничтожаем окно
