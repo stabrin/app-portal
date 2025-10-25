@@ -674,7 +674,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             new_object = {
                 "type": "barcode",
                 "barcode_type": obj_type, # obj_type здесь это 'QR', 'SSCC' и т.д.
-                "data_source": "ap_workplaces.access_token", # Более осмысленный пример по умолчанию
+                "data_source": "QR: Конфигурация рабочего места", # ИСПРАВЛЕНИЕ: Используем новый, правильный источник данных по умолчанию
                 "x_mm": 10,
                 "y_mm": 10,
                 "width_mm": 30,
