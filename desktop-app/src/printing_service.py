@@ -211,27 +211,27 @@ class PrintingService:
                         continue
 
                     if barcode_image:
-                        # --- ИСПРАВЛЕНИЕ: Используем более надежный способ конвертации PIL Image в DIB ---
-                        # 1. Конвертируем изображение в режим RGB, если оно в другом формате.
-                        if barcode_image.mode != "RGB":
-                            barcode_image = barcode_image.convert("RGB")
-                        
-                        # 2. Создаем битмап (DIB) из данных изображения.
-                        dib = win32ui.CreateBitmap()
-                        dib.CreateFromHandle(barcode_image.tobitmap())
-
-                        # 3. Создаем битмап-контейнер нужного размера для холста принтера.
+                        # --- ИСПРАВЛЕНИЕ: Используем правильный способ конвертации PIL Image в DIB для pywin32 ---
+                        # 1. Создаем битмап-контейнер нужного размера для холста принтера.
                         bmp = win32ui.CreateBitmap()
                         bmp.CreateCompatibleBitmap(dc, width, height)
                         
-                        # 4. Создаем "вспомогательный" DC в памяти для масштабирования.
+                        # 2. Создаем "вспомогательный" DC в памяти для масштабирования.
                         mem_dc = dc.CreateCompatibleDC()
                         mem_dc.SelectObject(bmp)
-                        
-                        # 5. Рисуем DIB в mem_dc с масштабированием.
-                        dib.Paint(mem_dc, (0, 0, width, height), (0, 0, barcode_image.width, barcode_image.height), win32con.SRCCOPY)
 
-                        # 6. Копируем итоговое изображение из памяти на "холст" принтера.
+                        # 3. Конвертируем изображение в режим RGB, если оно в другом формате.
+                        if barcode_image.mode != "RGB":
+                            barcode_image = barcode_image.convert("RGB")
+                        
+                        # 4. Преобразуем данные изображения в формат DIB (Device Independent Bitmap).
+                        # 'raw' - это формат, 'RGB' - порядок цветов.
+                        dib_data = barcode_image.tobytes('raw', 'RGB')
+                        
+                        # 5. Рисуем DIB в mem_dc с масштабированием (StretchBlt).
+                        mem_dc.StretchBlt((0, 0), (width, height), dc, (0, 0), (barcode_image.width, barcode_image.height), dib_data, win32con.SRCCOPY)
+
+                        # 6. Копируем итоговое масштабированное изображение из памяти на "холст" принтера.
                         dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
                         
                         # Очищаем ресурсы
