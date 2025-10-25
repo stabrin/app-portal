@@ -9,6 +9,7 @@ import json
 from db_connector import get_main_db_connection
 import bcrypt
 import psycopg2
+import psycopg2.extras
 
 # Импортируем новый сервис печати
 from printing_service import PrintingService, LabelEditorWindow
