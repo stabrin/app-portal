@@ -175,7 +175,12 @@ def open_workplace_setup_window(parent_widget, user_info):
             messagebox.showerror("Ошибка", "Необходимые библиотеки не установлены.\nУстановите их: pip install qrcode pillow", parent=setup_window)
             return
 
-        config_data = {"type": "server_config", "address": address}
+        config_data = {
+            "type": "server_config", # Тип для распознавания сканером
+            "address": address
+        }
+
+        # Сжатие данных для уменьшения размера QR-кода
         json_bytes = json.dumps(config_data).encode('utf-8')
         compressed_bytes = zlib.compress(json_bytes, level=9)
         base64_data = base64.b64encode(compressed_bytes).decode('ascii')
@@ -340,7 +345,14 @@ def display_workplace_qrs(tokens_info, parent):
         workplace_data = tokens_info[index]
         token = workplace_data['token']
         
-        qr_payload = json.dumps({"type": "workplace_token", "token": token})
+        # Обновленный формат данных для QR-кода рабочего места
+        qr_payload_data = {
+            "type": "workplace_setup", # Тип для распознавания сканером
+            "token": token,
+            "warehouse": workplace_data['workplace'].split(' - ')[0],
+            "workplace_no": int(workplace_data['workplace'].split(' - Место ')[1])
+        }
+        qr_payload = json.dumps(qr_payload_data)
         img = qrcode.make(qr_payload).resize((300, 300))
         photo = ImageTk.PhotoImage(img)
         qr_label.config(image=photo)
@@ -509,6 +521,7 @@ def open_user_management_window(parent_widget, user_info):
 
         # Собираем все данные для QR-кода
         auth_data = {
+            "type": "user_auth", # Тип для распознавания сканером
             "login": login,
             "client_db_config": user_info.get("client_db_config")
         }

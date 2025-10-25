@@ -42,6 +42,7 @@ except ImportError:
 try:
     import tkinter as tk
     from tkinter import ttk, simpledialog, messagebox
+    import psycopg2
 except ImportError:
     tk = None # Помечаем как недоступный, если среда без GUI
 
@@ -337,7 +338,46 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         # Заглушка для списка макетов. В будущем будет грузиться из БД.
         self.layouts_list = []
 
+        # Проверяем наличие данных для подключения к БД клиента
+        if not self.user_info.get("client_db_config"):
+            messagebox.showerror("Ошибка конфигурации", "Не найдены данные для подключения к базе данных клиента. Редактор макетов не может быть запущен.")
+            self.destroy()
+            return
+
         self._create_widgets()
+
+    def _get_client_db_connection(self):
+        """Создает и возвращает подключение к БД клиента."""
+        db_config = self.user_info.get("client_db_config")
+        if not db_config or not db_config.get('db_name'):
+            raise ConnectionError("Конфигурация базы данных клиента неполная.")
+
+        conn_params = {
+            'host': db_config['db_host'],
+            'port': db_config['db_port'],
+            'dbname': db_config['db_name'],
+            'user': db_config['db_user'],
+            'password': db_config['db_password']
+        }
+
+        temp_cert_file = None
+        try:
+            if db_config.get('db_ssl_cert'):
+                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                    fp.write(db_config['db_ssl_cert'])
+                    temp_cert_file = fp.name
+                conn_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
+
+            conn = psycopg2.connect(**conn_params)
+            return conn
+
+        finally:
+            # Удаляем временный файл сертификата после установки соединения
+            if temp_cert_file and os.path.exists(temp_cert_file):
+                try:
+                    os.remove(temp_cert_file)
+                except OSError as e:
+                    logging.warning(f"Не удалось удалить временный файл сертификата {temp_cert_file}: {e}")
 
     def _create_widgets(self):
         # Основной разделенный фрейм
@@ -466,7 +506,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             return
         
         # Проверка на уникальность имени
-        if any(layout['template_name'] == name for layout in self.layouts_list):
+        # Теперь проверяем в self.layouts_list, который загружен из БД
+        if any(layout['name'] == name for layout in self.layouts_list):
             messagebox.showerror("Ошибка", "Макет с таким названием уже существует.", parent=self)
             return
 
@@ -484,12 +525,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         # Создаем базовую структуру шаблона
         new_template = {
-            "template_name": name,
+            "name": name,
             "width_mm": width_mm,
             "height_mm": height_mm,
             "objects": []
         }
-        self.layouts_list.append(new_template) # Добавляем в общий список
+        # Не добавляем в layouts_list здесь, это произойдет при сохранении
         self.template = new_template # Устанавливаем как текущий редактируемый
 
         self.selected_object_id = None
@@ -509,7 +550,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         layout_name = self.layouts_tree.item(selected_item)['values'][0]
         
         # Находим макет в нашем списке-заглушке
-        layout_to_edit = next((l for l in self.layouts_list if l['template_name'] == layout_name), None)
+        layout_to_edit = next((l for l in self.layouts_list if l['name'] == layout_name), None)
 
         if layout_to_edit:
             self.template = layout_to_edit
@@ -520,16 +561,60 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self._toggle_properties_panel(False)
 
     def _delete_selected_layout(self):
-        # TODO: Реализовать удаление макета
-        messagebox.showinfo("В разработке", "Функция удаления макета будет добавлена позже.", parent=self)
+        selected_item = self.layouts_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Внимание", "Выберите макет для удаления.", parent=self)
+            return
+
+        layout_name = self.layouts_tree.item(selected_item)['values'][0]
+        if not messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить макет '{layout_name}'?\nЭто действие необратимо.", parent=self):
+            return
+
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM label_templates WHERE name = %s", (layout_name,))
+                conn.commit()
+            
+            messagebox.showinfo("Успех", f"Макет '{layout_name}' успешно удален.", parent=self)
+            self._load_layouts_to_tree() # Обновляем список
+
+        except Exception as e:
+            logging.error(f"Ошибка удаления макета из БД: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось удалить макет из базы данных: {e}", parent=self)
 
     def _save_layout(self):
         """Сохраняет текущий макет."""
         if not self.template:
             return
-        # TODO: Реализовать сохранение в БД
-        logging.info(f"Сохранение макета '{self.template['template_name']}': {json.dumps(self.template, indent=2)}")
-        messagebox.showinfo("Сохранено", f"Макет '{self.template['template_name']}' сохранен (в лог).", parent=self)
+
+        layout_name = self.template.get('name')
+        if not layout_name:
+            messagebox.showerror("Ошибка", "У макета отсутствует имя.", parent=self)
+            return
+
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    # Используем INSERT ... ON CONFLICT (UPSERT)
+                    cur.execute("""
+                        INSERT INTO label_templates (name, template_json, updated_at)
+                        VALUES (%s, %s, NOW())
+                        ON CONFLICT (name) DO UPDATE SET
+                            template_json = EXCLUDED.template_json,
+                            updated_at = NOW();
+                    """, (layout_name, json.dumps(self.template)))
+                conn.commit()
+            
+            logging.info(f"Макет '{layout_name}' успешно сохранен в БД.")
+            messagebox.showinfo("Сохранено", f"Макет '{layout_name}' успешно сохранен.", parent=self)
+            
+            # Обновляем заголовок окна, если это был новый макет
+            self.title(f"Редактор макетов - {layout_name}")
+
+        except Exception as e:
+            logging.error(f"Ошибка сохранения макета в БД: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось сохранить макет в базу данных: {e}", parent=self)
 
     def _draw_canvas_background(self):
         """Отрисовывает фон (этикетку) на холсте."""
@@ -550,12 +635,25 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
     def _load_layouts_to_tree(self):
         """Загружает список макетов в Treeview."""
+        self.layouts_list.clear()
         # Очищаем дерево
         for i in self.layouts_tree.get_children():
             self.layouts_tree.delete(i)
-        for layout in self.layouts_list:
-            self.layouts_tree.insert('', 'end', values=(layout['template_name'], f"{layout['width_mm']} x {layout['height_mm']}"))
-
+        
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT name, template_json FROM label_templates ORDER BY name")
+                    for row in cur.fetchall():
+                        name, template_data = row
+                        self.layouts_list.append(template_data) # Сохраняем полный JSON
+                        size_str = f"{template_data.get('width_mm', '?')} x {template_data.get('height_mm', '?')}"
+                        self.layouts_tree.insert('', 'end', values=(name, size_str))
+            logging.info(f"Загружено {len(self.layouts_list)} макетов из БД.")
+        except Exception as e:
+            logging.error(f"Ошибка загрузки макетов из БД: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось загрузить макеты из базы данных: {e}", parent=self)
+            
     def _add_object_to_canvas(self, barcode_type: str):
         """Добавляет новый объект (пока только штрихкод) на холст и в шаблон."""
         if not self.template:
