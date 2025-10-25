@@ -552,16 +552,14 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
 
     def __init__(self, parent, user_info, title_name, items_to_print=None):
         super().__init__(parent)
-        self.title(f"Печать этикеток для '{warehouse_name}'")
         self.title(f"Печать: '{title_name}'")
         self.geometry("500x400")
         self.transient(parent)
         self.grab_set()
 
         self.items_to_print = items_to_print # Если данные переданы, используем их
-        self.warehouse_name = title_name if items_to_print is None else None # Для обратной совместимости
         self.user_info = user_info
-        self.warehouse_name = warehouse_name
+        self.warehouse_name = title_name if items_to_print is None else None # Для обратной совместимости
         self.layouts = [] # Список загруженных макетов
 
         if not self.win32print:
