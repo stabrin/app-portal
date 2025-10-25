@@ -332,6 +332,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.canvas_scale = 5  # Масштаб для отображения мм на холсте (5 пикселей = 1 мм)
         self.selected_object_id = None # ID объекта в списке self.template['objects']
         self.canvas_objects = {} # Словарь для связи ID объекта с тегом на холсте
+        self.active_view = None # Текущий отображаемый фрейм ('list' или 'editor')
+
+        # Заглушка для списка макетов. В будущем будет грузиться из БД.
+        self.layouts_list = []
 
         self._create_widgets()
 
@@ -339,11 +343,52 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         # Основной разделенный фрейм
         paned_window = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         paned_window.pack(fill=tk.BOTH, expand=True)
+        
+        # --- Фрейм для списка макетов (начальный экран) ---
+        self.list_view_frame = ttk.Frame(self, padding="10")
+        self._create_list_view_widgets()
 
-        # --- Левая панель (инструменты) ---
-        controls_frame = ttk.Frame(paned_window, width=300, padding="10")
+        # --- Фрейм для редактора (холст и инструменты) ---
+        self.editor_view_frame = ttk.Frame(self)
+        self._create_editor_view_widgets(paned_window)
+
+        # Показываем начальный экран
+        self._switch_view('list')
+
+    def _create_list_view_widgets(self):
+        """Создает виджеты для экрана со списком макетов."""
+        list_controls_frame = ttk.Frame(self.list_view_frame)
+        list_controls_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
+
+        ttk.Button(list_controls_frame, text="Создать новый макет", command=self._prompt_for_new_layout).pack(side=tk.LEFT, padx=5)
+        ttk.Button(list_controls_frame, text="Редактировать", command=self._edit_selected_layout).pack(side=tk.LEFT, padx=5)
+        ttk.Button(list_controls_frame, text="Удалить", command=self._delete_selected_layout).pack(side=tk.LEFT, padx=5)
+
+        tree_frame = ttk.Frame(self.list_view_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+
+        self.layouts_tree = ttk.Treeview(tree_frame, columns=('name', 'size'), show='headings')
+        self.layouts_tree.heading('name', text='Название макета')
+        self.layouts_tree.heading('size', text='Размер (мм)')
+        self.layouts_tree.column('name', width=250)
+        self.layouts_tree.column('size', width=100, anchor=tk.CENTER)
+        self.layouts_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=self.layouts_tree.yview)
+        self.layouts_tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self._load_layouts_to_tree()
+
+    def _create_editor_view_widgets(self, paned_window):
+        """Создает виджеты для экрана редактирования (холст, инструменты)."""
+        # --- Левая панель (управление) ---
+        controls_frame = ttk.Frame(self.editor_view_frame, width=300, padding="10")
         paned_window.add(controls_frame, weight=1)
 
+        # Кнопки управления
+        ttk.Button(controls_frame, text="<< К списку макетов", command=lambda: self._switch_view('list')).pack(fill=tk.X, pady=5)
+        ttk.Button(controls_frame, text="Сохранить макет", command=self._save_layout).pack(fill=tk.X, pady=5)
         # Кнопка создания нового макета
         ttk.Button(controls_frame, text="Создать новый макет", command=self._prompt_for_new_layout).pack(fill=tk.X, pady=5)
         ttk.Separator(controls_frame).pack(fill=tk.X, pady=10)
@@ -380,28 +425,57 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.apply_props_button = ttk.Button(self.properties_frame, text="Применить", command=self._apply_properties)
         self.apply_props_button.pack(pady=5)
 
-        # Изначально деактивируем свойства
-        for widget in self.properties_frame.winfo_children():
-            widget.configure(state="disabled")
-
-        # Изначально деактивируем инструменты
-        for widget in self.tools_frame.winfo_children():
-            widget.configure(state="disabled")
-
-        # --- Правая панель (холст) ---
-        canvas_frame = ttk.Frame(paned_window)
+        # --- Правая панель редактора (холст) ---
+        canvas_frame = ttk.Frame(self.editor_view_frame)
         paned_window.add(canvas_frame, weight=4)
 
         self.canvas = tk.Canvas(canvas_frame, bg="lightgrey")
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
+        # Добавляем фрейм редактора в paned_window
+        self.editor_view_frame.add(paned_window)
+
         # Привязываем событие клика к холсту
         self.canvas.bind("<Button-1>", self._on_canvas_click)
 
+        # Изначально деактивируем все панели
+        self._toggle_properties_panel(False)
+        self._toggle_tools_panel(False)
+
+    def _switch_view(self, view_name: str):
+        """Переключает между видом списка и видом редактора."""
+        if self.active_view == view_name:
+            return
+
+        # Скрываем все
+        self.list_view_frame.pack_forget()
+        self.editor_view_frame.pack_forget()
+
+        if view_name == 'list':
+            self.title("Редактор макетов - Список")
+            self.list_view_frame.pack(fill=tk.BOTH, expand=True)
+            self._load_layouts_to_tree() # Обновляем список
+        elif view_name == 'editor':
+            layout_name = self.template.get('template_name', 'Новый макет') if self.template else 'Редактор'
+            self.title(f"Редактор макетов - {layout_name}")
+            self.editor_view_frame.pack(fill=tk.BOTH, expand=True)
+            self._draw_canvas_background()
+        
+        self.active_view = view_name
+
     def _prompt_for_new_layout(self):
-        """Запрашивает у пользователя размеры нового макета."""
-        size_str = simpledialog.askstring("Новый макет", "Введите размеры этикетки (Ширина x Высота) в мм:", parent=self)
-        if not size_str:
+        """Запрашивает у пользователя имя и размеры нового макета."""
+        name = simpledialog.askstring("Новый макет", "Введите название макета:", parent=self)
+        if not name:
+            return
+        
+        # Проверка на уникальность имени
+        if any(layout['template_name'] == name for layout in self.layouts_list):
+            messagebox.showerror("Ошибка", "Макет с таким названием уже существует.", parent=self)
+            return
+
+        size_str = simpledialog.askstring("Размеры макета", "Введите размеры этикетки (Ширина x Высота) в мм:", parent=self)
+        if not size_str: # Пользователь нажал "Отмена" на втором диалоге
             return
 
         try:
@@ -413,21 +487,53 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             return
 
         # Создаем базовую структуру шаблона
-        self.template = {
-            "template_name": "Новый макет",
+        new_template = {
+            "template_name": name,
             "width_mm": width_mm,
             "height_mm": height_mm,
             "objects": []
         }
+        self.layouts_list.append(new_template) # Добавляем в общий список
+        self.template = new_template # Устанавливаем как текущий редактируемый
+
         self.selected_object_id = None
         self.canvas_objects.clear()
 
-        self._draw_canvas_background()
-        # Активируем инструменты
-        for widget in self.tools_frame.winfo_children():
-            widget.configure(state="normal")
-        # Деактивируем свойства, пока ничего не выбрано
+        self._switch_view('editor')
+        self._toggle_tools_panel(True)
         self._toggle_properties_panel(False)
+
+    def _edit_selected_layout(self):
+        """Открывает выбранный макет для редактирования."""
+        selected_item = self.layouts_tree.focus()
+        if not selected_item:
+            messagebox.showwarning("Внимание", "Выберите макет из списка для редактирования.", parent=self)
+            return
+        
+        layout_name = self.layouts_tree.item(selected_item)['values'][0]
+        
+        # Находим макет в нашем списке-заглушке
+        layout_to_edit = next((l for l in self.layouts_list if l['template_name'] == layout_name), None)
+
+        if layout_to_edit:
+            self.template = layout_to_edit
+            self.selected_object_id = None
+            self.canvas_objects.clear()
+            self._switch_view('editor')
+            self._toggle_tools_panel(True)
+            self._toggle_properties_panel(False)
+
+    def _delete_selected_layout(self):
+        # TODO: Реализовать удаление макета
+        messagebox.showinfo("В разработке", "Функция удаления макета будет добавлена позже.", parent=self)
+
+    def _save_layout(self):
+        """Сохраняет текущий макет."""
+        if not self.template:
+            return
+        # TODO: Реализовать сохранение в БД
+        logging.info(f"Сохранение макета '{self.template['template_name']}': {json.dumps(self.template, indent=2)}")
+        messagebox.showinfo("Сохранено", f"Макет '{self.template['template_name']}' сохранен (в лог).", parent=self)
 
     def _draw_canvas_background(self):
         """Отрисовывает фон (этикетку) на холсте."""
@@ -445,6 +551,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         # Перерисовываем все существующие объекты
         for i, obj in enumerate(self.template['objects']):
             self._draw_object(obj, i)
+
+    def _load_layouts_to_tree(self):
+        """Загружает список макетов в Treeview."""
+        # Очищаем дерево
+        for i in self.layouts_tree.get_children():
+            self.layouts_tree.delete(i)
+        for layout in self.layouts_list:
+            self.layouts_tree.insert('', 'end', values=(layout['template_name'], f"{layout['width_mm']} x {layout['height_mm']}"))
 
     def _add_object_to_canvas(self, barcode_type: str):
         """Добавляет новый объект (пока только штрихкод) на холст и в шаблон."""
@@ -535,6 +649,19 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     for sub_widget in widget.winfo_children():
                          try: sub_widget.config(state=state)
                          except tk.TclError: pass
+
+    def _toggle_tools_panel(self, active: bool):
+        """Включает или выключает панель инструментов."""
+        state = "normal" if active else "disabled"
+        for widget in self.tools_frame.winfo_children():
+            try:
+                widget.config(state=state)
+            except tk.TclError:
+                 if isinstance(widget, ttk.Button):
+                    widget.state([state] if state == "normal" else [state])
+
+
+
 
     def _update_properties_panel(self):
         """Заполняет панель свойств данными выделенного объекта."""
