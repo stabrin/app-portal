@@ -11,23 +11,16 @@ import bcrypt
 import psycopg2
 
 # Импортируем новый сервис печати
-from printing_service import PrintingService
+from printing_service import PrintingService, LabelEditorWindow
 
 import traceback
 
 def open_label_editor_window(parent_widget, user_info):
     """
     Открывает окно редактора макетов этикеток.
-    (Пока что это заглушка)
     """
-    editor_window = tk.Toplevel(parent_widget)
-    editor_window.title("Редактор макетов этикеток")
-    editor_window.geometry("800x600")
-    editor_window.grab_set()
-
-    # TODO: Реализовать полноценный редактор макетов
-    label = ttk.Label(editor_window, text="Здесь будет редактор макетов.\nФункционал в разработке.", font=("Arial", 14), justify=tk.CENTER)
-    label.pack(expand=True)
+    # Создаем экземпляр нашего нового класса редактора
+    LabelEditorWindow(parent_widget, user_info)
 
 def open_print_management_window(parent_widget):
     """

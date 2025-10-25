@@ -38,6 +38,13 @@ except ImportError:
     win32con = None
     pywin_error = None
 
+# Добавляем импорты для редактора
+try:
+    import tkinter as tk
+    from tkinter import ttk, simpledialog, messagebox
+except ImportError:
+    tk = None # Помечаем как недоступный, если среда без GUI
+
 # Configure logging for this module
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - [printing_service] - %(message)s')
 
@@ -304,3 +311,131 @@ class PrintingService:
                     logging.info(f"Временный PDF файл удален: {temp_pdf_path}")
                 except Exception as e:
                     logging.warning(f"Не удалось удалить временный PDF файл {temp_pdf_path}: {e}")
+
+
+# --- Класс визуального редактора макетов ---
+
+class LabelEditorWindow(tk.Toplevel if tk else object):
+    """
+    Окно визуального редактора макетов этикеток.
+    """
+    def __init__(self, parent, user_info):
+        if not tk:
+            raise RuntimeError("Tkinter не доступен в текущем окружении.")
+        super().__init__(parent)
+        self.title("Редактор макетов")
+        self.geometry("1200x800")
+        self.grab_set()
+
+        self.user_info = user_info
+        self.template = None  # Здесь будет храниться JSON-представление макета
+        self.canvas_scale = 5  # Масштаб для отображения мм на холсте (5 пикселей = 1 мм)
+
+        self._create_widgets()
+
+    def _create_widgets(self):
+        # Основной разделенный фрейм
+        paned_window = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+
+        # --- Левая панель (инструменты) ---
+        controls_frame = ttk.Frame(paned_window, width=300, padding="10")
+        paned_window.add(controls_frame, weight=1)
+
+        # Кнопка создания нового макета
+        ttk.Button(controls_frame, text="Создать новый макет", command=self._prompt_for_new_layout).pack(fill=tk.X, pady=5)
+        ttk.Separator(controls_frame).pack(fill=tk.X, pady=10)
+
+        # Фрейм для инструментов (изначально неактивен)
+        self.tools_frame = ttk.LabelFrame(controls_frame, text="Инструменты")
+        self.tools_frame.pack(fill=tk.X, pady=5)
+
+        # Кнопки для добавления объектов
+        ttk.Button(self.tools_frame, text="Добавить QR-код", command=lambda: self._add_object_to_canvas("QR")).pack(fill=tk.X, pady=2)
+        ttk.Button(self.tools_frame, text="Добавить SSCC", command=lambda: self._add_object_to_canvas("SSCC")).pack(fill=tk.X, pady=2)
+        ttk.Button(self.tools_frame, text="Добавить DataMatrix", command=lambda: self._add_object_to_canvas("DataMatrix")).pack(fill=tk.X, pady=2)
+
+        # Изначально деактивируем инструменты
+        for widget in self.tools_frame.winfo_children():
+            widget.configure(state="disabled")
+
+        # --- Правая панель (холст) ---
+        canvas_frame = ttk.Frame(paned_window)
+        paned_window.add(canvas_frame, weight=4)
+
+        self.canvas = tk.Canvas(canvas_frame, bg="lightgrey")
+        self.canvas.pack(fill=tk.BOTH, expand=True)
+
+    def _prompt_for_new_layout(self):
+        """Запрашивает у пользователя размеры нового макета."""
+        size_str = simpledialog.askstring("Новый макет", "Введите размеры этикетки (Ширина x Высота) в мм:", parent=self)
+        if not size_str:
+            return
+
+        try:
+            width_str, height_str = size_str.lower().split('x')
+            width_mm = int(width_str.strip())
+            height_mm = int(height_str.strip())
+        except (ValueError, IndexError):
+            messagebox.showerror("Ошибка", "Неверный формат. Введите размеры в формате '100 x 50'.", parent=self)
+            return
+
+        # Создаем базовую структуру шаблона
+        self.template = {
+            "template_name": "Новый макет",
+            "width_mm": width_mm,
+            "height_mm": height_mm,
+            "objects": []
+        }
+
+        self._draw_canvas_background()
+        # Активируем инструменты
+        for widget in self.tools_frame.winfo_children():
+            widget.configure(state="normal")
+
+    def _draw_canvas_background(self):
+        """Отрисовывает фон (этикетку) на холсте."""
+        self.canvas.delete("all")  # Очищаем холст
+
+        if not self.template:
+            return
+
+        width_px = self.template['width_mm'] * self.canvas_scale
+        height_px = self.template['height_mm'] * self.canvas_scale
+
+        # Рисуем белый прямоугольник, представляющий этикетку
+        self.canvas.create_rectangle(10, 10, 10 + width_px, 10 + height_px, fill="white", outline="black", tags="label_bg")
+
+    def _add_object_to_canvas(self, barcode_type: str):
+        """Добавляет новый объект (пока только штрихкод) на холст и в шаблон."""
+        if not self.template:
+            messagebox.showwarning("Внимание", "Сначала создайте новый макет.", parent=self)
+            return
+
+        # Создаем объект с параметрами по умолчанию
+        new_object = {
+            "type": "barcode",
+            "barcode_type": barcode_type,
+            "data_source": "placeholder.data", # Заглушка
+            "x_mm": 10,
+            "y_mm": 10,
+            "width_mm": 30,
+            "height_mm": 30
+        }
+        self.template["objects"].append(new_object)
+
+        # Отрисовываем объект на холсте
+        self._draw_object(new_object)
+        logging.info(f"Добавлен новый объект: {barcode_type}. Текущий шаблон: {json.dumps(self.template, indent=2)}")
+
+    def _draw_object(self, obj_data: dict):
+        """Отрисовывает один объект на холсте."""
+        x_px = 10 + obj_data['x_mm'] * self.canvas_scale
+        y_px = 10 + obj_data['y_mm'] * self.canvas_scale
+        width_px = obj_data['width_mm'] * self.canvas_scale
+        height_px = obj_data['height_mm'] * self.canvas_scale
+
+        # Рисуем прямоугольник-заглушку
+        self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill="lightblue", outline="blue", tags="object")
+        # Добавляем текст
+        self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=obj_data['barcode_type'], tags="object_text")
