@@ -454,6 +454,15 @@ def display_qr_sequence(title, chunks, parent):
 
 class PrintWorkplaceLabelsDialog(tk.Toplevel):
     """Диалог для выбора параметров печати этикеток рабочих мест."""
+    # --- ИСПРАВЛЕНИЕ: Добавляем импорты для работы с принтерами ---
+    try:
+        import win32print
+        import win32api
+    except ImportError:
+        win32print = None
+        win32api = None
+    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
     def __init__(self, parent, user_info, warehouse_name):
         super().__init__(parent)
         self.title(f"Печать этикеток для '{warehouse_name}'")
@@ -464,6 +473,11 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         self.user_info = user_info
         self.warehouse_name = warehouse_name
         self.layouts = [] # Список загруженных макетов
+
+        if not self.win32print:
+            messagebox.showerror("Ошибка", "Библиотека 'pywin32' не установлена.\nФункционал печати недоступен.", parent=self)
+            self.destroy()
+            return
 
         self._create_widgets()
         self._load_printers()
@@ -500,10 +514,10 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
 
     def _load_printers(self):
         try:
-            printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1)]
+            printers = [p[2] for p in self.win32print.EnumPrinters(self.win32print.PRINTER_ENUM_LOCAL, None, 1)]
             self.printer_combo['values'] = printers
             if printers:
-                default_printer = win32print.GetDefaultPrinter()
+                default_printer = self.win32print.GetDefaultPrinter()
                 if default_printer in printers:
                     self.printer_combo.set(default_printer)
                 else:
@@ -518,16 +532,16 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         
         paper_names = []
         try:
-            h_printer = win32print.OpenPrinter(printer_name)
+            h_printer = self.win32print.OpenPrinter(printer_name)
             try:
                 # Получаем все формы, доступные для принтера
-                forms = win32print.EnumForms(h_printer)
+                forms = self.win32print.EnumForms(h_printer)
                 for form in forms:
                     # Фильтруем по префиксу, если нужно
                     if form['Name'].startswith('Tilda_'):
                          paper_names.append(form['Name'])
             finally:
-                win32print.ClosePrinter(h_printer)
+                self.win32print.ClosePrinter(h_printer)
             
             self.paper_combo['values'] = sorted(paper_names)
             if paper_names:
