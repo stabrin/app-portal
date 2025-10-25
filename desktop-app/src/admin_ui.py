@@ -192,122 +192,6 @@ def open_workplace_setup_window(parent_widget, user_info):
 
     ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
 
-    # --- Вкладка 2: Генерация рабочих мест ---
-    workplaces_frame = ttk.Frame(notebook, padding="10")
-    notebook.add(workplaces_frame, text="Рабочие места")
-
-    ttk.Label(workplaces_frame, text="Название склада:", font=("Arial", 10, "bold")).pack(anchor="w")
-    warehouse_name_entry = ttk.Entry(workplaces_frame, width=40)
-    warehouse_name_entry.pack(fill="x", pady=(0, 10))
-
-    ttk.Label(workplaces_frame, text="Количество рабочих мест:", font=("Arial", 10, "bold")).pack(anchor="w")
-    workplaces_count_spinbox = ttk.Spinbox(workplaces_frame, from_=1, to=100, width=10)
-    workplaces_count_spinbox.pack(anchor="w")
-
-    def generate_workplaces():
-        warehouse_name = warehouse_name_entry.get()
-        try:
-            count = int(workplaces_count_spinbox.get())
-        except ValueError:
-            messagebox.showwarning("Внимание", "Укажите корректное количество рабочих мест.", parent=setup_window)
-            return
-
-        if not warehouse_name or count <= 0:
-            messagebox.showwarning("Внимание", "Заполните все поля.", parent=setup_window)
-            return
-
-        if not messagebox.askyesno("Подтверждение", f"Будет создано {count} рабочих мест для склада '{warehouse_name}'.\nПродолжить?", parent=setup_window):
-            return
-
-        client_db_config = user_info.get("client_db_config")
-        if not client_db_config:
-            messagebox.showerror("Ошибка", "Не найдены данные для подключения к базе клиента.", parent=setup_window)
-            return
-
-        generated_tokens = []
-        try:
-            # Подключаемся к базе клиента для сохранения токенов
-            # --- ИСПРАВЛЕНИЕ: Используем правильные имена ключей для psycopg2 ---
-            conn_params = {
-                'host': client_db_config.get('db_host'),
-                'port': client_db_config.get('db_port'),
-                'dbname': client_db_config.get('db_name'),
-                'user': client_db_config.get('db_user'),
-                'password': client_db_config.get('db_password')
-            }
-            # SSL-сертификат здесь не используется, так как предполагается,
-            # что рабочие места создаются для локальной сети.
-            
-            with psycopg2.connect(**conn_params) as conn:
-                with conn.cursor() as cur:
-                    for i in range(1, count + 1):
-                        # Вставляем запись и получаем сгенерированный токен
-                        cur.execute(
-                            "INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s) RETURNING access_token",
-                            (warehouse_name, i)
-                        )
-                        token = cur.fetchone()[0]
-                        generated_tokens.append({"workplace": f"{warehouse_name} - Место {i}", "token": str(token)})
-                conn.commit()
-            
-            messagebox.showinfo("Успех", f"Успешно создано и сохранено {len(generated_tokens)} рабочих мест.", parent=setup_window)
-            display_workplace_qrs(generated_tokens, setup_window)
-
-        except Exception as e:
-            error_details = traceback.format_exc()
-            logging.error(f"Ошибка генерации рабочих мест: {e}\n{error_details}")
-            messagebox.showerror("Ошибка", f"Не удалось создать рабочие места. Подробности в app.log.", parent=setup_window)
-
-    ttk.Button(workplaces_frame, text="Сгенерировать и сохранить", command=generate_workplaces).pack(pady=20)
-
-def display_qr_sequence(title, chunks, parent):
-    """Вспомогательная функция для отображения серии QR-кодов."""
-    try:
-        import qrcode
-        from PIL import Image, ImageTk
-    except ImportError: return
-
-    qr_window = tk.Toplevel(parent)
-    qr_window.title(title)
-    qr_window.grab_set()
-
-    current_chunk_index = 0
-    
-    info_label = ttk.Label(qr_window, text="", font=("Arial", 12))
-    info_label.pack(pady=10)
-    qr_label = ttk.Label(qr_window)
-    qr_label.pack(padx=20, pady=10)
-    nav_frame = ttk.Frame(qr_window)
-    nav_frame.pack(pady=10)
-    prev_button = ttk.Button(nav_frame, text="<< Назад")
-    prev_button.pack(side=tk.LEFT, padx=10)
-    next_button = ttk.Button(nav_frame, text="Далее >>")
-    next_button.pack(side=tk.LEFT, padx=10)
-
-    def show_chunk(index):
-        nonlocal current_chunk_index
-        current_chunk_index = index
-        chunk_data = f"{index+1}/{len(chunks)}:{chunks[index]}"
-        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
-        qr.add_data(chunk_data)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white").resize((350, 350))
-        photo = ImageTk.PhotoImage(img)
-        qr_label.config(image=photo)
-        qr_label.image = photo
-        info_label.config(text=f"Шаг {index + 1} из {len(chunks)}. Отсканируйте код.")
-        prev_button.config(state="normal" if index > 0 else "disabled")
-        next_button.config(state="normal" if index < len(chunks) - 1 else "disabled")
-
-    def show_next():
-        if current_chunk_index < len(chunks) - 1: show_chunk(current_chunk_index + 1)
-    def show_prev():
-        if current_chunk_index > 0: show_chunk(current_chunk_index - 1)
-
-    prev_button.config(command=show_prev)
-    next_button.config(command=show_next)
-    show_chunk(0)
-
 def display_workplace_qrs(tokens_info, parent):
     """Отображает QR-коды для рабочих мест с возможностью печати."""
     try:
@@ -336,10 +220,10 @@ def display_workplace_qrs(tokens_info, parent):
     
     def print_label():
         workplace_data = tokens_info[current_index]
-        pdf_buffer = PrintingService.generate_workplace_label_pdf(workplace_data['workplace'], workplace_data['token'])
-        # TODO: Здесь нужно открыть диалог выбора принтера и размера бумаги
-        # и затем вызвать PrintingService.print_pdf(printer, pdf_buffer, paper)
-        messagebox.showinfo("Печать", "Функционал печати в разработке.\nPDF сгенерирован в памяти.", parent=qr_window)
+        # Используем старую функцию для генерации PDF, но она может быть заменена на новую
+        # с использованием макетов. Для демонстрации оставим так.
+        pdf_buffer = PrintingService.generate_workplace_label_pdf(workplace_data['workplace'], workplace_data['token']) 
+        PrintingService.print_pdf(None, pdf_buffer) # None - принтер по умолчанию
 
     print_button = ttk.Button(nav_frame, text="Печать", command=print_label)
     print_button.pack(side=tk.LEFT, padx=5)
@@ -378,6 +262,141 @@ def display_workplace_qrs(tokens_info, parent):
     prev_button.config(command=show_prev)
     next_button.config(command=show_next)
     show_workplace(0)
+
+class PrintWorkplaceLabelsDialog(tk.Toplevel):
+    """Диалог для выбора параметров печати этикеток рабочих мест."""
+    def __init__(self, parent, user_info, warehouse_name):
+        super().__init__(parent)
+        self.title(f"Печать этикеток для '{warehouse_name}'")
+        self.geometry("500x400")
+        self.transient(parent)
+        self.grab_set()
+
+        self.user_info = user_info
+        self.warehouse_name = warehouse_name
+        self.layouts = [] # Список загруженных макетов
+
+        self._create_widgets()
+        self._load_printers()
+        self._load_layouts()
+
+    def _get_client_db_connection(self):
+        """Подключение к БД клиента."""
+        db_config = self.user_info.get("client_db_config")
+        if not db_config: return None
+        return psycopg2.connect(
+            host=db_config.get('db_host'), port=db_config.get('db_port'),
+            dbname=db_config.get('db_name'), user=db_config.get('db_user'),
+            password=db_config.get('db_password')
+        )
+
+    def _create_widgets(self):
+        frame = ttk.Frame(self, padding="10")
+        frame.pack(expand=True, fill="both")
+
+        ttk.Label(frame, text="1. Выберите принтер:").pack(fill="x", pady=2)
+        self.printer_combo = ttk.Combobox(frame, state="readonly")
+        self.printer_combo.pack(fill="x", pady=2)
+        self.printer_combo.bind("<<ComboboxSelected>>", self._load_paper_sizes)
+
+        ttk.Label(frame, text="2. Выберите размер бумаги:").pack(fill="x", pady=(10, 2))
+        self.paper_combo = ttk.Combobox(frame, state="readonly")
+        self.paper_combo.pack(fill="x", pady=2)
+
+        ttk.Label(frame, text="3. Выберите макет этикетки:").pack(fill="x", pady=(10, 2))
+        self.layout_combo = ttk.Combobox(frame, state="readonly")
+        self.layout_combo.pack(fill="x", pady=2)
+
+        ttk.Button(frame, text="Напечатать", command=self._do_print).pack(fill="x", pady=(20, 2))
+
+    def _load_printers(self):
+        try:
+            printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1)]
+            self.printer_combo['values'] = printers
+            if printers:
+                default_printer = win32print.GetDefaultPrinter()
+                if default_printer in printers:
+                    self.printer_combo.set(default_printer)
+                else:
+                    self.printer_combo.current(0)
+                self._load_paper_sizes()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось получить список принтеров: {e}", parent=self)
+
+    def _load_paper_sizes(self, *args):
+        printer_name = self.printer_combo.get()
+        if not printer_name: return
+        
+        paper_names = []
+        try:
+            h_printer = win32print.OpenPrinter(printer_name)
+            try:
+                # Получаем все формы, доступные для принтера
+                forms = win32print.EnumForms(h_printer)
+                for form in forms:
+                    # Фильтруем по префиксу, если нужно
+                    if form['Name'].startswith('Tilda_'):
+                         paper_names.append(form['Name'])
+            finally:
+                win32print.ClosePrinter(h_printer)
+            
+            self.paper_combo['values'] = sorted(paper_names)
+            if paper_names:
+                self.paper_combo.current(0)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось получить размеры бумаги для принтера: {e}", parent=self)
+
+    def _load_layouts(self):
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT name, template_json FROM label_templates ORDER BY name")
+                    self.layouts = [{'name': row[0], 'json': row[1]} for row in cur.fetchall()]
+            
+            layout_names = [l['name'] for l in self.layouts]
+            self.layout_combo['values'] = layout_names
+            if layout_names:
+                self.layout_combo.current(0)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить макеты: {e}", parent=self)
+
+    def _do_print(self):
+        printer = self.printer_combo.get()
+        paper = self.paper_combo.get()
+        layout_name = self.layout_combo.get()
+
+        if not all([printer, paper, layout_name]):
+            messagebox.showwarning("Внимание", "Все поля должны быть выбраны.", parent=self)
+            return
+
+        selected_layout = next((l for l in self.layouts if l['name'] == layout_name), None)
+        if not selected_layout:
+            messagebox.showerror("Ошибка", "Выбранный макет не найден.", parent=self)
+            return
+
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM ap_workplaces WHERE warehouse_name = %s ORDER BY workplace_number", (self.warehouse_name,))
+                    workplaces_data = cur.fetchall()
+            
+            # Преобразуем данные для сервиса печати
+            items_to_print = []
+            for wp in workplaces_data:
+                items_to_print.append({
+                    "ap_workplaces.warehouse_name": wp['warehouse_name'],
+                    "ap_workplaces.workplace_number": wp['workplace_number'],
+                    "ap_workplaces.access_token": str(wp['access_token'])
+                })
+
+            PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], items_to_print)
+            messagebox.showinfo("Успех", f"Задание на печать {len(items_to_print)} этикеток отправлено на принтер.", parent=self)
+            self.destroy()
+
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка печати этикеток рабочих мест: {e}\n{error_details}")
+            messagebox.showerror("Ошибка печати", f"Произошла ошибка: {e}\nПодробности в app.log.", parent=self)
 
 def open_user_management_window(parent_widget, user_info):
     """Открывает окно для управления пользователями клиента."""

@@ -350,6 +350,33 @@ class PrintingService:
                 except Exception as e:
                     logging.warning(f"Не удалось удалить временный PDF файл {temp_pdf_path}: {e}")
 
+    @staticmethod
+    def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list):
+        """
+        Генерирует и печатает по одной этикетке для каждого элемента в списке.
+
+        :param printer_name: Имя принтера.
+        :param paper_name: Имя формата бумаги.
+        :param template_json: JSON-макет этикетки.
+        :param items_data: Список словарей, где каждый словарь - данные для одной этикетки.
+                           Пример: [{'orders.client_name': 'A'}, {'orders.client_name': 'B'}]
+        """
+        if not items_data:
+            logging.warning("Список элементов для печати пуст.")
+            return
+
+        logging.info(f"Начало пакетной печати {len(items_data)} этикеток на принтер '{printer_name}'...")
+
+        for i, item_data in enumerate(items_data):
+            try:
+                logging.info(f"Генерация PDF для элемента {i+1}/{len(items_data)}...")
+                pdf_buffer = PrintingService.generate_pdf_from_template(template_json, item_data)
+                
+                # Отправляем на печать. Будет создан временный файл для каждого PDF.
+                PrintingService.print_pdf(printer_name, pdf_buffer, paper_name)
+            except Exception as e:
+                logging.error(f"Ошибка при печати этикетки для элемента {i+1}: {item_data}. Ошибка: {e}")
+                # Можно добавить messagebox.showerror здесь, если нужна немедленная обратная связь
 
 # --- Класс визуального редактора макетов ---
 
