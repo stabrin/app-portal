@@ -330,6 +330,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.user_info = user_info
         self.template = None  # Здесь будет храниться JSON-представление макета
         self.canvas_scale = 5  # Масштаб для отображения мм на холсте (5 пикселей = 1 мм)
+        self.selected_object_id = None # ID объекта в списке self.template['objects']
+        self.canvas_objects = {} # Словарь для связи ID объекта с тегом на холсте
 
         self._create_widgets()
 
@@ -355,6 +357,33 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         ttk.Button(self.tools_frame, text="Добавить SSCC", command=lambda: self._add_object_to_canvas("SSCC")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить DataMatrix", command=lambda: self._add_object_to_canvas("DataMatrix")).pack(fill=tk.X, pady=2)
 
+        # --- Новая панель свойств ---
+        self.properties_frame = ttk.LabelFrame(controls_frame, text="Свойства объекта")
+        self.properties_frame.pack(fill=tk.X, pady=10)
+
+        self.prop_entries = {}
+        prop_fields = {
+            "x_mm": "X (мм):",
+            "y_mm": "Y (мм):",
+            "width_mm": "Ширина (мм):",
+            "height_mm": "Высота (мм):"
+        }
+
+        for key, text in prop_fields.items():
+            frame = ttk.Frame(self.properties_frame)
+            frame.pack(fill=tk.X, padx=5, pady=2)
+            ttk.Label(frame, text=text, width=12).pack(side=tk.LEFT)
+            entry = ttk.Entry(frame)
+            entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.prop_entries[key] = entry
+
+        self.apply_props_button = ttk.Button(self.properties_frame, text="Применить", command=self._apply_properties)
+        self.apply_props_button.pack(pady=5)
+
+        # Изначально деактивируем свойства
+        for widget in self.properties_frame.winfo_children():
+            widget.configure(state="disabled")
+
         # Изначально деактивируем инструменты
         for widget in self.tools_frame.winfo_children():
             widget.configure(state="disabled")
@@ -365,6 +394,9 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         self.canvas = tk.Canvas(canvas_frame, bg="lightgrey")
         self.canvas.pack(fill=tk.BOTH, expand=True)
+
+        # Привязываем событие клика к холсту
+        self.canvas.bind("<Button-1>", self._on_canvas_click)
 
     def _prompt_for_new_layout(self):
         """Запрашивает у пользователя размеры нового макета."""
@@ -387,11 +419,15 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             "height_mm": height_mm,
             "objects": []
         }
+        self.selected_object_id = None
+        self.canvas_objects.clear()
 
         self._draw_canvas_background()
         # Активируем инструменты
         for widget in self.tools_frame.winfo_children():
             widget.configure(state="normal")
+        # Деактивируем свойства, пока ничего не выбрано
+        self._toggle_properties_panel(False)
 
     def _draw_canvas_background(self):
         """Отрисовывает фон (этикетку) на холсте."""
@@ -405,6 +441,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         # Рисуем белый прямоугольник, представляющий этикетку
         self.canvas.create_rectangle(10, 10, 10 + width_px, 10 + height_px, fill="white", outline="black", tags="label_bg")
+
+        # Перерисовываем все существующие объекты
+        for i, obj in enumerate(self.template['objects']):
+            self._draw_object(obj, i)
 
     def _add_object_to_canvas(self, barcode_type: str):
         """Добавляет новый объект (пока только штрихкод) на холст и в шаблон."""
@@ -422,20 +462,101 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             "width_mm": 30,
             "height_mm": 30
         }
+        
+        # Добавляем объект в список и получаем его индекс (ID)
+        object_id = len(self.template["objects"])
         self.template["objects"].append(new_object)
 
         # Отрисовываем объект на холсте
-        self._draw_object(new_object)
+        self._draw_object(new_object, object_id)
         logging.info(f"Добавлен новый объект: {barcode_type}. Текущий шаблон: {json.dumps(self.template, indent=2)}")
 
-    def _draw_object(self, obj_data: dict):
+    def _draw_object(self, obj_data: dict, object_id: int):
         """Отрисовывает один объект на холсте."""
+        canvas_tag = f"obj_{object_id}"
+        self.canvas_objects[object_id] = canvas_tag
+
         x_px = 10 + obj_data['x_mm'] * self.canvas_scale
         y_px = 10 + obj_data['y_mm'] * self.canvas_scale
         width_px = obj_data['width_mm'] * self.canvas_scale
         height_px = obj_data['height_mm'] * self.canvas_scale
 
         # Рисуем прямоугольник-заглушку
-        self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill="lightblue", outline="blue", tags="object")
+        outline_color = "blue" if object_id == self.selected_object_id else "grey"
+        self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill="lightblue", outline=outline_color, width=2, tags=(canvas_tag, "object"))
         # Добавляем текст
-        self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=obj_data['barcode_type'], tags="object_text")
+        self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=obj_data['barcode_type'], tags=(canvas_tag, "object_text"))
+
+    def _on_canvas_click(self, event):
+        """Обрабатывает клики по холсту для выделения объектов."""
+        clicked_items = self.canvas.find_withtag(tk.CURRENT)
+        if not clicked_items:
+            self._select_object(None) # Клик по пустому месту
+            return
+
+        # Ищем тег объекта, например "obj_0"
+        for tag in self.canvas.gettags(clicked_items[0]):
+            if tag.startswith("obj_"):
+                try:
+                    object_id = int(tag.split("_")[1])
+                    self._select_object(object_id)
+                    return
+                except (ValueError, IndexError):
+                    continue
+        
+        # Если кликнули, но не по объекту (например, по фону)
+        self._select_object(None)
+
+    def _select_object(self, object_id: int or None):
+        """Выделяет объект и обновляет UI."""
+        if self.selected_object_id == object_id:
+            return # Объект уже выделен
+
+        self.selected_object_id = object_id
+        self._draw_canvas_background() # Перерисовываем все для обновления рамок
+
+        if object_id is not None:
+            self._toggle_properties_panel(True)
+            self._update_properties_panel()
+        else:
+            self._toggle_properties_panel(False)
+
+    def _toggle_properties_panel(self, active: bool):
+        """Включает или выключает панель свойств."""
+        state = "normal" if active else "disabled"
+        for widget in self.properties_frame.winfo_children():
+            # ttk.Entry и ttk.Button не имеют метода configure для state в некоторых случаях
+            try:
+                widget.config(state=state)
+            except tk.TclError:
+                if isinstance(widget, (ttk.Entry, ttk.Button)):
+                    widget.state([state] if state == "normal" else [state])
+                elif isinstance(widget, ttk.Frame): # Рекурсивно для вложенных фреймов
+                    for sub_widget in widget.winfo_children():
+                         try: sub_widget.config(state=state)
+                         except tk.TclError: pass
+
+    def _update_properties_panel(self):
+        """Заполняет панель свойств данными выделенного объекта."""
+        if self.selected_object_id is None:
+            return
+
+        obj_data = self.template['objects'][self.selected_object_id]
+        for key, entry in self.prop_entries.items():
+            entry.delete(0, tk.END)
+            entry.insert(0, str(obj_data.get(key, '')))
+
+    def _apply_properties(self):
+        """Применяет изменения из панели свойств к объекту."""
+        if self.selected_object_id is None:
+            return
+
+        try:
+            for key, entry in self.prop_entries.items():
+                value = float(entry.get())
+                self.template['objects'][self.selected_object_id][key] = value
+            
+            self._draw_canvas_background() # Перерисовываем холст с новыми данными
+            logging.info(f"Свойства объекта {self.selected_object_id} обновлены.")
+        except ValueError:
+            messagebox.showerror("Ошибка", "Значения свойств должны быть числами.", parent=self)
