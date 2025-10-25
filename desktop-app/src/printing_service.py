@@ -816,18 +816,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             logging.info(f"Свойства объекта {self.selected_object_id} обновлены.")
         except ValueError:
             messagebox.showerror("Ошибка", "Значения геометрических свойств должны быть числами.", parent=self)
-        canvas_frame = ttk.Frame(paned_window)
-        paned_window.add(canvas_frame, weight=4)
-
-        self.canvas = tk.Canvas(canvas_frame, bg="lightgrey")
-        self.canvas.pack(fill=tk.BOTH, expand=True)
-
-        # Привязываем событие клика к холсту
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
-
-        # Изначально деактивируем все панели
-        self._toggle_properties_panel(False)
-        self._toggle_tools_panel(False)
 
     def _switch_view(self, view_name: str):
         """Переключает между видом списка и видом редактора."""
