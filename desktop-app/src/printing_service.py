@@ -356,6 +356,34 @@ class PrintingService:
                     logging.warning(f"Не удалось удалить временный PDF файл {temp_pdf_path}: {e}")
 
     @staticmethod
+    def preview_pdf(pdf_buffer: io.BytesIO):
+        """
+        Сохраняет PDF во временный файл и открывает его для предпросмотра.
+        Файл не удаляется сразу, чтобы пользователь успел его посмотреть.
+        """
+        if win32api is None:
+            logging.error("Невозможно выполнить предпросмотр: отсутствуют библиотеки pywin32.")
+            raise RuntimeError("pywin32 libraries are not installed.")
+
+        temp_pdf_path = None
+        try:
+            # Создаем временный файл с суффиксом .pdf, который не будет удален автоматически
+            # Это позволяет программе просмотра PDF получить к нему доступ.
+            fd, temp_pdf_path = tempfile.mkstemp(suffix=".pdf")
+            with os.fdopen(fd, 'wb') as temp_file:
+                temp_file.write(pdf_buffer.getvalue())
+
+            logging.info(f"PDF для предпросмотра сохранен: {temp_pdf_path}")
+
+            # Используем os.startfile для открытия файла ассоциированным приложением.
+            # Это проще и надежнее для данной задачи, чем ShellExecute.
+            os.startfile(temp_pdf_path)
+
+        except Exception as e:
+            logging.error(f"Ошибка при открытии PDF для предпросмотра: {e}")
+            raise RuntimeError(f"Ошибка предпросмотра: {e}")
+
+    @staticmethod
     def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list):
         """
         Генерирует и печатает по одной этикетке для каждого элемента в списке.
@@ -376,17 +404,20 @@ class PrintingService:
 
         logging.info(f"Начало пакетной печати {len(items_data)} этикеток на принтер '{printer_name}'...")
 
-        for i, item_data in enumerate(items_data):
-            try:
-                logging.info(f"Генерация PDF для элемента {i+1}/{len(items_data)}...")
-                pdf_buffer = PrintingService.generate_pdf_from_template(template_json, item_data)
-                
-                # Отправляем на печать. Будет создан временный файл для каждого PDF.
-                PrintingService.print_pdf(printer_name, pdf_buffer, paper_name)
-            except Exception as e:
-                logging.error(f"Ошибка при печати этикетки для элемента {i+1}: {item_data}. Ошибка: {e}")
-                # --- ИСПРАВЛЕНИЕ: Прерываем выполнение и пробрасываем ошибку наверх ---
-                raise RuntimeError(f"Ошибка при генерации этикетки №{i+1}. Процесс печати прерван.") from e
+        # --- ИЗМЕНЕНИЕ: Вместо печати, генерируем и открываем первую этикетку для предпросмотра ---
+        first_item_data = items_data[0]
+        try:
+            logging.info(f"Генерация PDF для предпросмотра (элемент 1 из {len(items_data)})...")
+            pdf_buffer = PrintingService.generate_pdf_from_template(template_json, first_item_data)
+
+            logging.info("Открытие PDF для предпросмотра...")
+            PrintingService.preview_pdf(pdf_buffer)
+
+            messagebox.showinfo("Предпросмотр", f"Сгенерирована и открыта для предпросмотра первая этикетка из {len(items_data)}.\nОстальные этикетки не будут обработаны в режиме предпросмотра.")
+
+        except Exception as e:
+            logging.error(f"Ошибка при генерации предпросмотра для элемента: {first_item_data}. Ошибка: {e}")
+            raise RuntimeError(f"Ошибка при генерации предпросмотра. Процесс прерван.") from e
 
 
 # --- Класс визуального редактора макетов ---
