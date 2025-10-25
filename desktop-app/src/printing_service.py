@@ -8,11 +8,14 @@ from typing import Dict, Any
 # Библиотеки для генерации штрихкодов и работы с Windows API
 try:
     import qrcode
-    from PIL import Image
+    from PIL import Image, ImageDraw, ImageFont, ImageTk
 except ImportError:
     logging.warning("QR code generation libraries (qrcode, Pillow) not installed. QR code features will be limited. Install with: pip install qrcode Pillow")
     qrcode = None
     Image = None
+    ImageDraw = None
+    ImageFont = None
+    ImageTk = None
 
 try:
     import win32print
@@ -44,6 +47,93 @@ class PrintingService:
     """
     Сервис для генерации и печати документов.
     """
+
+    @staticmethod
+    def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any]):
+        """
+        Генерирует изображение этикетки в памяти с помощью Pillow, обходясь без ReportLab.
+        """
+        if Image is None or ImageDraw is None or ImageFont is None:
+            raise ImportError("Библиотека Pillow не установлена. Генерация изображения невозможна.")
+
+        # Используем стандартный DPI для конвертации мм в пиксели
+        DPI = 300
+        dots_per_mm = DPI / 25.4
+
+        width_px = int(template_json.get("width_mm", 100) * dots_per_mm)
+        height_px = int(template_json.get("height_mm", 50) * dots_per_mm)
+
+        # Создаем белое изображение
+        label_image = Image.new('RGB', (width_px, height_px), 'white')
+        draw = ImageDraw.Draw(label_image)
+
+        for obj in template_json.get("objects", []):
+            obj_data = data.get(obj["data_source"])
+            if obj_data is None:
+                logging.warning(f"Источник данных '{obj['data_source']}' не найден. Пропуск объекта.")
+                continue
+
+            # Конвертируем координаты и размеры из мм в пиксели
+            x = int(obj["x_mm"] * dots_per_mm)
+            y = int(obj["y_mm"] * dots_per_mm)
+            width = int(obj["width_mm"] * dots_per_mm)
+            height = int(obj["height_mm"] * dots_per_mm)
+
+            if obj["type"] == "text":
+                text = str(obj_data)
+                try:
+                    # Пытаемся загрузить системный шрифт Arial
+                    font = ImageFont.truetype("arial.ttf", size=int(height * 0.8))
+                except IOError:
+                    # Если не найден, используем шрифт по умолчанию
+                    font = ImageFont.load_default()
+                
+                # Рисуем текст. Координаты (x, y) - это верхний левый угол.
+                draw.text((x, y), text, fill="black", font=font)
+
+            elif obj["type"] == "barcode":
+                barcode_type = obj.get("barcode_type", "QR").upper()
+                if barcode_type == "QR":
+                    if qrcode is None:
+                        logging.warning("Библиотека qrcode не установлена, пропуск QR-кода.")
+                        continue
+                    
+                    qr_gen = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=1)
+                    qr_gen.add_data(str(obj_data))
+                    qr_gen.make(fit=True)
+                    barcode_image = qr_gen.make_image(fill_color="black", back_color="white")
+
+                    # Масштабируем QR-код под нужный размер и вставляем на этикетку
+                    barcode_image = barcode_image.resize((width, height), Image.Resampling.LANCZOS)
+                    label_image.paste(barcode_image, (x, y))
+                else:
+                    logging.warning(f"Генерация изображения для типа штрихкода '{barcode_type}' пока не реализована.")
+                    # Рисуем заглушку
+                    draw.rectangle([x, y, x + width, y + height], outline="red", fill="white")
+                    draw.text((x + 5, y + 5), f"Unsupported:\n{barcode_type}", fill="red")
+
+        return label_image
+
+    @staticmethod
+    def preview_image(image: Image.Image):
+        """
+        Открывает новое окно Tkinter для отображения сгенерированного изображения.
+        """
+        if tk is None or ImageTk is None:
+            raise ImportError("Tkinter или Pillow.ImageTk не доступны. Предпросмотр невозможен.")
+        
+        preview_window = tk.Toplevel()
+        preview_window.title("Предпросмотр этикетки")
+        preview_window.grab_set()
+
+        # Конвертируем изображение для Tkinter
+        photo_image = ImageTk.PhotoImage(image)
+
+        # Отображаем изображение в Label
+        label = tk.Label(preview_window, image=photo_image)
+        # ВАЖНО: сохраняем ссылку на изображение, чтобы оно не было удалено сборщиком мусора
+        label.image = photo_image 
+        label.pack(padx=10, pady=10)
 
     @staticmethod
     def print_label_direct(printer_name: str, template_json: Dict[str, Any], data: Dict[str, Any]):
@@ -183,17 +273,20 @@ class PrintingService:
 
         logging.info(f"Начало пакетной печати {len(items_data)} этикеток на принтер '{printer_name}'...")
 
-        # --- НОВАЯ ЛОГИКА: Используем прямую печать для каждого элемента ---
-        for i, item_data in enumerate(items_data):
-            try:
-                logging.info(f"Прямая печать этикетки {i+1}/{len(items_data)}...")
-                # Вызываем новый метод прямой печати
-                PrintingService.print_label_direct(printer_name, template_json, item_data)
-            except Exception as e:
-                logging.error(f"Ошибка при прямой печати этикетки для элемента {i+1}: {item_data}. Ошибка: {e}")
-                # Прерываем выполнение и пробрасываем ошибку наверх, чтобы пользователь увидел сообщение
-                raise RuntimeError(f"Ошибка при печати этикетки №{i+1}. Процесс печати прерван.") from e
+        # --- НОВАЯ ЛОГИКА: Вместо печати, генерируем и открываем первую этикетку для предпросмотра ---
+        first_item_data = items_data[0]
+        try:
+            logging.info(f"Генерация изображения для предпросмотра (элемент 1 из {len(items_data)})...")
+            label_image = PrintingService.generate_label_image(template_json, first_item_data)
 
+            logging.info("Открытие окна предпросмотра...")
+            PrintingService.preview_image(label_image)
+
+            messagebox.showinfo("Предпросмотр", f"Сгенерирована и открыта для предпросмотра первая этикетка из {len(items_data)}.\nОстальные этикетки не будут обработаны в режиме предпросмотра.")
+
+        except Exception as e:
+            logging.error(f"Ошибка при генерации предпросмотра для элемента: {first_item_data}. Ошибка: {e}")
+            raise RuntimeError(f"Ошибка при генерации предпросмотра. Процесс прерван.") from e
 
 # --- Класс визуального редактора макетов ---
 
