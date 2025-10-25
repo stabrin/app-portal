@@ -229,8 +229,11 @@ class PrintingService:
                         dib_data = barcode_image.tobytes('raw', 'RGB')
                         
                         # 5. Рисуем DIB в mem_dc с масштабированием (StretchBlt).
-                        mem_dc.StretchBlt((0, 0), (width, height), None, (0, 0), (barcode_image.width, barcode_image.height), dib_data, win32con.SRCCOPY)
-
+                        # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ: Используем StretchDIBits ---
+                        # Эта функция специально предназначена для отрисовки DIB (Device-Independent Bitmap) из данных в памяти.
+                        # Она принимает правильное количество аргументов.
+                        mem_dc.StretchDIBits((0, 0), (width, height), (0, 0), (barcode_image.width, barcode_image.height), dib_data, barcode_image.info.get('dib'), win32con.SRCCOPY)
+                        
                         # 6. Копируем итоговое масштабированное изображение из памяти на "холст" принтера.
                         dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
                         
