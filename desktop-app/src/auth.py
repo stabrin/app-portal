@@ -88,11 +88,13 @@ class StandaloneLoginWindow(tk.Tk):
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
                     # Если это администратор, добавляем всю информацию о его клиенте
+                    # --- ИСПРАВЛЕНИЕ: Читаем SSL-сертификат из активного соединения ---
                     if user_role == 'администратор':
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
-                            "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert
+                            "db_user": db_user, "db_password": db_password,
+                            "db_ssl_cert": conn.info.ssl_root_cert # Получаем содержимое сертификата
                         }
                     self.on_complete_callback(user_info) # Сначала вызываем callback
                     self.destroy() # Затем уничтожаем окно

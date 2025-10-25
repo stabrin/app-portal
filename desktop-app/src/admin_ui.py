@@ -169,12 +169,21 @@ def open_workplace_setup_window(parent_widget, user_info):
             return
 
         try:
-            import qrcode
-            from PIL import Image, ImageTk
-            import zlib, base64
+            # Эти импорты уже есть в display_qr_sequence, но для ясности оставим
+            import zlib
+            import base64
         except ImportError:
             messagebox.showerror("Ошибка", "Необходимые библиотеки не установлены.\nУстановите их: pip install qrcode pillow", parent=setup_window)
             return
+
+        # --- НОВАЯ ЛОГИКА: Получаем SSL-сертификат из БД ---
+        # Это необходимо, чтобы включить его в QR-код настройки
+        try:
+            with get_main_db_connection() as conn:
+                # Этот запрос не требует курсора, т.к. мы просто читаем переменную
+                ssl_cert_content = conn.info.ssl_root_cert
+        except Exception as e:
+            ssl_cert_content = f"ERROR: Could not read cert file: {e}"
 
         config_data = {
             "type": "server_config", # Тип для распознавания сканером
@@ -183,11 +192,11 @@ def open_workplace_setup_window(parent_widget, user_info):
 
         # Сжатие данных для уменьшения размера QR-кода
         json_bytes = json.dumps(config_data).encode('utf-8')
-        compressed_bytes = zlib.compress(json_bytes, level=9)
-        base64_data = base64.b64encode(compressed_bytes).decode('ascii')
+        compressed_bytes = zlib.compress(json_bytes, level=9) # Максимальное сжатие
+        full_base64_data = base64.b64encode(compressed_bytes).decode('ascii')
 
         chunk_size = 2500
-        chunks = [base64_data[i:i + chunk_size] for i in range(0, len(base64_data), chunk_size)]
+        chunks = [full_base64_data[i:i + chunk_size] for i in range(0, len(full_base64_data), chunk_size)]
 
         display_qr_sequence(f"Настройка сервера: {address}", chunks, setup_window)
 
@@ -453,6 +462,69 @@ def display_qr_sequence(title, chunks, parent):
     next_button.config(command=show_next)
     show_chunk(0)
 
+class PreviewLabelsDialog(tk.Toplevel):
+    """Новый класс для окна предпросмотра сгенерированных этикеток."""
+    def __init__(self, parent, images, on_print_callback):
+        super().__init__(parent)
+        self.title("Предпросмотр этикеток")
+        self.geometry("600x500")
+        self.transient(parent)
+        self.grab_set()
+
+        self.images = images
+        self.on_print_callback = on_print_callback
+        self.current_index = 0
+
+        self.info_label = ttk.Label(self, text="", font=("Arial", 12))
+        self.info_label.pack(pady=10)
+
+        self.image_label = ttk.Label(self)
+        self.image_label.pack(padx=10, pady=10, expand=True, fill="both")
+
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(pady=10)
+
+        self.prev_button = ttk.Button(nav_frame, text="<< Назад", command=self._show_prev)
+        self.prev_button.pack(side=tk.LEFT, padx=10)
+
+        self.print_button = ttk.Button(nav_frame, text="Напечатать все", command=self._confirm_print)
+        self.print_button.pack(side=tk.LEFT, padx=10)
+
+        self.next_button = ttk.Button(nav_frame, text="Далее >>", command=self._show_next)
+        self.next_button.pack(side=tk.LEFT, padx=10)
+
+        self._show_image(0)
+
+    def _show_image(self, index):
+        self.current_index = index
+        image = self.images[index]
+
+        # Масштабируем изображение для предпросмотра, сохраняя пропорции
+        max_w, max_h = 500, 350
+        img_w, img_h = image.size
+        ratio = min(max_w / img_w, max_h / img_h)
+        new_size = (int(img_w * ratio), int(img_h * ratio))
+        
+        from PIL import ImageTk
+        resized_image = image.resize(new_size, Image.Resampling.LANCZOS)
+        photo = ImageTk.PhotoImage(resized_image)
+
+        self.image_label.config(image=photo)
+        self.image_label.image = photo
+
+        self.info_label.config(text=f"Этикетка {index + 1} из {len(self.images)}")
+        self.prev_button.config(state="normal" if index > 0 else "disabled")
+        self.next_button.config(state="normal" if index < len(self.images) - 1 else "disabled")
+
+    def _show_next(self):
+        if self.current_index < len(self.images) - 1: self._show_image(self.current_index + 1)
+    def _show_prev(self):
+        if self.current_index > 0: self._show_image(self.current_index - 1)
+
+    def _confirm_print(self):
+        self.on_print_callback()
+        self.destroy()
+
 class PrintWorkplaceLabelsDialog(tk.Toplevel):
     """Диалог для выбора параметров печати этикеток рабочих мест."""
     # --- ИСПРАВЛЕНИЕ: Добавляем импорты для работы с принтерами ---
@@ -584,19 +656,40 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
                     cur.execute("SELECT * FROM ap_workplaces WHERE warehouse_name = %s ORDER BY workplace_number", (self.warehouse_name,))
                     workplaces_data = cur.fetchall()
             
-            # Преобразуем данные для сервиса печати
-            items_to_print = []
+            # --- НОВАЯ ЛОГИКА: Сначала генерируем изображения для предпросмотра ---
+            images_to_preview = []
+            all_items_data = [] # Сохраняем данные для последующей печати
             for wp in workplaces_data:
-                items_to_print.append({
+                # --- ИЗМЕНЕНИЕ: Формируем данные для QR-кода, как вы просили ---
+                qr_payload = {
+                    "type": "workplace_config",
+                    "warehouse": wp['warehouse_name'],
+                    "workplace": wp['workplace_number']
+                }
+                item_data = {
                     "ap_workplaces.warehouse_name": wp['warehouse_name'],
                     "ap_workplaces.workplace_number": wp['workplace_number'],
-                    "ap_workplaces.access_token": str(wp['access_token'])
-                })
+                    # Теперь источник данных для QR-кода будет содержать JSON
+                    "ap_workplaces.access_token": json.dumps(qr_payload, ensure_ascii=False)
+                }
+                all_items_data.append(item_data)
+                
+                # Генерируем изображение для этого элемента
+                img = PrintingService.generate_label_image(selected_layout['json'], item_data)
+                images_to_preview.append(img)
 
-            PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], items_to_print)
-            messagebox.showinfo("Успех", f"Задание на печать {len(items_to_print)} этикеток отправлено на принтер.", parent=self)
-            self.destroy()
+            if not images_to_preview:
+                messagebox.showwarning("Внимание", "Нет данных для генерации этикеток.", parent=self)
+                return
 
+            # Функция, которая будет вызвана, если пользователь нажмет "Напечатать" в окне предпросмотра
+            def perform_actual_printing():
+                PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data)
+                messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
+                self.destroy()
+
+            # Открываем окно предпросмотра
+            PreviewLabelsDialog(self, images_to_preview, perform_actual_printing)
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка печати этикеток рабочих мест: {e}\n{error_details}")
