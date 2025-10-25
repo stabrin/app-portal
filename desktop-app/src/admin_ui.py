@@ -550,7 +550,6 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         win32api = None
     # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
-    def __init__(self, parent, user_info, warehouse_name):
     def __init__(self, parent, user_info, title_name, items_to_print=None):
         super().__init__(parent)
         self.title(f"Печать этикеток для '{warehouse_name}'")
