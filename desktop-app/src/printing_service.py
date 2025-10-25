@@ -341,16 +341,13 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
     def _create_widgets(self):
         # Основной разделенный фрейм
-        paned_window = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
-        
         # --- Фрейм для списка макетов (начальный экран) ---
         self.list_view_frame = ttk.Frame(self, padding="10")
         self._create_list_view_widgets()
 
         # --- Фрейм для редактора (холст и инструменты) ---
         self.editor_view_frame = ttk.Frame(self)
-        self._create_editor_view_widgets(paned_window)
+        self._create_editor_view_widgets()
 
         # Показываем начальный экран
         self._switch_view('list')
@@ -380,17 +377,19 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         self._load_layouts_to_tree()
 
-    def _create_editor_view_widgets(self, paned_window):
+    def _create_editor_view_widgets(self):
         """Создает виджеты для экрана редактирования (холст, инструменты)."""
+        # PanedWindow теперь является дочерним элементом editor_view_frame
+        paned_window = ttk.PanedWindow(self.editor_view_frame, orient=tk.HORIZONTAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+
         # --- Левая панель (управление) ---
-        controls_frame = ttk.Frame(self.editor_view_frame, width=300, padding="10")
+        controls_frame = ttk.Frame(paned_window, width=300, padding="10")
         paned_window.add(controls_frame, weight=1)
 
         # Кнопки управления
         ttk.Button(controls_frame, text="<< К списку макетов", command=lambda: self._switch_view('list')).pack(fill=tk.X, pady=5)
         ttk.Button(controls_frame, text="Сохранить макет", command=self._save_layout).pack(fill=tk.X, pady=5)
-        # Кнопка создания нового макета
-        ttk.Button(controls_frame, text="Создать новый макет", command=self._prompt_for_new_layout).pack(fill=tk.X, pady=5)
         ttk.Separator(controls_frame).pack(fill=tk.X, pady=10)
 
         # Фрейм для инструментов (изначально неактивен)
@@ -426,14 +425,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.apply_props_button.pack(pady=5)
 
         # --- Правая панель редактора (холст) ---
-        canvas_frame = ttk.Frame(self.editor_view_frame)
+        canvas_frame = ttk.Frame(paned_window)
         paned_window.add(canvas_frame, weight=4)
 
         self.canvas = tk.Canvas(canvas_frame, bg="lightgrey")
         self.canvas.pack(fill=tk.BOTH, expand=True)
-
-        # Добавляем фрейм редактора в paned_window
-        self.editor_view_frame.add(paned_window)
 
         # Привязываем событие клика к холсту
         self.canvas.bind("<Button-1>", self._on_canvas_click)
