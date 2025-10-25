@@ -10,6 +10,9 @@ try:
     from reportlab.lib.pagesizes import A4, landscape, portrait
     from reportlab.lib.units import mm
     from reportlab.lib.utils import ImageReader
+    # Новые импорты для работы с текстом и переносами
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.colors import black
     # Для штрихкодов
     from reportlab.graphics.barcode import qr, code128, datamatrix
@@ -89,8 +92,42 @@ class PrintingService:
                 height = obj["height_mm"] * mm
 
                 if obj["type"] == "text":
-                    c.setFont(obj.get("font_name", "Helvetica"), obj.get("font_size", 10))
-                    c.drawString(x, y, str(obj_data))
+                    # --- НОВАЯ ЛОГИКА ДЛЯ ТЕКСТА С АВТОПОДБОРОМ РАЗМЕРА И ПЕРЕНОСАМИ ---
+                    text = str(obj_data)
+                    font_name = obj.get("font_name", "Helvetica")
+                    
+                    # Функция для поиска оптимального размера шрифта
+                    def find_optimal_font_size(txt, max_w, max_h, font):
+                        # Начинаем с большого шрифта и уменьшаем
+                        for size in range(48, 4, -1):
+                            style = ParagraphStyle(
+                                name='CustomStyle',
+                                fontName=font,
+                                fontSize=size,
+                                leading=size * 1.2, # Межстрочный интервал
+                            )
+                            p = Paragraph(txt, style)
+                            w, h = p.wrapOn(c, max_w, max_h)
+                            if w <= max_w and h <= max_h:
+                                return size, style, p
+                        # Если даже самый маленький шрифт не подошел
+                        style = ParagraphStyle(name='Smallest', fontName=font, fontSize=4, leading=4.8)
+                        return 4, style, Paragraph(txt, style)
+
+                    font_size, style, paragraph = find_optimal_font_size(text, width, height, font_name)
+                    
+                    # Пересчитываем реальную высоту параграфа с найденным шрифтом
+                    _, paragraph_height = paragraph.wrapOn(c, width, height)
+
+                    # Центрируем параграф по вертикали внутри его блока
+                    # y - это нижняя граница, поэтому сдвигаем вверх
+                    y_centered = y + (height - paragraph_height) / 2
+                    
+                    # Рисуем параграф. Он автоматически позиционируется внутри своего фрейма,
+                    # который мы "рисуем" с помощью translate и drawOn.
+                    c.saveState()
+                    paragraph.drawOn(c, x, y_centered)
+                    c.restoreState()
 
                 elif obj["type"] == "image":
                     # Предполагаем, что в obj_data находятся байты картинки
@@ -437,6 +474,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.tools_frame.pack(fill=tk.X, pady=5)
 
         # Кнопки для добавления объектов
+        ttk.Button(self.tools_frame, text="Добавить Текст", command=lambda: self._add_object_to_canvas("text")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить QR-код", command=lambda: self._add_object_to_canvas("QR")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить SSCC", command=lambda: self._add_object_to_canvas("SSCC")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить DataMatrix", command=lambda: self._add_object_to_canvas("DataMatrix")).pack(fill=tk.X, pady=2)
@@ -450,7 +488,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             "x_mm": "X (мм):",
             "y_mm": "Y (мм):",
             "width_mm": "Ширина (мм):",
-            "height_mm": "Высота (мм):"
+            "height_mm": "Высота (мм):",
+            "data_source": "Источник данных:"
         }
 
         for key, text in prop_fields.items():
@@ -654,22 +693,32 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             logging.error(f"Ошибка загрузки макетов из БД: {e}")
             messagebox.showerror("Ошибка", f"Не удалось загрузить макеты из базы данных: {e}", parent=self)
             
-    def _add_object_to_canvas(self, barcode_type: str):
-        """Добавляет новый объект (пока только штрихкод) на холст и в шаблон."""
+    def _add_object_to_canvas(self, obj_type: str):
+        """Добавляет новый объект на холст и в шаблон."""
         if not self.template:
             messagebox.showwarning("Внимание", "Сначала создайте новый макет.", parent=self)
             return
 
-        # Создаем объект с параметрами по умолчанию
-        new_object = {
-            "type": "barcode",
-            "barcode_type": barcode_type,
-            "data_source": "placeholder.data", # Заглушка
-            "x_mm": 10,
-            "y_mm": 10,
-            "width_mm": 30,
-            "height_mm": 30
-        }
+        if obj_type == "text":
+            new_object = {
+                "type": "text",
+                "data_source": "orders.client_name", # Пример
+                "x_mm": 10,
+                "y_mm": 10,
+                "width_mm": 40,
+                "height_mm": 15,
+                "font_name": "Helvetica" # Можно будет добавить в свойства
+            }
+        else: # Это штрихкод
+            new_object = {
+                "type": "barcode",
+                "barcode_type": obj_type, # obj_type здесь это 'QR', 'SSCC' и т.д.
+                "data_source": "packages.sscc_code", # Пример
+                "x_mm": 10,
+                "y_mm": 10,
+                "width_mm": 30,
+                "height_mm": 30
+            }
         
         # Добавляем объект в список и получаем его индекс (ID)
         object_id = len(self.template["objects"])
@@ -677,7 +726,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         # Отрисовываем объект на холсте
         self._draw_object(new_object, object_id)
-        logging.info(f"Добавлен новый объект: {barcode_type}. Текущий шаблон: {json.dumps(self.template, indent=2)}")
+        logging.info(f"Добавлен новый объект: {obj_type}. Текущий шаблон: {json.dumps(self.template, indent=2)}")
 
     def _draw_object(self, obj_data: dict, object_id: int):
         """Отрисовывает один объект на холсте."""
@@ -691,9 +740,16 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         # Рисуем прямоугольник-заглушку
         outline_color = "blue" if object_id == self.selected_object_id else "grey"
-        self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill="lightblue", outline=outline_color, width=2, tags=(canvas_tag, "object"))
-        # Добавляем текст
-        self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=obj_data['barcode_type'], tags=(canvas_tag, "object_text"))
+        
+        if obj_data['type'] == 'text':
+            fill_color = "lightyellow"
+            display_text = "Текст"
+        else: # barcode
+            fill_color = "lightblue"
+            display_text = obj_data['barcode_type']
+
+        self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill=fill_color, outline=outline_color, width=2, tags=(canvas_tag, "object"))
+        self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=display_text, tags=(canvas_tag, "object_text"))
 
     def _on_canvas_click(self, event):
         """Обрабатывает клики по холсту для выделения объектов."""
@@ -774,10 +830,13 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         try:
             for key, entry in self.prop_entries.items():
-                value = float(entry.get())
-                self.template['objects'][self.selected_object_id][key] = value
+                if key == 'data_source':
+                    self.template['objects'][self.selected_object_id][key] = entry.get()
+                else:
+                    value = float(entry.get())
+                    self.template['objects'][self.selected_object_id][key] = value
             
             self._draw_canvas_background() # Перерисовываем холст с новыми данными
             logging.info(f"Свойства объекта {self.selected_object_id} обновлены.")
         except ValueError:
-            messagebox.showerror("Ошибка", "Значения свойств должны быть числами.", parent=self)
+            messagebox.showerror("Ошибка", "Значения геометрических свойств должны быть числами.", parent=self)
