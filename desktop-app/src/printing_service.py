@@ -361,6 +361,10 @@ class PrintingService:
         :param items_data: Список словарей, где каждый словарь - данные для одной этикетки.
                            Пример: [{'orders.client_name': 'A'}, {'orders.client_name': 'B'}]
         """
+        # --- ИСПРАВЛЕНИЕ: Проверяем наличие ReportLab до начала цикла ---
+        if canvas is None:
+            raise ImportError("Библиотека ReportLab не установлена. Печать невозможна.")
+
         if not items_data:
             logging.warning("Список элементов для печати пуст.")
             return
@@ -376,7 +380,9 @@ class PrintingService:
                 PrintingService.print_pdf(printer_name, pdf_buffer, paper_name)
             except Exception as e:
                 logging.error(f"Ошибка при печати этикетки для элемента {i+1}: {item_data}. Ошибка: {e}")
-                # Можно добавить messagebox.showerror здесь, если нужна немедленная обратная связь
+                # --- ИСПРАВЛЕНИЕ: Прерываем выполнение и пробрасываем ошибку наверх ---
+                raise RuntimeError(f"Ошибка при генерации этикетки №{i+1}. Процесс печати прерван.") from e
+
 
 # --- Класс визуального редактора макетов ---
 
