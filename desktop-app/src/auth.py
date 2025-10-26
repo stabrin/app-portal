@@ -20,12 +20,11 @@ if os.path.isdir(venv_site_packages) and venv_site_packages not in sys.path:
     sys.path.insert(0, venv_site_packages)
 # --- КОНЕЦ РЕШЕНИЯ ---
 
-sys.path.insert(0, project_root)
-
-from db_connector import get_main_db_connection
+# --- ИСПРАВЛЕНИЕ: Используем относительные импорты ---
+from .db_connector import get_main_db_connection
 # Импортируем наши новые классы интерфейсов
-from supervisor_ui import SupervisorWindow
-from admin_ui import AdminWindow
+from .supervisor_ui import SupervisorWindow
+from .admin_ui import AdminWindow
 
 
 # --- Настройка логирования (копируем из main_window.py) ---

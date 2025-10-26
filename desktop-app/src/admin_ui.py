@@ -12,13 +12,13 @@ except ImportError:
     Image = None # Помечаем как недоступный, если Pillow не установлен
 
 # Импорты для работы с БД и QR-кодами
-from db_connector import get_main_db_connection
+from .db_connector import get_main_db_connection
 import bcrypt
 import psycopg2
 import psycopg2.extras
 
 # Импортируем новый сервис печати
-from printing_service import PrintingService, LabelEditorWindow
+from .printing_service import PrintingService, LabelEditorWindow
 
 import traceback
 

@@ -10,9 +10,9 @@ import traceback
 import psycopg2
 from psycopg2 import sql
 import bcrypt
-
-from db_connector import get_main_db_connection
-from scripts.setup_client_database import update_client_db_schema
+ 
+from .db_connector import get_main_db_connection
+from .scripts.setup_client_database import update_client_db_schema
 
 def run_db_setup():
     """
