@@ -576,12 +576,14 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             self.destroy()
             return
 
-        # Удаляем дублирующуюся функцию, теперь используем PrintingService._get_client_db_connection
-        # self._get_client_db_connection = PrintingService._get_client_db_connection 
-
         self._create_widgets()
         self._load_printers()
         self._load_layouts()
+
+    def _get_client_db_connection(self):
+        """Вспомогательный метод для подключения к БД клиента.
+        Использует универсальный метод из PrintingService."""
+        return PrintingService._get_client_db_connection(self.user_info)
 
     def _create_widgets(self):
         frame = ttk.Frame(self, padding="10")
@@ -641,7 +643,7 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
 
     def _load_layouts(self):
         try:
-            with PrintingService._get_client_db_connection(self.user_info) as conn:
+            with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT name, template_json FROM label_templates ORDER BY name")
                     self.layouts = [{'name': row[0], 'json': row[1]} for row in cur.fetchall()]
@@ -1042,7 +1044,7 @@ class AdminWindow(tk.Tk):
             "QR: Конфигурация сервера": json.dumps({"error": "not applicable"}),
             "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
             "ap_workplaces.warehouse_name": "Тест DataMatrix (из БД)",
-            "ap_workplaces.workplace_number": ""
+            "ap_workplaces.workplace_number": 0 # ИСПРАВЛЕНИЕ: Пустая строка вызывала ошибку, заменяем на 0
         }
 
         # Вызываем нашу стандартную процедуру печати с предпросмотром.
