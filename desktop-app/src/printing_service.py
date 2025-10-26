@@ -376,8 +376,12 @@ class PrintingService:
                             if not dmtx_encode:
                                 logging.warning("Библиотека pylibdmtx не установлена. Пропуск DataMatrix.")
                                 continue
-                            # pylibdmtx.encode принимает байты и возвращает готовое изображение Pillow
-                            barcode_image = dmtx_encode(data_str.encode('utf-8'))
+                            # --- ИСПРАВЛЕНИЕ: Логика приведена в соответствие с generate_label_image ---
+                            # dmtx_encode возвращает объект с пикселями, а не готовое изображение.
+                            # Его нужно сначала преобразовать в изображение Pillow.
+                            encoded_dm = dmtx_encode(data_str.encode('utf-8'))
+                            if encoded_dm:
+                                barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels)
                         
                         else:
                             logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
