@@ -26,7 +26,9 @@ spec_dir = os.path.dirname(SPECPATH)
 # PyInstaller анализирует ваш код, начиная с auth.py, и находит все импорты.
 a = Analysis(
     ['src/auth.py'], # PyInstaller автоматически разрешает путь относительно spec-файла
-    pathex=[],
+    # --- ИСПРАВЛЕНИЕ: Добавляем путь к папке с .spec файлом ---
+    # Это позволит PyInstaller найти db_connector.py, admin_ui.py и другие ваши модули.
+    pathex=[spec_dir],
     # Явно указываем, что нужно включить DLL. Она будет лежать в корневой папке приложения.
     binaries=[(libdmtx_dll_path, '.')],
     # Указываем, какие файлы данных нужно скопировать.
