@@ -146,6 +146,10 @@ class PrintingService:
         draw = ImageDraw.Draw(label_image)
 
         for obj in template_json.get("objects", []):
+            # --- УЛУЧШЕННОЕ ЛОГИРОВАНИЕ ---
+            logging.info(f"Обработка объекта: тип='{obj.get('type')}', источник='{obj.get('data_source')}'")
+            # --- КОНЕЦ ЛОГИРОВАНИЯ ---
+
             obj_data = data.get(obj["data_source"])
             
             # НОВАЯ ЛОГИКА: Если obj_data не предоставлен, пытаемся получить его из БД
@@ -157,6 +161,11 @@ class PrintingService:
             elif obj_data is None: # If it's not a DB source and still None
                 logging.warning(f"Источник данных '{obj['data_source']}' не найден. Пропуск объекта.")
                 continue
+            
+            # --- УЛУЧШЕННОЕ ЛОГИРОВАНИЕ ---
+            # Выводим первые 50 символов полученных данных, чтобы не засорять лог
+            logging.info(f"  -> Получены данные: '{str(obj_data)[:50]}...'")
+            # --- КОНЕЦ ЛОГИРОВАНИЯ ---
 
             # Конвертируем координаты и размеры из мм в пиксели
             x = int(obj["x_mm"] * dots_per_mm)
@@ -166,16 +175,16 @@ class PrintingService:
 
             if obj["type"] == "text":
                 text = str(obj_data)
+                # --- ИСПРАВЛЕНИЕ: Логика загрузки шрифта перенесена внутрь блока "text" ---
                 try:
                     # Пытаемся загрузить системный шрифт Arial
                     font = ImageFont.truetype("arial.ttf", size=int(height * 0.8))
                 except IOError:
                     # Если не найден, используем шрифт по умолчанию
                     font = ImageFont.load_default()
-                
                 # Рисуем текст. Координаты (x, y) - это верхний левый угол.
                 draw.text((x, y), text, fill="black", font=font)
-
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
             elif obj["type"] == "barcode":
                 barcode_type = obj.get("barcode_type", "QR").upper()
                 if barcode_type == "QR":
