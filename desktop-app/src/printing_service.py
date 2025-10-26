@@ -172,8 +172,13 @@ class PrintingService:
             y = int(obj["y_mm"] * dots_per_mm)
             width = int(obj["width_mm"] * dots_per_mm)
             height = int(obj["height_mm"] * dots_per_mm)
+            
+            # --- НОВОЕ ЛОГИРОВАНИЕ ---
+            logging.info(f"  -> Рассчитанные размеры (px): width={width}, height={height}")
+            # --- КОНЕЦ ЛОГИРОВАНИЯ ---
 
             if obj["type"] == "text":
+                logging.info("  -> Обработка как 'text'")
                 text = str(obj_data)
                 # --- ИСПРАВЛЕНИЕ: Логика загрузки шрифта теперь находится внутри блока "text" ---
                 try:
@@ -184,8 +189,10 @@ class PrintingService:
                     font = ImageFont.load_default()
                 draw.text((x, y), text, fill="black", font=font)
             elif obj["type"] == "barcode":
+                logging.info("  -> Обработка как 'barcode'")
                 barcode_type = obj.get("barcode_type", "QR").upper()
                 if barcode_type == "QR":
+                    logging.info("    -> Подтип: 'QR'")
                     if qrcode is None:
                         logging.warning("Библиотека qrcode не установлена, пропуск QR-кода.")
                         continue
@@ -199,6 +206,7 @@ class PrintingService:
                     barcode_image = barcode_image.resize((width, height), Image.Resampling.LANCZOS)
                     label_image.paste(barcode_image, (x, y))
                 elif barcode_type == "DATAMATRIX":
+                    logging.info("    -> Подтип: 'DATAMATRIX'")
                     if DataMatrixEncoder is None:
                         logging.warning("Библиотека pystrich не установлена, пропуск DataMatrix.")
                         continue
