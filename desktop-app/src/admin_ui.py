@@ -219,7 +219,7 @@ def open_workplace_setup_window(parent_widget, user_info):
             "QR: Конфигурация сервера": json.dumps(main_config, ensure_ascii=False),
             "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
             "ap_workplaces.warehouse_name": "Настройка сервера (основное)",
-            "ap_workplaces.workplace_number": ""
+            "ap_workplaces.workplace_number": 0
         })
         # Следующие 10 этикеток - части сертификата
         for i, cert_part in enumerate(cert_chunks):
@@ -228,7 +228,7 @@ def open_workplace_setup_window(parent_widget, user_info):
                 "QR: Конфигурация сервера": json.dumps(cert_part_data, ensure_ascii=False),
                 "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
                 "ap_workplaces.warehouse_name": f"Сертификат (часть {i+1}/10)",
-                "ap_workplaces.workplace_number": ""
+                "ap_workplaces.workplace_number": 0
             })
 
         # 6. Открываем диалог печати, передавая ему список всех 11 частей.

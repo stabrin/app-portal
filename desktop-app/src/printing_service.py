@@ -282,7 +282,7 @@ class PrintingService:
 
                 if obj["type"] == "text":
                     text = str(obj_data)
-                    # --- ИСПРАВЛЕНИЕ: Логика создания шрифта перенесена внутрь блока "text" ---
+                    # --- ИСПРАВЛЕНИЕ: Логика создания шрифта находится внутри блока "text" ---
                     font_height = -int(height * 0.8)
                     font = win32ui.CreateFont({
                         'name': obj.get("font_name", "Arial"),
@@ -293,7 +293,7 @@ class PrintingService:
                     dc.SelectObject(font)
                     # Пока используем простой TextOut
                     dc.TextOut(x, y, text)
-                    win32gui.DeleteObject(font.GetHandle()) # Освобождаем ресурс шрифта
+                    win32gui.DeleteObject(font.GetHandle()) # Освобождаем ресурс шрифта после использования
                 elif obj["type"] == "barcode":
                     # Для штрихкодов генерируем картинку в памяти и "впечатываем" ее на холст
                     barcode_type = obj.get("barcode_type", "QR").upper()
