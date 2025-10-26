@@ -7,8 +7,8 @@ from typing import Dict, Any
 
 # Библиотеки для генерации штрихкодов и работы с Windows API
 try:
-    import qrcode
-    from PIL import Image, ImageDraw, ImageFont, ImageTk
+    import qrcode # type: ignore
+    from PIL import Image, ImageDraw, ImageFont, ImageTk, ImageWin # type: ignore
 except ImportError:
     logging.warning("QR code generation libraries (qrcode, Pillow) not installed. QR code features will be limited. Install with: pip install qrcode Pillow")
     qrcode = None
@@ -16,6 +16,7 @@ except ImportError:
     ImageDraw = None
     ImageFont = None
     ImageTk = None
+    ImageWin = None
 
 try:
     import win32print
@@ -195,15 +196,15 @@ class PrintingService:
                     barcode_image = None
 
                     if qrcode is None or Image is None:
-                        logging.warning("Библиотеки для генерации штрихкодов не установлены.")
+                        logging.warning("Библиотеки для генерации штрихкодов (qrcode, Pillow) не установлены.")
                         continue
 
                     # Генерируем PIL Image
                     if barcode_type == "QR":
                         qr_gen = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=1)
-                        qr_gen.add_data(str(obj_data))
+                        qr_gen.add_data(str(obj_data)) # type: ignore
                         qr_gen.make(fit=True)
-                        barcode_image = qr_gen.make_image(fill_color="black", back_color="white")
+                        barcode_image = qr_gen.make_image(fill_color="black", back_color="white") # type: ignore
                     # TODO: Добавить генерацию для других типов штрихкодов (SSCC, DataMatrix)
                     # Потребуется библиотека python-barcode или аналоги
                     else:
@@ -211,30 +212,31 @@ class PrintingService:
                         continue
 
                     if barcode_image:
-                        # --- ИСПРАВЛЕНИЕ: Используем правильный способ конвертации PIL Image в DIB для pywin32 ---
-                        # 1. Создаем битмап-контейнер нужного размера для холста принтера.
-                        bmp = win32ui.CreateBitmap()
-                        bmp.CreateCompatibleBitmap(dc, width, height)
-                        
-                        # 2. Создаем "вспомогательный" DC в памяти для масштабирования.
-                        mem_dc = dc.CreateCompatibleDC()
-                        mem_dc.SelectObject(bmp)
+                        # --- ИСПРАВЛЕНИЕ: Используем ImageWin.Dib для отрисовки PIL Image на DC ---
+                        if ImageWin is None:
+                            logging.error("ImageWin (часть Pillow) не доступен. Невозможно напечатать изображение.")
+                            raise ImportError("ImageWin не доступен.")
 
-                        # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ: Используем SetBitmapBits ---
-                        # 3. Масштабируем изображение до нужных размеров печати.
+                        # 1. Масштабируем изображение до нужных размеров печати.
                         scaled_image = barcode_image.resize((width, height), Image.Resampling.LANCZOS)
                         
-                        # 4. Конвертируем изображение в формат, совместимый с SetBitmapBits.
-                        # 'BGRX' - это 32-битный формат, который хорошо работает с pywin32.
+                        # 2. Конвертируем изображение в RGB, если оно в другом формате.
                         if scaled_image.mode != 'RGB':
                             scaled_image = scaled_image.convert('RGB')
-                        image_data = scaled_image.tobytes('raw', 'BGRX')
                         
-                        # 5. Загружаем данные изображения в битмап.
-                        bmp.SetBitmapBits(True, image_data)
+                        # 3. Создаем DIB из PIL Image
+                        dib = ImageWin.Dib(scaled_image)
+
+                        # 4. Создаем битмап и выбираем его в memory DC
+                        bmp = win32ui.CreateBitmap()
+                        bmp.CreateCompatibleBitmap(dc, width, height)
+                        mem_dc = dc.CreateCompatibleDC()
+                        mem_dc.SelectObject(bmp)
                         
-                        # 6. Копируем готовый битмап из памяти на "холст" принтера.
-                        # Теперь не нужно масштабирование, так как изображение уже нужного размера.
+                        # 5. Рисуем DIB на memory DC
+                        dib.draw(mem_dc.GetHandle(), (0, 0, width, height))
+                        
+                        # 6. Копируем готовый битмап из memory DC на "холст" принтера.
                         dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
                         
                         # Очищаем ресурсы
