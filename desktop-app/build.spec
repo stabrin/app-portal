@@ -11,12 +11,12 @@ import sys
 # PyInstaller не всегда находит её автоматически.
 
 # --- ИСПРАВЛЕНИЕ: Используем абсолютный путь от .spec файла, а не от текущей директории ---
-spec_dir = os.path.dirname(os.path.abspath(__file__))
-venv_path = os.path.join(spec_dir, '.venv')
+# Используем переменную SPECPATH, предоставляемую PyInstaller, для надежного определения пути.
+spec_dir = os.path.dirname(SPECPATH)
 libdmtx_dll_path = None
 
 # Ищем DLL в папке site-packages вашего виртуального окружения
-site_packages_path = os.path.join(venv_path, 'Lib', 'site-packages')
+site_packages_path = os.path.join(spec_dir, '..', '.venv', 'Lib', 'site-packages')
 if os.path.isdir(site_packages_path):
     for root, dirs, files in os.walk(site_packages_path):
         # Имя DLL может немного отличаться, но обычно содержит 'libdmtx'
