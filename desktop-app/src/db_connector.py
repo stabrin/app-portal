@@ -5,6 +5,9 @@ import logging
 import psycopg2
 from contextlib import contextmanager
 from dotenv import load_dotenv
+
+from run import resource_path # Импортируем нашу новую функцию
+
 @contextmanager
 def get_main_db_connection():
     """
@@ -23,10 +26,8 @@ def get_main_db_connection():
         "sslmode": 'verify-full'
     }
 
-    # Находим путь к сертификату сервера
-    desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    app_portal_root = os.path.abspath(os.path.join(desktop_app_root, '..'))
-    cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
+    # --- ИСПРАВЛЕНИЕ: Используем универсальную функцию для поиска ресурса ---
+    cert_path = resource_path(os.path.join('secrets', 'postgres', 'server.crt'))
     if not os.path.exists(cert_path):
         raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
 
