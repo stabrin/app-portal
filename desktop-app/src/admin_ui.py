@@ -167,51 +167,71 @@ def open_workplace_setup_window(parent_widget, user_info):
     ttk.Label(config_frame, text="(например, http://192.168.1.100:8080)", wraplength=400).pack(anchor="w", pady=(0, 5))
     server_address_entry = ttk.Entry(config_frame, width=60)
     server_address_entry.pack(fill="x")
-
+    
     def generate_server_config_qr():
         """
-        Новая логика: вместо отображения QR на экране, открывает диалог печати.
-        """
-        address = server_address_entry.get()
-        if not address:
-            messagebox.showwarning("Внимание", "Введите адрес сервера.", parent=setup_window)
-            return
+        Новая логика: формирует QR-код для настройки сервера и открывает диалог печати.
+        В QR-код помещаются базовые данные для подключения, но без SSL-сертификата,
+        чтобы код оставался компактным и легко читаемым.
 
+        ИЗМЕНЕНИЕ: Теперь генерируется многочастный QR-код.
+        - Часть 1: Основные настройки (адрес, порт, юзер и т.д.)
+        - Части 2..N: SSL-сертификат.
+        Это позволяет настроить рабочее место полностью в офлайн-режиме.
+        """
         try:
-            # Эти импорты уже есть в display_qr_sequence, но для ясности оставим
             import zlib
             import base64
         except ImportError:
-            messagebox.showerror("Ошибка", "Необходимые библиотеки не установлены.\nУстановите их: pip install qrcode pillow", parent=setup_window)
             messagebox.showerror("Ошибка", "Необходимые библиотеки для сжатия не установлены.", parent=setup_window)
             return
 
-        # --- НОВАЯ ЛОГИКА: Получаем SSL-сертификат из БД ---
-        # Это необходимо, чтобы включить его в QR-код настройки
-        try:
-            with get_main_db_connection() as conn:
-                # Этот запрос не требует курсора, т.к. мы просто читаем переменную
-                ssl_cert_content = conn.info.ssl_root_cert
-        except Exception as e:
-            ssl_cert_content = f"ERROR: Could not read cert file: {e}"
+        # 1. Получаем конфигурацию БД клиента из user_info
+        config_data = user_info.get('client_db_config', {}).copy()
+        if not config_data:
+            messagebox.showerror("Ошибка", "Конфигурация базы данных клиента не найдена в данных пользователя.", parent=setup_window)
+            return
 
-        config_data = {
-            "type": "server_config", # Тип для распознавания сканером
-            "address": address
+        # 2. Определяем адрес сервера
+        final_address = server_address_entry.get().strip() or config_data.get('db_host')
+        if not final_address:
+            messagebox.showerror("Ошибка", "Не удалось определить адрес сервера. Введите его вручную или убедитесь, что он есть в конфигурации клиента.", parent=setup_window)
+            return
+
+        # 3. Разделяем данные: основные настройки и сертификат
+        ssl_cert_content = config_data.pop('db_ssl_cert', '') # Извлекаем сертификат
+        
+        main_config = {
+            "type": "server_config_main",
+            "address": final_address, # Адрес, который будет использовать мобильное приложение
+            "db_name": config_data.get("db_name"),
+            "db_user": config_data.get("db_user"),
+            "db_password": config_data.get("db_password"),
+            "db_port": config_data.get("db_port")
         }
+        
+        # 4. Сжимаем и кодируем данные
+        def compress_and_encode(data_dict):
+            json_bytes = json.dumps(data_dict, ensure_ascii=False).encode('utf-8')
+            compressed = zlib.compress(json_bytes, level=9)
+            return base64.b64encode(compressed).decode('ascii')
 
-        # Формируем данные для подстановки в макет.
-        # Это имитирует структуру данных, как при печати этикеток рабочих мест.
-        item_data_for_printing = {
-            # ВАЖНО: Ключ должен совпадать с одним из доступных источников данных в редакторе макетов.
-            # Для QR-кода сервера мы передаем JSON-строку с его конфигурацией.
-            "QR: Конфигурация сервера": json.dumps(config_data, ensure_ascii=False),
-            # Добавляем заглушки для других возможных полей в макете, чтобы избежать ошибок.
-            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"})
-        }
+        # 5. Разбиваем сертификат на части
+        cert_chunk_size = 2000 # Размер части для сертификата
+        cert_chunks = [ssl_cert_content[i:i+cert_chunk_size] for i in range(0, len(ssl_cert_content), cert_chunk_size)]
 
-        # Открываем новый диалог печати, передавая ему данные для единственной этикетки.
-        PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {address}", [item_data_for_printing])
+        # 6. Формируем итоговый список данных для QR-кодов
+        all_chunks_data = []
+        # Первая часть - основные настройки
+        main_config['cert_parts_count'] = len(cert_chunks) # Сообщаем сканеру, сколько частей сертификата ожидать
+        all_chunks_data.append(compress_and_encode(main_config))
+        # Последующие части - сертификат
+        for i, cert_part in enumerate(cert_chunks):
+            cert_part_data = {"type": "server_config_cert", "part_index": i, "data": cert_part}
+            all_chunks_data.append(compress_and_encode(cert_part_data))
+
+        # 7. Отображаем последовательность QR-кодов
+        display_qr_sequence(f"Настройка сервера: {final_address}", all_chunks_data, setup_window)
 
     ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
 
