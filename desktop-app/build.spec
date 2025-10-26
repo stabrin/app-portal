@@ -29,9 +29,9 @@ a = Analysis(
     # Это самый надежный способ гарантировать, что PyInstaller их найдет и упакует.
     [
         'src/auth.py',
-        'db_connector.py',
-        'admin_ui.py',
-        'supervisor_ui.py'
+        'src/db_connector.py',
+        'src/admin_ui.py',
+        'src/supervisor_ui.py'
     ],
     pathex=[], # pathex больше не нужен
     # Явно указываем, что нужно включить DLL. Она будет лежать в корневой папке приложения.
