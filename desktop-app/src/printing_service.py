@@ -23,12 +23,14 @@ try:
     import win32api
     import win32con
     import win32ui
+    import win32gui
     from pywintypes import error as pywin_error
 except ImportError:
     logging.warning("pywin32 not installed. Windows printing features will be limited. Install with: pip install pywin32")
     win32print = None
     win32api = None
     win32con = None
+    win32ui = None
     pywin_error = None
 
 
@@ -241,7 +243,7 @@ class PrintingService:
                         
                         # Очищаем ресурсы
                         mem_dc.DeleteDC()
-                        win32ui.DeleteObject(bmp.GetHandle())
+                        win32gui.DeleteObject(bmp.GetHandle())
 
             # 5. Завершаем печать
             dc.EndPage()
