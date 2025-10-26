@@ -282,9 +282,8 @@ class PrintingService:
 
                 if obj["type"] == "text":
                     text = str(obj_data)
-                    # TODO: Реализовать более сложную логику подбора шрифта и выравнивания
-                    # Пока используем простой TextOut
-                    font_height = -int(height * 0.8) # Примерный подбор высоты шрифта
+                    # --- ИСПРАВЛЕНИЕ: Логика создания шрифта перенесена внутрь блока "text" ---
+                    font_height = -int(height * 0.8)
                     font = win32ui.CreateFont({
                         'name': obj.get("font_name", "Arial"),
                         'height': font_height,
@@ -292,8 +291,9 @@ class PrintingService:
                         'charset': 204 # RUSSIAN_CHARSET
                     })
                     dc.SelectObject(font)
+                    # Пока используем простой TextOut
                     dc.TextOut(x, y, text)
-
+                    win32gui.DeleteObject(font.GetHandle()) # Освобождаем ресурс шрифта
                 elif obj["type"] == "barcode":
                     # Для штрихкодов генерируем картинку в памяти и "впечатываем" ее на холст
                     barcode_type = obj.get("barcode_type", "QR").upper()
