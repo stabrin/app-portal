@@ -19,6 +19,13 @@ except ImportError:
     ImageWin = None
 
 try:
+    from pystrich.datamatrix import DataMatrixEncoder
+except ImportError:
+    logging.warning("Библиотека pystrich не установлена. Генерация DataMatrix не будет работать. Установите: pip install pystrich")
+    DataMatrixEncoder = None
+
+
+try:
     import win32print
     import win32api
     import win32con
@@ -108,6 +115,19 @@ class PrintingService:
 
                     # Масштабируем QR-код под нужный размер и вставляем на этикетку
                     barcode_image = barcode_image.resize((width, height), Image.Resampling.LANCZOS)
+                    label_image.paste(barcode_image, (x, y))
+                elif barcode_type == "DATAMATRIX":
+                    if DataMatrixEncoder is None:
+                        logging.warning("Библиотека pystrich не установлена, пропуск DataMatrix.")
+                        continue
+                    
+                    encoder = DataMatrixEncoder(str(obj_data))
+                    # Сохраняем во временный буфер в памяти, т.к. pystrich работает с файлами
+                    with io.BytesIO() as buffer:
+                        encoder.save(buffer, "PNG")
+                        buffer.seek(0)
+                        barcode_image = Image.open(buffer).convert("RGB")
+                    barcode_image = barcode_image.resize((width, height), Image.Resampling.NEAREST)
                     label_image.paste(barcode_image, (x, y))
                 else:
                     logging.warning(f"Генерация изображения для типа штрихкода '{barcode_type}' пока не реализована.")
@@ -208,6 +228,18 @@ class PrintingService:
                         qr_gen.make(fit=True)
                         barcode_image = qr_gen.make_image(fill_color="black", back_color="white") # type: ignore
                     # TODO: Добавить генерацию для других типов штрихкодов (SSCC, DataMatrix)
+                    elif barcode_type == "DATAMATRIX":
+                        if DataMatrixEncoder is None:
+                            logging.warning("Библиотека pystrich не установлена, пропуск DataMatrix.")
+                            continue
+                        
+                        encoder = DataMatrixEncoder(str(obj_data))
+                        # Сохраняем во временный буфер в памяти
+                        with io.BytesIO() as buffer:
+                            encoder.save(buffer, "PNG")
+                            buffer.seek(0)
+                            barcode_image = Image.open(buffer).convert("RGB")
+
                     # Потребуется библиотека python-barcode или аналоги
                     else:
                         logging.warning(f"Прямая печать для типа штрихкода '{barcode_type}' пока не реализована.")

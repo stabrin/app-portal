@@ -1035,6 +1035,27 @@ class AdminWindow(tk.Tk):
         label = ttk.Label(self, text="Добро пожаловать, Администратор!", font=("Arial", 14))
         label.pack(expand=True)
 
+    def _open_dm_test_print_dialog(self):
+        """
+        Открывает диалог печати для тестирования DataMatrix.
+        Данные для кода будут получены автоматически сервисом печати
+        согласно источнику данных, указанному в макете.
+        """
+        # Готовим "пустой" набор данных. Сервис печати сам подставит реальные
+        # данные из БД, так как в макете указан источник "items.datamatrix".
+        item_data_for_printing = {
+            "items.datamatrix": None, # Значение будет получено из БД автоматически
+            # Добавляем заглушки для других возможных полей в макете, чтобы избежать ошибок.
+            "QR: Конфигурация сервера": json.dumps({"error": "not applicable"}),
+            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
+            "ap_workplaces.warehouse_name": "Тест DataMatrix (из БД)",
+            "ap_workplaces.workplace_number": ""
+        }
+
+        # Вызываем нашу стандартную процедуру печати с предпросмотром.
+        PrintWorkplaceLabelsDialog(self, self.user_info, "Тестирование DataMatrix", [item_data_for_printing])
+
+
     def _create_menu(self):
         menubar = tk.Menu(self)
         self.config(menu=menubar)
@@ -1046,6 +1067,8 @@ class AdminWindow(tk.Tk):
         # Меню для управления устройствами
         devices_menu = tk.Menu(menubar, tearoff=0)
         devices_menu.add_command(label="Управление печатью", command=lambda: open_print_management_window(self))
+        devices_menu.add_separator()
+        devices_menu.add_command(label="Тестирование ДМ", command=self._open_dm_test_print_dialog)
         menubar.add_cascade(label="Устройства", menu=devices_menu)
 
         # Меню для управления пользователями
