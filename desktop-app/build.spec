@@ -11,7 +11,9 @@ from PyInstaller.utils.hooks import get_hook_dirs
 # Это критически важный шаг, так как без DLL библиотека не будет работать.
 # PyInstaller не всегда находит её автоматически.
 
-venv_path = os.path.join(os.getcwd(), '.venv')
+# --- ИСПРАВЛЕНИЕ: Используем абсолютный путь от .spec файла, а не от текущей директории ---
+spec_dir = os.path.dirname(os.path.abspath(__file__))
+venv_path = os.path.join(spec_dir, '.venv')
 libdmtx_dll_path = None
 
 # Ищем DLL в папке site-packages вашего виртуального окружения
@@ -32,14 +34,14 @@ if not libdmtx_dll_path:
 # --- Шаг 2: Анализ зависимостей ---
 # PyInstaller анализирует ваш код, начиная с auth.py, и находит все импорты.
 a = Analysis(
-    ['src/auth.py'],
+    [os.path.join(spec_dir, 'src', 'auth.py')],
     pathex=[],
     # Явно указываем, что нужно включить DLL. Она будет лежать в корневой папке приложения.
     binaries=[(libdmtx_dll_path, '.')],
     # Указываем, какие файлы данных нужно скопировать.
-    # ('путь/откуда', 'путь/куда_в_сборке')
+    # ('путь/откуда', 'путь/куда_в_сборке'). Теперь путь абсолютный.
     datas=[
-        ('secrets/postgres/server.crt', 'secrets/postgres')
+        (os.path.join(spec_dir, '..', 'secrets', 'postgres', 'server.crt'), 'secrets/postgres')
     ],
     # Иногда PyInstaller "пропускает" некоторые импорты.
     # Здесь мы явно указываем их, чтобы избежать ошибок во время выполнения.
