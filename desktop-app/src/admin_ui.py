@@ -242,20 +242,10 @@ def open_workplace_setup_window(parent_widget, user_info):
 
     # --- НОВАЯ ЛОГИКА ДЛЯ ВКЛАДКИ "РАБОЧИЕ МЕСТА" ---
 
-    def get_client_db_connection():
+    def get_client_db_connection(): # Эта функция локальна для open_workplace_setup_window
         """Вспомогательная функция для подключения к БД клиента."""
-        client_db_config = user_info.get("client_db_config")
-        if not client_db_config:
-            messagebox.showerror("Ошибка", "Не найдены данные для подключения к базе клиента.", parent=setup_window)
-            return None
-        
-        conn_params = {
-            'host': client_db_config.get('db_host'), 'port': client_db_config.get('db_port'),
-            'dbname': client_db_config.get('db_name'), 'user': client_db_config.get('db_user'),
-            'password': client_db_config.get('db_password')
-        }
-        # SSL пока не используется для этой операции, можно добавить при необходимости
-        return psycopg2.connect(**conn_params)
+        # Используем универсальный метод из PrintingService
+        return PrintingService._get_client_db_connection(user_info)
 
     def load_warehouses():
         """Загружает и отображает склады и количество рабочих мест в них."""
@@ -586,19 +576,12 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             self.destroy()
             return
 
+        # Удаляем дублирующуюся функцию, теперь используем PrintingService._get_client_db_connection
+        # self._get_client_db_connection = PrintingService._get_client_db_connection 
+
         self._create_widgets()
         self._load_printers()
         self._load_layouts()
-
-    def _get_client_db_connection(self):
-        """Подключение к БД клиента."""
-        db_config = self.user_info.get("client_db_config")
-        if not db_config: return None
-        return psycopg2.connect(
-            host=db_config.get('db_host'), port=db_config.get('db_port'),
-            dbname=db_config.get('db_name'), user=db_config.get('db_user'),
-            password=db_config.get('db_password')
-        )
 
     def _create_widgets(self):
         frame = ttk.Frame(self, padding="10")
@@ -658,7 +641,7 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
 
     def _load_layouts(self):
         try:
-            with self._get_client_db_connection() as conn:
+            with PrintingService._get_client_db_connection(self.user_info) as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT name, template_json FROM label_templates ORDER BY name")
                     self.layouts = [{'name': row[0], 'json': row[1]} for row in cur.fetchall()]
@@ -720,8 +703,8 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Сначала генерируем изображения для предпросмотра ---
             images_to_preview = []
             for item_data in all_items_data:
-                try:
-                    img = PrintingService.generate_label_image(selected_layout['json'], item_data)
+                try: # Передаем user_info для возможности получения данных из БД
+                    img = PrintingService.generate_label_image(selected_layout['json'], item_data, self.user_info)
                     images_to_preview.append(img)
                 except Exception as e:
                     logging.error(f"Ошибка генерации изображения для предпросмотра: {e}")
@@ -734,7 +717,7 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             # Функция, которая будет вызвана, если пользователь нажмет "Напечатать" в окне предпросмотра
             def perform_actual_printing():
                 try:
-                    PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data)
+                    PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data, self.user_info)
                     messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
                     self.destroy() # Закрываем диалог печати после успешной отправки
                 except Exception as e_print:

@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import tempfile
+import psycopg2
 from typing import Dict, Any
 
 # Библиотеки для генерации штрихкодов и работы с Windows API
@@ -59,7 +60,55 @@ class PrintingService:
     """
 
     @staticmethod
-    def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any]):
+    def _get_client_db_connection(user_info: Dict[str, Any]):
+        """Helper to get a client DB connection."""
+        db_config = user_info.get("client_db_config")
+        if not db_config:
+            logging.error("Client DB configuration not found in user_info.")
+            return None
+        
+        conn_params = {
+            'host': db_config.get('db_host'), 'port': db_config.get('db_port'),
+            'dbname': db_config.get('db_name'), 'user': db_config.get('db_user'),
+            'password': db_config.get('db_password')
+        }
+        
+        temp_cert_file = None
+        try:
+            if db_config.get('db_ssl_cert'):
+                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                    fp.write(db_config['db_ssl_cert'])
+                    temp_cert_file = fp.name
+                conn_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
+
+            conn = psycopg2.connect(**conn_params)
+            return conn
+        except Exception as e:
+            logging.error(f"Failed to connect to client DB: {e}")
+            return None
+        finally:
+            if temp_cert_file and os.path.exists(temp_cert_file):
+                try:
+                    os.remove(temp_cert_file)
+                except OSError as e:
+                    logging.warning(f"Could not delete temporary cert file {temp_cert_file}: {e}")
+
+    @staticmethod
+    def _fetch_data_from_db(user_info: Dict[str, Any], data_source: str) -> Optional[str]:
+        """Fetches data from the client DB based on data_source (e.g., 'items.datamatrix')."""
+        parts = data_source.split('.')
+        if len(parts) != 2:
+            logging.warning(f"Некорректный формат data_source для БД: '{data_source}'. Ожидается 'table.field'.")
+            return None
+        
+        table_name, field_name = parts
+        
+        # TODO: Для более сложной логики (например, выбор конкретного элемента)
+        # потребуется передавать ID или другие фильтры. Пока берем LIMIT 1.
+        return None # Placeholder for now, actual implementation below
+
+    @staticmethod
+    def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any]):
         """
         Генерирует изображение этикетки в памяти с помощью Pillow, обходясь без ReportLab.
         """
@@ -79,7 +128,14 @@ class PrintingService:
 
         for obj in template_json.get("objects", []):
             obj_data = data.get(obj["data_source"])
-            if obj_data is None:
+            
+            # НОВАЯ ЛОГИКА: Если obj_data не предоставлен, пытаемся получить его из БД
+            if obj_data is None and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
+                obj_data = PrintingService._fetch_data_from_db(user_info, obj["data_source"])
+                if obj_data is None:
+                    logging.warning(f"Источник данных '{obj['data_source']}' не найден в переданных данных и не удалось получить из БД. Пропуск объекта.")
+                    continue
+            elif obj_data is None: # If it's not a DB source and still None
                 logging.warning(f"Источник данных '{obj['data_source']}' не найден. Пропуск объекта.")
                 continue
 
@@ -159,7 +215,7 @@ class PrintingService:
         label.pack(padx=10, pady=10)
 
     @staticmethod
-    def print_label_direct(printer_name: str, template_json: Dict[str, Any], data: Dict[str, Any]):
+    def print_label_direct(printer_name: str, template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any]):
         """
         Генерирует и отправляет этикетку НАПРЯМУЮ на принтер, минуя PDF.
         Использует GDI-команды pywin32 для отрисовки.
@@ -296,7 +352,7 @@ class PrintingService:
                 win32print.ClosePrinter(h_printer)
 
     @staticmethod
-    def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list):
+    def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list, user_info: Dict[str, Any]):
         """
         Генерирует и печатает по одной этикетке для каждого элемента в списке.
 
@@ -318,7 +374,7 @@ class PrintingService:
             try:
                 logging.info(f"Отправка на печать этикетки {i+1}/{len(items_data)}...")
                 # Используем метод прямой печати для каждого элемента
-                PrintingService.print_label_direct(printer_name, template_json, item_data)
+                PrintingService.print_label_direct(printer_name, template_json, item_data, user_info)
             except Exception as e:
                 logging.error(f"Ошибка при печати элемента {i+1}: {item_data}. Ошибка: {e}")
                 # В зависимости от требований, можно либо прервать, либо продолжить печать
