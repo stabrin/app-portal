@@ -10,6 +10,16 @@ import traceback
 
 # --- Настройка путей для импорта ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+# --- НАДЁЖНОЕ РЕШЕНИЕ ПРОБЛЕМЫ С ВИРТУАЛЬНЫМ ОКРУЖЕНИЕМ ---
+# Принудительно добавляем путь к библиотекам виртуального окружения.
+# Это гарантирует, что все зависимости (pylibdmtx, qrcode и т.д.) будут найдены,
+# даже если приложение запускается не из активированной консоли.
+venv_site_packages = os.path.join(project_root, '.venv', 'Lib', 'site-packages')
+if os.path.isdir(venv_site_packages) and venv_site_packages not in sys.path:
+    sys.path.insert(0, venv_site_packages)
+# --- КОНЕЦ РЕШЕНИЯ ---
+
 sys.path.insert(0, project_root)
 
 from db_connector import get_main_db_connection
