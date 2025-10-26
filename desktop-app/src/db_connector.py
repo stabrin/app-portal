@@ -6,7 +6,7 @@ import psycopg2
 from contextlib import contextmanager
 from dotenv import load_dotenv
 
-from run import resource_path # Импортируем нашу новую функцию
+from .utils import resource_path # Импортируем нашу новую функцию
 
 @contextmanager
 def get_main_db_connection():
