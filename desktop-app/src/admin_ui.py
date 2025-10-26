@@ -173,41 +173,58 @@ def open_workplace_setup_window(parent_widget, user_info):
         Новая логика: формирует QR-код для настройки сервера и открывает диалог печати.
         В QR-код помещаются базовые данные для подключения, но без SSL-сертификата,
         чтобы код оставался компактным и легко читаемым.
+
+        ИЗМЕНЕНИЕ: Теперь генерируется многочастный QR-код для печати,
+        включающий и настройки, и SSL-сертификат для полной офлайн-настройки.
         """
+        try:
+            import zlib
+            import base64
+        except ImportError:
+            messagebox.showerror("Ошибка", "Необходимые библиотеки для сжатия не установлены.", parent=setup_window)
+            return
+
         # 1. Получаем конфигурацию БД клиента из user_info
         config_data = user_info.get('client_db_config', {}).copy()
         if not config_data:
             messagebox.showerror("Ошибка", "Конфигурация базы данных клиента не найдена в данных пользователя.", parent=setup_window)
             return
 
-        # 2. Определяем адрес сервера для мобильного приложения
-        # Если в поле введен локальный адрес, он будет иметь приоритет.
-        # Иначе используется основной хост из конфигурации.
+        # 2. Определяем адрес сервера
         final_address = server_address_entry.get().strip() or config_data.get('db_host')
-
         if not final_address:
             messagebox.showerror("Ошибка", "Не удалось определить адрес сервера. Введите его вручную или убедитесь, что он есть в конфигурации клиента.", parent=setup_window)
             return
 
-        # 3. Формируем компактный словарь данных для QR-кода.
-        # Исключаем из него большой SSL-сертификат.
-        qr_config = {
-            "type": "server_config",
-            "address": final_address, # Адрес, который будет использовать мобильное приложение
-            "db_name": config_data.get("db_name"),
-            "db_user": config_data.get("db_user"),
-            "db_password": config_data.get("db_password"),
-            "db_port": config_data.get("db_port")
-        }
+        # Добавляем тип и адрес в основной конфиг
+        config_data['type'] = 'server_config'
+        config_data['address'] = final_address
 
-        # 4. Готовим данные для универсального диалога печати.
-        item_data_for_printing = {
-            "QR: Конфигурация сервера": json.dumps(qr_config, ensure_ascii=False),
-            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"})
-        }
+        # 3. Сжимаем и кодируем ВЕСЬ конфиг, включая сертификат
+        json_bytes = json.dumps(config_data, ensure_ascii=False).encode('utf-8')
+        compressed_bytes = zlib.compress(json_bytes, level=9)
+        full_base64_data = base64.b64encode(compressed_bytes).decode('ascii')
 
-        # 5. Открываем диалог печати, передавая ему данные для одной этикетки.
-        PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {final_address}", [item_data_for_printing])
+        # 4. Разбиваем на части, если данные слишком большие
+        chunk_size = 2500 # Максимальная емкость QR v40 с коррекцией L ~2953 байт. Берем с запасом.
+        chunks = [full_base64_data[i:i + chunk_size] for i in range(0, len(full_base64_data), chunk_size)]
+
+        # 5. Формируем список данных для печати (по одной "этикетке" на каждую часть QR-кода)
+        items_to_print = []
+        for i, chunk in enumerate(chunks):
+            # Формат "1/3:данные", "2/3:данные" и т.д.
+            chunk_data_for_qr = f"{i+1}/{len(chunks)}:{chunk}"
+            item_data = {
+                "QR: Конфигурация сервера": chunk_data_for_qr,
+                # Добавляем заглушки для других полей, чтобы макет не ломался
+                "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
+                "ap_workplaces.warehouse_name": f"Настройка сервера (часть {i+1}/{len(chunks)})",
+                "ap_workplaces.workplace_number": ""
+            }
+            items_to_print.append(item_data)
+
+        # 6. Открываем диалог печати, передавая ему список всех частей для печати.
+        PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {final_address}", items_to_print)
 
     ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
 
