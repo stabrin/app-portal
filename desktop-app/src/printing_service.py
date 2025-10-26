@@ -175,16 +175,14 @@ class PrintingService:
 
             if obj["type"] == "text":
                 text = str(obj_data)
-                # --- ИСПРАВЛЕНИЕ: Логика загрузки шрифта перенесена внутрь блока "text" ---
+                # --- ИСПРАВЛЕНИЕ: Логика загрузки шрифта теперь находится внутри блока "text" ---
                 try:
                     # Пытаемся загрузить системный шрифт Arial
                     font = ImageFont.truetype("arial.ttf", size=int(height * 0.8))
                 except IOError:
                     # Если не найден, используем шрифт по умолчанию
                     font = ImageFont.load_default()
-                # Рисуем текст. Координаты (x, y) - это верхний левый угол.
                 draw.text((x, y), text, fill="black", font=font)
-                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
             elif obj["type"] == "barcode":
                 barcode_type = obj.get("barcode_type", "QR").upper()
                 if barcode_type == "QR":
