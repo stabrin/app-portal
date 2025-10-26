@@ -5,7 +5,6 @@
 
 import os
 import sys
-from PyInstaller.utils.hooks import get_hook_dirs
 
 # --- Шаг 1: Находим DLL для pylibdmtx ---
 # Это критически важный шаг, так как без DLL библиотека не будет работать.
