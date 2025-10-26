@@ -200,18 +200,16 @@ def open_workplace_setup_window(parent_widget, user_info):
             "address": address
         }
 
-        # Сжатие данных для уменьшения размера QR-кода
-        json_bytes = json.dumps(config_data).encode('utf-8')
-        compressed_bytes = zlib.compress(json_bytes, level=9) # Максимальное сжатие
-        full_base64_data = base64.b64encode(compressed_bytes).decode('ascii')
         # Формируем данные для подстановки в макет.
         # Это имитирует структуру данных, как при печати этикеток рабочих мест.
         item_data_for_printing = {
-            "QR: Конфигурация сервера": json.dumps(config_data, ensure_ascii=False)
+            # ВАЖНО: Ключ должен совпадать с одним из доступных источников данных в редакторе макетов.
+            # Для QR-кода сервера мы передаем JSON-строку с его конфигурацией.
+            "QR: Конфигурация сервера": json.dumps(config_data, ensure_ascii=False),
+            # Добавляем заглушки для других возможных полей в макете, чтобы избежать ошибок.
+            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"})
         }
 
-        chunk_size = 2500
-        chunks = [full_base64_data[i:i + chunk_size] for i in range(0, len(full_base64_data), chunk_size)]
         # Открываем новый диалог печати, передавая ему данные для единственной этикетки.
         PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {address}", [item_data_for_printing])
 
