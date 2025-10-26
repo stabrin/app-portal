@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import tempfile
+from psycopg2 import sql
 import psycopg2
 from typing import Dict, Any
 
@@ -110,7 +111,7 @@ class PrintingService:
                 return None
             
             with conn.cursor() as cur:
-                # ВАЖНО: Используем безопасную параметризацию SQL
+                # ВАЖНО: Используем безопасную параметризацию SQL из psycopg2
                 query = sql.SQL("SELECT {field} FROM {table} LIMIT 1").format(
                     field=sql.Identifier(field_name),
                     table=sql.Identifier(table_name)
@@ -148,7 +149,7 @@ class PrintingService:
             obj_data = data.get(obj["data_source"])
             
             # НОВАЯ ЛОГИКА: Если obj_data не предоставлен, пытаемся получить его из БД
-            if obj_data is None and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
+            if obj_data is None and obj["data_source"] and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
                 obj_data = PrintingService._fetch_data_from_db(user_info, obj["data_source"])
                 if obj_data is None:
                     logging.warning(f"Источник данных '{obj['data_source']}' не найден в переданных данных и не удалось получить из БД. Пропуск объекта.")
@@ -261,10 +262,17 @@ class PrintingService:
 
             # 4. Итерируемся по объектам в шаблоне и рисуем каждый
             for obj in template_json.get("objects", []):
-                obj_data = data.get(obj["data_source"])
-                if obj_data is None:
+                obj_data = data.get(obj["data_source"])                
+                # НОВАЯ ЛОГИКА: Если obj_data не предоставлен, пытаемся получить его из БД
+                if obj_data is None and obj["data_source"] and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
+                    obj_data = PrintingService._fetch_data_from_db(user_info, obj["data_source"])
+                    if obj_data is None:
+                        logging.warning(f"Источник данных '{obj['data_source']}' не найден в переданных данных и не удалось получить из БД. Пропуск объекта.")
+                        continue
+                elif obj_data is None: # If it's not a DB source and still None
                     logging.warning(f"Источник данных '{obj['data_source']}' не найден. Пропуск объекта.")
                     continue
+
 
                 # Конвертируем координаты и размеры из мм в точки
                 x = int(obj["x_mm"] * dots_per_mm_x)
