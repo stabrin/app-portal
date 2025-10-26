@@ -211,7 +211,8 @@ class PrintingService:
                         logging.warning("Библиотека pystrich не установлена, пропуск DataMatrix.")
                         continue
                     
-                    encoder = DataMatrixEncoder(str(obj_data))
+                    # --- ИСПРАВЛЕНИЕ: pystrich ожидает байтовую строку, а не str ---
+                    encoder = DataMatrixEncoder(str(obj_data).encode('utf-8'))
                     # Сохраняем во временный буфер в памяти, т.к. pystrich работает с файлами
                     with io.BytesIO() as buffer:
                         encoder.save(buffer, "PNG")
@@ -330,7 +331,8 @@ class PrintingService:
                             logging.warning("Библиотека pystrich не установлена, пропуск DataMatrix.")
                             continue
                         
-                        encoder = DataMatrixEncoder(str(obj_data))
+                        # --- ИСПРАВЛЕНИЕ: pystrich ожидает байтовую строку, а не str ---
+                        encoder = DataMatrixEncoder(str(obj_data).encode('utf-8'))
                         # Сохраняем во временный буфер в памяти
                         with io.BytesIO() as buffer:
                             encoder.save(buffer, "PNG")
