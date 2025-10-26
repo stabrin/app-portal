@@ -684,12 +684,22 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
                             "type": "workplace_config",
                             "warehouse": wp['warehouse_name'],
                             "workplace": wp['workplace_number']
-                        }, ensure_ascii=False),
-                        "QR: Конфигурация сервера": json.dumps({"error": "This QR type is not for workplace labels"})
+                        }, ensure_ascii=False)
                     }
+                    # --- ИСПРАВЛЕНИЕ: Добавляем заглушку для источника данных QR-кода сервера ---
+                    # Это предотвращает ошибку, если макет содержит объект с таким источником.
+                    # Раньше это поле отсутствовало, что приводило к сбою.
+                    item_data["QR: Конфигурация сервера"] = json.dumps({"error": "This QR type is not for workplace labels"})
+                    
+                    # Добавляем заглушку для DataMatrix, чтобы избежать ошибок при печати рабочих мест
+                    # с макетом, содержащим DataMatrix.
+                    item_data["items.datamatrix"] = "DM_placeholder"
+
                     all_items_data.append(item_data)
             except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось загрузить данные о рабочих местах: {e}", parent=self)
+                # --- ИЗМЕНЕНИЕ: Ошибка теперь пишется в лог, а не показывается в messagebox ---
+                logging.error(f"Не удалось загрузить данные о рабочих местах: {e}\n{traceback.format_exc()}")
+                messagebox.showerror("Ошибка", "Не удалось загрузить данные о рабочих местах. Подробности в app.log.", parent=self)
                 return
         # Если данные были переданы при создании окна (новый сценарий для QR-кода сервера)
         elif self.items_to_print is not None:
