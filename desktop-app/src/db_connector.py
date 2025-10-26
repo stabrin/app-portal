@@ -5,7 +5,6 @@ import logging
 import psycopg2
 from contextlib import contextmanager
 from dotenv import load_dotenv
-
 @contextmanager
 def get_main_db_connection():
     """
@@ -13,26 +12,26 @@ def get_main_db_connection():
     с ГЛАВНОЙ базой данных (portal_db).
     """
     # Загружаем переменные из .env файла
-    desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    dotenv_path = os.path.join(desktop_app_root, '.env')
-    load_dotenv(dotenv_path=dotenv_path)
+    # --- ИЗМЕНЕНИЕ: Убираем зависимость от .env и хардкодим параметры ---
+    db_params = {
+        "dbname": "tilda_db",
+        "user": "portal_user",
+        "password": "!T-W0rkshop",
+        "host": "172.16.10.234",
+        "port": "5432",
+        "connect_timeout": 5,
+        "sslmode": 'verify-full'
+    }
 
     # Находим путь к сертификату сервера
+    desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     app_portal_root = os.path.abspath(os.path.join(desktop_app_root, '..'))
     cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
     if not os.path.exists(cert_path):
         raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
 
     # Подключаемся к БД напрямую с использованием SSL
-    conn = psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST"), # ВАЖНО: здесь должен быть внешний адрес сервера
-        port=os.getenv("DB_PORT"),
-        connect_timeout=5,
-        sslmode='verify-full',
-        sslrootcert=cert_path
-    )
+    db_params['sslrootcert'] = cert_path
+    conn = psycopg2.connect(**db_params)
     yield conn
     conn.close()

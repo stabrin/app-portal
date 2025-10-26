@@ -57,7 +57,15 @@ class StandaloneLoginWindow(tk.Tk):
         self.password_entry = tk.Entry(frame, width=30, show="*")
         self.password_entry.grid(row=1, column=1, pady=5)
         tk.Button(frame, text="Войти", command=self._verify_login).grid(row=2, columnspan=2, pady=10)
+        
+        # --- НОВАЯ КНОПКА ---
+        # Добавляем кнопку для входа по QR-коду.
+        # Пока она не выполняет никаких действий, но готова для будущей реализации.
+        tk.Button(frame, text="Войти по QR-коду", command=self._login_with_qr).grid(row=3, columnspan=2, pady=(0, 10))
 
+    def _login_with_qr(self):
+        messagebox.showinfo("В разработке", "Функция входа по QR-коду находится в разработке.", parent=self)
+        
     def _verify_login(self):
         login = self.login_entry.get()
         password = self.password_entry.get()
