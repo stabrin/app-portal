@@ -17,7 +17,7 @@ def get_main_db_connection():
         "dbname": "tilda_db",
         "user": "portal_user",
         "password": "!T-W0rkshop",
-        "host": "172.16.10.234",
+        "host": "109.172.115.204",
         "port": "5432",
         "connect_timeout": 5,
         "sslmode": 'verify-full'
