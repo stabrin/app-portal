@@ -102,10 +102,28 @@ class PrintingService:
             return None
         
         table_name, field_name = parts
-        
-        # TODO: Для более сложной логики (например, выбор конкретного элемента)
-        # потребуется передавать ID или другие фильтры. Пока берем LIMIT 1.
-        return None # Placeholder for now, actual implementation below
+
+        conn = None
+        try:
+            conn = PrintingService._get_client_db_connection(user_info)
+            if not conn:
+                return None
+            
+            with conn.cursor() as cur:
+                # ВАЖНО: Используем безопасную параметризацию SQL
+                query = sql.SQL("SELECT {field} FROM {table} LIMIT 1").format(
+                    field=sql.Identifier(field_name),
+                    table=sql.Identifier(table_name)
+                )
+                cur.execute(query)
+                result = cur.fetchone()
+                return result[0] if result else None
+        except Exception as e:
+            logging.error(f"Ошибка при получении данных из БД для '{data_source}': {e}")
+            return None
+        finally:
+            if conn:
+                conn.close()
 
     @staticmethod
     def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any]):
