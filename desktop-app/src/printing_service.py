@@ -21,10 +21,10 @@ except ImportError:
     ImageWin = None
 
 try:
-    from pystrich.datamatrix import DataMatrixEncoder
+    from pylibdmtx.pylibdmtx import encode as dmtx_encode
 except ImportError:
-    logging.warning("Библиотека pystrich не установлена. Установите: pip install pystrich")
-    DataMatrixEncoder = None
+    logging.warning("Библиотека pylibdmtx не установлена. Установите: pip install pylibdmtx")
+    dmtx_encode = None
 
 try:
     import win32print
@@ -226,25 +226,16 @@ class PrintingService:
                             continue
                     
                     elif barcode_type == "DATAMATRIX":
-                        if not DataMatrixEncoder:
-                            logging.warning("Библиотека pystrich не установлена. Пропуск DataMatrix.")
+                        if not dmtx_encode:
+                            logging.warning("Библиотека pylibdmtx не установлена. Пропуск DataMatrix.")
                             continue
                         try:
                             data_str = str(obj_data).strip()
                             if not data_str:
                                 logging.warning("Данные для DataMatrix пусты. Пропуск.")
                                 continue
-                            if not data_str.isascii():
-                                logging.warning(f"Данные содержат не-ASCII символы: '{data_str}'. Перекодировка в ASCII.")
-                                data_str = data_str.encode('ascii', errors='ignore').decode('ascii')
-                                if not data_str:
-                                    logging.warning("После перекодировки данные пусты. Пропуск.")
-                                    continue
-                            encoder = DataMatrixEncoder(data_str)
-                            with io.BytesIO() as buffer:
-                                encoder.save(buffer, "PNG")
-                                buffer.seek(0)
-                                barcode_image = Image.open(buffer).convert("RGB")
+                            # pylibdmtx.encode принимает байты и возвращает готовое изображение Pillow
+                            barcode_image = dmtx_encode(data_str.encode('utf-8'))
                             barcode_image = barcode_image.resize((width, height), Image.Resampling.NEAREST)
                             label_image.paste(barcode_image, (x, y))
                         except Exception as e:
@@ -379,20 +370,11 @@ class PrintingService:
                             barcode_image = qr_gen.make_image(fill_color="black", back_color="white")
                         
                         elif barcode_type == "DATAMATRIX":
-                            if not DataMatrixEncoder:
-                                logging.warning("Библиотека pystrich не установлена. Пропуск DataMatrix.")
+                            if not dmtx_encode:
+                                logging.warning("Библиотека pylibdmtx не установлена. Пропуск DataMatrix.")
                                 continue
-                            if not data_str.isascii():
-                                logging.warning(f"Данные содержат не-ASCII символы: '{data_str}'. Перекодировка в ASCII.")
-                                data_str = data_str.encode('ascii', errors='ignore').decode('ascii')
-                                if not data_str:
-                                    logging.warning("После перекодировки данные пусты. Пропуск.")
-                                    continue
-                            encoder = DataMatrixEncoder(data_str)
-                            with io.BytesIO() as buffer:
-                                encoder.save(buffer, "PNG")
-                                buffer.seek(0)
-                                barcode_image = Image.open(buffer).convert("RGB")
+                            # pylibdmtx.encode принимает байты и возвращает готовое изображение Pillow
+                            barcode_image = dmtx_encode(data_str.encode('utf-8'))
                         
                         else:
                             logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
