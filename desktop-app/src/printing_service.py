@@ -234,8 +234,11 @@ class PrintingService:
                             if not data_str:
                                 logging.warning("Данные для DataMatrix пусты. Пропуск.")
                                 continue
-                            # pylibdmtx.encode принимает байты и возвращает готовое изображение Pillow
-                            barcode_image = dmtx_encode(data_str.encode('utf-8'))
+                            # --- ИСПРАВЛЕНИЕ: Преобразуем результат pylibdmtx в изображение Pillow ---
+                            # dmtx_encode возвращает специальный объект, а не готовое изображение.
+                            # Создаем изображение из его пикселей, ширины и высоты.
+                            encoded_dm = dmtx_encode(data_str.encode('utf-8'))
+                            barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels)
                             barcode_image = barcode_image.resize((width, height), Image.Resampling.NEAREST)
                             label_image.paste(barcode_image, (x, y))
                         except Exception as e:
