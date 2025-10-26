@@ -173,65 +173,41 @@ def open_workplace_setup_window(parent_widget, user_info):
         Новая логика: формирует QR-код для настройки сервера и открывает диалог печати.
         В QR-код помещаются базовые данные для подключения, но без SSL-сертификата,
         чтобы код оставался компактным и легко читаемым.
-
-        ИЗМЕНЕНИЕ: Теперь генерируется многочастный QR-код.
-        - Часть 1: Основные настройки (адрес, порт, юзер и т.д.)
-        - Части 2..N: SSL-сертификат.
-        Это позволяет настроить рабочее место полностью в офлайн-режиме.
         """
-        try:
-            import zlib
-            import base64
-        except ImportError:
-            messagebox.showerror("Ошибка", "Необходимые библиотеки для сжатия не установлены.", parent=setup_window)
-            return
-
         # 1. Получаем конфигурацию БД клиента из user_info
         config_data = user_info.get('client_db_config', {}).copy()
         if not config_data:
             messagebox.showerror("Ошибка", "Конфигурация базы данных клиента не найдена в данных пользователя.", parent=setup_window)
             return
 
-        # 2. Определяем адрес сервера
+        # 2. Определяем адрес сервера для мобильного приложения
+        # Если в поле введен локальный адрес, он будет иметь приоритет.
+        # Иначе используется основной хост из конфигурации.
         final_address = server_address_entry.get().strip() or config_data.get('db_host')
+
         if not final_address:
             messagebox.showerror("Ошибка", "Не удалось определить адрес сервера. Введите его вручную или убедитесь, что он есть в конфигурации клиента.", parent=setup_window)
             return
 
-        # 3. Разделяем данные: основные настройки и сертификат
-        ssl_cert_content = config_data.pop('db_ssl_cert', '') # Извлекаем сертификат
-        
-        main_config = {
-            "type": "server_config_main",
+        # 3. Формируем компактный словарь данных для QR-кода.
+        # Исключаем из него большой SSL-сертификат.
+        qr_config = {
+            "type": "server_config",
             "address": final_address, # Адрес, который будет использовать мобильное приложение
             "db_name": config_data.get("db_name"),
             "db_user": config_data.get("db_user"),
             "db_password": config_data.get("db_password"),
             "db_port": config_data.get("db_port")
         }
-        
-        # 4. Сжимаем и кодируем данные
-        def compress_and_encode(data_dict):
-            json_bytes = json.dumps(data_dict, ensure_ascii=False).encode('utf-8')
-            compressed = zlib.compress(json_bytes, level=9)
-            return base64.b64encode(compressed).decode('ascii')
 
-        # 5. Разбиваем сертификат на части
-        cert_chunk_size = 2000 # Размер части для сертификата
-        cert_chunks = [ssl_cert_content[i:i+cert_chunk_size] for i in range(0, len(ssl_cert_content), cert_chunk_size)]
+        # 4. Готовим данные для универсального диалога печати.
+        item_data_for_printing = {
+            "QR: Конфигурация сервера": json.dumps(qr_config, ensure_ascii=False),
+            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"})
+        }
 
-        # 6. Формируем итоговый список данных для QR-кодов
-        all_chunks_data = []
-        # Первая часть - основные настройки
-        main_config['cert_parts_count'] = len(cert_chunks) # Сообщаем сканеру, сколько частей сертификата ожидать
-        all_chunks_data.append(compress_and_encode(main_config))
-        # Последующие части - сертификат
-        for i, cert_part in enumerate(cert_chunks):
-            cert_part_data = {"type": "server_config_cert", "part_index": i, "data": cert_part}
-            all_chunks_data.append(compress_and_encode(cert_part_data))
-
-        # 7. Отображаем последовательность QR-кодов
-        display_qr_sequence(f"Настройка сервера: {final_address}", all_chunks_data, setup_window)
+        # 5. Открываем диалог печати, передавая ему данные для одной этикетки.
+        PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {final_address}", [item_data_for_printing])
 
     ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
 
