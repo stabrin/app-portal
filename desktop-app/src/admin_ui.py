@@ -1044,7 +1044,7 @@ class AdminWindow(tk.Tk):
             "QR: Конфигурация сервера": json.dumps({"error": "not applicable"}),
             "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
             "ap_workplaces.warehouse_name": "Тест DataMatrix (из БД)",
-            "ap_workplaces.workplace_number": 0 # ИСПРАВЛЕНИЕ: Пустая строка вызывала ошибку, заменяем на 0
+            "ap_workplaces.workplace_number": 0
         }
 
         # Вызываем нашу стандартную процедуру печати с предпросмотром.
