@@ -234,7 +234,7 @@ class PrintingService:
                         mem_dc.SelectObject(bmp)
                         
                         # 5. Рисуем DIB на memory DC
-                        dib.draw(mem_dc.GetHandle(), (0, 0, width, height))
+                        dib.draw(mem_dc.GetSafeHdc(), (0, 0, width, height))
                         
                         # 6. Копируем готовый битмап из memory DC на "холст" принтера.
                         dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
