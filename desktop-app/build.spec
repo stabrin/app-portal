@@ -5,42 +5,34 @@
 
 import os
 import sys
+import pkg_resources
 
 # --- Шаг 1: Находим DLL для pylibdmtx ---
 # Это критически важный шаг, так как без DLL библиотека не будет работать.
-# PyInstaller не всегда находит её автоматически.
-
-# --- ИСПРАВЛЕНИЕ: Используем абсолютный путь от .spec файла, а не от текущей директории ---
-# Используем переменную SPECPATH, предоставляемую PyInstaller, для надежного определения пути.
-spec_dir = os.path.dirname(SPECPATH)
-libdmtx_dll_path = None
-
-# Ищем DLL в папке site-packages вашего виртуального окружения
-site_packages_path = os.path.join(spec_dir, '..', '.venv', 'Lib', 'site-packages')
-if os.path.isdir(site_packages_path):
-    for root, dirs, files in os.walk(site_packages_path):
-        # Имя DLL может немного отличаться, но обычно содержит 'libdmtx'
-        if 'libdmtx-64.dll' in files:
-            libdmtx_dll_path = os.path.join(root, 'libdmtx-64.dll')
-            break
-
-if not libdmtx_dll_path:
+# Используем pkg_resources для надежного поиска DLL внутри установленного пакета.
+# Этот метод работает независимо от версии пакета или структуры папок.
+try:
+    libdmtx_dll_path = pkg_resources.resource_filename('pylibdmtx', 'libdmtx-64.dll')
+except (pkg_resources.DistributionNotFound, KeyError):
     raise FileNotFoundError(
-        "Не удалось найти libdmtx-64.dll в .venv/Lib/site-packages. "
+        "Не удалось найти libdmtx-64.dll. "
         "Убедитесь, что pylibdmtx установлена корректно (`pip install pylibdmtx`)."
     )
+
+# Используем переменную SPECPATH, предоставляемую PyInstaller, для надежного определения пути.
+spec_dir = os.path.dirname(SPECPATH)
 
 # --- Шаг 2: Анализ зависимостей ---
 # PyInstaller анализирует ваш код, начиная с auth.py, и находит все импорты.
 a = Analysis(
-    [os.path.join(spec_dir, 'src', 'auth.py')],
+    ['src/auth.py'], # PyInstaller автоматически разрешает путь относительно spec-файла
     pathex=[],
     # Явно указываем, что нужно включить DLL. Она будет лежать в корневой папке приложения.
     binaries=[(libdmtx_dll_path, '.')],
     # Указываем, какие файлы данных нужно скопировать.
-    # ('путь/откуда', 'путь/куда_в_сборке'). Теперь путь абсолютный.
+    # ('путь/откуда', 'путь/куда_в_сборке'). Пути также относительны spec-файла.
     datas=[
-        (os.path.join(spec_dir, '..', 'secrets', 'postgres', 'server.crt'), 'secrets/postgres')
+        ('../secrets/postgres/server.crt', 'secrets/postgres')
     ],
     # Иногда PyInstaller "пропускает" некоторые импорты.
     # Здесь мы явно указываем их, чтобы избежать ошибок во время выполнения.
