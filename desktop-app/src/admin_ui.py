@@ -176,14 +176,9 @@ def open_workplace_setup_window(parent_widget, user_info):
 
         ИЗМЕНЕНИЕ: Теперь генерируется многочастный QR-код для печати,
         включающий и настройки, и SSL-сертификат для полной офлайн-настройки.
+        - Часть 1: Основные настройки.
+        - Части 2-11: SSL-сертификат, разделенный ровно на 10 частей.
         """
-        try:
-            import zlib
-            import base64
-        except ImportError:
-            messagebox.showerror("Ошибка", "Необходимые библиотеки для сжатия не установлены.", parent=setup_window)
-            return
-
         # 1. Получаем конфигурацию БД клиента из user_info
         config_data = user_info.get('client_db_config', {}).copy()
         if not config_data:
@@ -196,34 +191,47 @@ def open_workplace_setup_window(parent_widget, user_info):
             messagebox.showerror("Ошибка", "Не удалось определить адрес сервера. Введите его вручную или убедитесь, что он есть в конфигурации клиента.", parent=setup_window)
             return
 
-        # Добавляем тип и адрес в основной конфиг
-        config_data['type'] = 'server_config'
-        config_data['address'] = final_address
+        # 3. Разделяем данные: основные настройки и сертификат
+        ssl_cert_content = config_data.pop('db_ssl_cert', '') # Извлекаем сертификат
+        
+        main_config = {
+            "type": "server_config_main",
+            "cert_parts_count": 10, # Фиксированное количество частей для сертификата
+            "address": final_address,
+            "db_name": config_data.get("db_name"),
+            "db_user": config_data.get("db_user"),
+            "db_password": config_data.get("db_password"),
+            "db_port": config_data.get("db_port")
+        }
 
-        # 3. Сжимаем и кодируем ВЕСЬ конфиг, включая сертификат
-        json_bytes = json.dumps(config_data, ensure_ascii=False).encode('utf-8')
-        compressed_bytes = zlib.compress(json_bytes, level=9)
-        full_base64_data = base64.b64encode(compressed_bytes).decode('ascii')
+        # 4. Разбиваем сертификат ровно на 10 частей
+        cert_len = len(ssl_cert_content)
+        # Вычисляем размер каждой части с округлением вверх
+        cert_chunk_size = (cert_len + 9) // 10
+        cert_chunks = [ssl_cert_content[i:i + cert_chunk_size] for i in range(0, cert_len, cert_chunk_size)]
+        # Дополняем список пустыми строками, если частей меньше 10
+        cert_chunks.extend([''] * (10 - len(cert_chunks)))
 
-        # 4. Разбиваем на части, если данные слишком большие
-        chunk_size = 2500 # Максимальная емкость QR v40 с коррекцией L ~2953 байт. Берем с запасом.
-        chunks = [full_base64_data[i:i + chunk_size] for i in range(0, len(full_base64_data), chunk_size)]
-
-        # 5. Формируем список данных для печати (по одной "этикетке" на каждую часть QR-кода)
+        # 5. Формируем итоговый список данных для печати (1 + 10 этикеток)
         items_to_print = []
-        for i, chunk in enumerate(chunks):
-            # Формат "1/3:данные", "2/3:данные" и т.д.
-            chunk_data_for_qr = f"{i+1}/{len(chunks)}:{chunk}"
-            item_data = {
-                "QR: Конфигурация сервера": chunk_data_for_qr,
-                # Добавляем заглушки для других полей, чтобы макет не ломался
+        # Первая этикетка - основные настройки
+        items_to_print.append({
+            "QR: Конфигурация сервера": json.dumps(main_config, ensure_ascii=False),
+            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
+            "ap_workplaces.warehouse_name": "Настройка сервера (основное)",
+            "ap_workplaces.workplace_number": ""
+        })
+        # Следующие 10 этикеток - части сертификата
+        for i, cert_part in enumerate(cert_chunks):
+            cert_part_data = {"type": "server_config_cert", "part_index": i + 1, "total_parts": 10, "data": cert_part}
+            items_to_print.append({
+                "QR: Конфигурация сервера": json.dumps(cert_part_data, ensure_ascii=False),
                 "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
-                "ap_workplaces.warehouse_name": f"Настройка сервера (часть {i+1}/{len(chunks)})",
+                "ap_workplaces.warehouse_name": f"Сертификат (часть {i+1}/10)",
                 "ap_workplaces.workplace_number": ""
-            }
-            items_to_print.append(item_data)
+            })
 
-        # 6. Открываем диалог печати, передавая ему список всех частей для печати.
+        # 6. Открываем диалог печати, передавая ему список всех 11 частей.
         PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {final_address}", items_to_print)
 
     ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
