@@ -241,7 +241,7 @@ class PrintingService:
                         
                         # Очищаем ресурсы
                         mem_dc.DeleteDC()
-                        bmp.DeleteObject()
+                        win32ui.DeleteObject(bmp.GetHandle())
 
             # 5. Завершаем печать
             dc.EndPage()
