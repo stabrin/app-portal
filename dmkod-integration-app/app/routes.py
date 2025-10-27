@@ -1132,15 +1132,13 @@ def integration_panel():
                     # --- Шаг 1: Собираем данные из нашей БД в DataFrame ---
                     with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute(
-                            "SELECT id, gtin, dm_quantity, production_date, api_id FROM dmkod_aggregation_details WHERE order_id = %s",
+                            "SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s",
                             (selected_order_id,)
                         )
                         details_data = cur.fetchall()
                         if not details_data:
                             raise Exception("В заказе нет детализации для создания тиражей.")
                     details_df = pd.DataFrame(details_data)
-                    # Преобразуем дату в строку формата YYYY-MM-DD для надежного сравнения
-                    details_df['production_date_str'] = pd.to_datetime(details_df['production_date']).dt.strftime('%Y-%m-%d')
     
                     # --- Шаг 2: Получение деталей заказа из API и обогащение DataFrame ---
                     get_order_url = f"{api_base_url}/psp/orders"
@@ -1157,22 +1155,12 @@ def integration_panel():
                     if not api_products:
                         raise Exception("API не вернуло список продуктов в заказе.")
     
-                    # --- НОВАЯ ЛОГИКА: Создаем словарь для поиска api_product_id по паре (gtin, production_date) ---
-                    # Это решает проблему, когда для одного GTIN есть несколько позиций с разными датами производства.
-                    # Ключом будет кортеж (gtin, 'YYYY-MM-DD'), значением - id продукта из API.
-                    product_key_to_api_id = {} # {('gtin', 'YYYY-MM-DD'): api_product_id}
+                    # Создаем словарь для быстрого поиска api_product_id по gtin.
+                    # !! БЕЗ КАКИХ-ЛИБО УСЛОВИЙ, согласно вашему требованию !!
+                    gtin_to_api_product_id = {}
                     for p in api_products:
-                        # Проверяем наличие production_date в атрибутах
-                        prod_date = p.get('attributes', {}).get('production_date')
-                        if p.get('state') == 'ACTIVE' and prod_date:
-                            product_key = (p['gtin'], prod_date)
-                            product_key_to_api_id[product_key] = p['id']
-                    
-                    # Функция для поиска api_product_id в DataFrame
-                    def find_api_product_id(row):
-                        # Ищем по ключу (gtin, 'YYYY-MM-DD')
-                        return product_key_to_api_id.get((row['gtin'], row['production_date_str']))
-                    details_df['api_product_id'] = details_df.apply(find_api_product_id, axis=1)
+                        gtin_to_api_product_id[p['gtin']] = p['id']
+                    details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
 
                     # --- Шаг 3: Обновление/добавление названий товаров ---
                     products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name')]
