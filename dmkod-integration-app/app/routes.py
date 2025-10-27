@@ -1132,13 +1132,18 @@ def integration_panel():
                     # --- Шаг 1: Собираем данные из нашей БД в DataFrame ---
                     with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute(
-                            "SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s",
+                            "SELECT id, gtin, dm_quantity, production_date, api_id FROM dmkod_aggregation_details WHERE order_id = %s",
                             (selected_order_id,)
                         )
                         details_data = cur.fetchall()
                         if not details_data:
                             raise Exception("В заказе нет детализации для создания тиражей.")
                     details_df = pd.DataFrame(details_data)
+                    # Преобразуем production_date в строку формата YYYY-MM-DD для надежного сравнения.
+                    # Обрабатываем возможные NaT (Not a Time) значения, если дата отсутствует.
+                    details_df['production_date_str'] = details_df['production_date'].apply(
+                        lambda x: x.strftime('%Y-%m-%d') if pd.notna(x) else None
+                    )
     
                     # --- Шаг 2: Получение деталей заказа из API и обогащение DataFrame ---
                     get_order_url = f"{api_base_url}/psp/orders"
