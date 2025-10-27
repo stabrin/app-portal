@@ -3,6 +3,7 @@ import requests
 import json
 from functools import wraps
 import logging
+import time
 import pandas as pd # Уже импортирован
 import re
 import math
@@ -1231,6 +1232,11 @@ def integration_panel():
                         # Обновляем DataFrame, чтобы на следующей итерации этот ID считался существующим
                         conn_local.commit()
                         user_logs.append(f"  ID тиража {new_printrun_id} присвоен позиции заказа (ID: {row['id']}) в базе данных.")
+
+                        # --- ДОБАВЛЕНО: Задержка между запросами ---
+                        if i < len(details_df) - 1: # Не делаем паузу после последнего запроса
+                            user_logs.append("  Пауза 5 секунд перед следующим запросом...")
+                            time.sleep(5)
     
                     # --- Шаг 5: Обновление статуса заказа ---
                     with conn_local.cursor() as cur:
@@ -1291,7 +1297,6 @@ def integration_panel():
                     full_url = f"{api_base_url}/psp/printrun/json/create"
                     headers = {'Authorization': f'Bearer {access_token}'}
                     
-                    import time # Импортируем модуль для задержки
                     user_logs.append(f"Найдено {len(details_to_process)} позиций для обработки.")
 
                     for i, detail in enumerate(details_to_process):
