@@ -1169,6 +1169,9 @@ def integration_panel():
                             gtin_to_api_product_id[p['gtin']] = p['id']
                     details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
 
+                    # --- ДЛЯ ОТЛАДКИ: Сохраняем итоговый DataFrame в переменную ПЕРЕД циклом ---
+                    debug_details_df_output = details_df.to_string()
+
                     # --- Шаг 3: Обновление/добавление названий товаров ---
                     products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name')]
                     if products_to_upsert:
@@ -1235,15 +1238,18 @@ def integration_panel():
                     conn_local.commit()
                     flash('Тиражи успешно созданы в API.', 'success')
                     # Перенаправляем, чтобы обновить состояние кнопок
-                    return redirect(url_for('.integration_panel', order_id=selected_order_id))
-    
                     api_response = {
                         'status_code': 200,
-                        'body': "\n".join(user_logs)
+                        'body': "\n".join(user_logs),
+                        'debug_details_df_output': debug_details_df_output
                     }
+                    # После успешного выполнения показываем результат, а не делаем редирект
+                    return render_template('integration_panel.html', orders=orders, selected_order_id=selected_order_id, selected_order=selected_order, api_response=api_response, title="Интеграция")
     
                 except Exception as e:
                     if 'conn_local' in locals() and conn_local: conn_local.rollback()
+                    # Инициализируем переменные для блока finally
+                    debug_details_df_output = debug_details_df_output if 'debug_details_df_output' in locals() else "DataFrame не был сформирован из-за ранней ошибки."
                     error_body = ""
                     if 'response_post' in locals() and hasattr(response_post, 'text'):
                         error_body = response_post.text
@@ -1252,9 +1258,9 @@ def integration_panel():
                     
                     api_response = {
                         'status_code': 500,
-                        'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
-                        # Добавляем вывод DataFrame, если он был сформирован
-                    } if 'debug_details_df_output' not in locals() else {**api_response, 'debug_details_df_output': debug_details_df_output}
+                        'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}",
+                        'debug_details_df_output': debug_details_df_output
+                    }
                 finally:
                     if 'conn_local' in locals() and conn_local: conn_local.close()
             
