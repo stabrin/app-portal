@@ -1009,29 +1009,35 @@ def integration_panel():
                         if not order_info:
                             raise Exception("Не найдена информация о заказе или товарной группе.")
 
-                        # 2. Агрегируем данные по продуктам
+                        # 2. Получаем детализацию для формирования продуктов с учетом дат
                         cur.execute("""
-                            SELECT gtin, SUM(dm_quantity) as total_qty
+                            SELECT gtin, dm_quantity, production_date
                             FROM dmkod_aggregation_details
                             WHERE order_id = %s AND gtin IS NOT NULL AND gtin != ''
-                            GROUP BY gtin
                         """, (selected_order_id,))
                         products_data = cur.fetchall()
 
                         if not products_data:
                             raise Exception("В заказе нет детализации по продуктам (GTIN) для отправки.")
 
-                    # 3. Формируем тело запроса к API
+                    # 3. Формируем тело запроса к API с учетом дат производства
                     products_payload = [
                         {
                             "gtin": p['gtin'],
                             "code_template": order_info['dm_template'],
-                            "qty": int(p['total_qty']),
+                            "qty": int(p['dm_quantity']),
                             "unit_type": "UNIT",
                             "release_method": "IMPORT",
-                            "payment_type": 2
+                            "payment_type": 2,
+                            "attributes": {
+                                "production_date": p['production_date'].strftime('%Y-%m-%d')
+                            } if p.get('production_date') else {}
                         } for p in products_data
                     ]
+                    # Удаляем пустые словари атрибутов, если дата не была указана
+                    for p in products_payload:
+                        if not p.get("attributes"):
+                            del p["attributes"]
                     
                     api_payload = {
                         "participant_id": order_info['participant_id'],
@@ -1160,12 +1166,45 @@ def integration_panel():
                     if not api_products:
                         raise Exception("API не вернуло список продуктов в заказе.")
     
-                    # Создаем словарь для быстрого поиска api_product_id по gtin.
-                    # !! БЕЗ КАКИХ-ЛИБО УСЛОВИЙ, согласно вашему требованию !!
-                    gtin_to_api_product_id = {}
+                    # --- НОВАЯ ЛОГИКА: Создаем словарь для поиска api_product_id по паре (gtin, production_date) ---
+                    # Это решает проблему, когда для одного GTIN есть несколько позиций с разными датами производства.
+                    # Ключом будет кортеж (gtin, 'YYYY-MM-DD'), значением - id продукта из API.
+                    product_key_to_api_id = {} # {('gtin', 'YYYY-MM-DD'): api_product_id}
                     for p in api_products:
-                        gtin_to_api_product_id[p['gtin']] = p['id']
-                    details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
+                        # Проверяем наличие production_date в атрибутах
+                        prod_date = p.get('attributes', {}).get('production_date')
+                        if p.get('state') == 'ACTIVE':
+                            # Ключ для сопоставления
+                            key = (p['gtin'], prod_date)
+                            # Если для одного ключа несколько ID, сохраняем их в список
+                            if key not in product_key_to_api_id:
+                                product_key_to_api_id[key] = []
+                            product_key_to_api_id[key].append(p['id'])
+                    
+                    # Функция для поиска api_product_id в DataFrame
+                    def find_api_product_id(row):
+                        # Создаем ключ из локальных данных
+                        key = (row['gtin'], row['production_date_str'])
+                        
+                        # Пытаемся найти список ID по ключу
+                        id_list = product_key_to_api_id.get(key)
+                        
+                        if id_list:
+                            # Если ID найдены, берем первый из списка и удаляем его,
+                            # чтобы следующая строка с таким же ключом получила следующий ID.
+                            return id_list.pop(0)
+                        
+                        logging.warning(f"Не найдено точное соответствие для GTIN: {row['gtin']}, ProdDate: {row['production_date_str']}. Проверьте данные в API и локальной БД.")
+                        return None
+                        
+                    details_df['api_product_id'] = details_df.apply(find_api_product_id, axis=1)
+
+                    # --- ДЛЯ ОТЛАДКИ: Сохраняем итоговый DataFrame в файл ---
+                    # Путь к корню проекта
+                    debug_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'debug_details_df.txt')
+                    with open(debug_file_path, 'w', encoding='utf-8') as f:
+                        f.write(details_df.to_string())
+                    logging.info(f"Debug DataFrame saved to: {debug_file_path}")
 
                     # --- Шаг 3: Обновление/добавление названий товаров ---
                     products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name')]
