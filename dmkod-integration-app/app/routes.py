@@ -1549,7 +1549,7 @@ def integration_panel():
                         # РЕКОМЕНДАЦИЯ: Запускайте Gunicorn с увеличенным таймаутом, например:
                         # gunicorn --workers 3 --timeout 300 'app:create_app()'
                         # Увеличиваем таймаут для одного запроса, чтобы дать API больше времени на обработку.
-                        response = requests.post(full_url, headers=headers, json=payload, timeout=120)
+                        response = requests.post(full_url, headers=headers, json=payload, timeout=240)
                         
                         user_logs.append(f"  URL: {full_url}")
                         user_logs.append(f"  Тело: {json.dumps(payload)}")
