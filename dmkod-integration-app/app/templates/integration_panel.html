@@ -93,6 +93,13 @@
             <h6>Тело ответа:</h6>
             <pre><code class="text-break" style="font-size: 0.85rem;">{{ api_response.body }}</code></pre>
         </div>
+        {# --- НОВЫЙ БЛОК: Вывод отладочного DataFrame --- #}
+        {% if api_response.debug_details_df_output %}
+        <div class="mt-3">
+            <h6>Отладочный DataFrame (details_df):</h6>
+            <pre><code class="text-break" style="font-size: 0.85rem;">{{ api_response.debug_details_df_output }}</code></pre>
+        </div>
+        {% endif %}
     </div>
     {% endif %}
 </div>

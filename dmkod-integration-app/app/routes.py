@@ -1253,7 +1253,8 @@ def integration_panel():
                     api_response = {
                         'status_code': 500,
                         'body': f"ОШИБКА: {e}\n\nОтвет сервера (если был):\n{error_body}"
-                    }
+                        # Добавляем вывод DataFrame, если он был сформирован
+                    } if 'debug_details_df_output' not in locals() else {**api_response, 'debug_details_df_output': debug_details_df_output}
                 finally:
                     if 'conn_local' in locals() and conn_local: conn_local.close()
             
