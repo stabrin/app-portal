@@ -28,3 +28,6 @@ docker-compose.yml
 
 # Directory for API testing scripts
 api_tests/
+
+# Игнорировать все секретные файлы и конфигурации
+secrets/postgres/server.key
