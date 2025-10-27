@@ -1009,29 +1009,35 @@ def integration_panel():
                         if not order_info:
                             raise Exception("Не найдена информация о заказе или товарной группе.")
 
-                        # 2. Агрегируем данные по продуктам
+                        # 2. Получаем детализацию для формирования продуктов с учетом дат
                         cur.execute("""
-                            SELECT gtin, SUM(dm_quantity) as total_qty
+                            SELECT gtin, dm_quantity, production_date
                             FROM dmkod_aggregation_details
                             WHERE order_id = %s AND gtin IS NOT NULL AND gtin != ''
-                            GROUP BY gtin
                         """, (selected_order_id,))
                         products_data = cur.fetchall()
 
                         if not products_data:
                             raise Exception("В заказе нет детализации по продуктам (GTIN) для отправки.")
 
-                    # 3. Формируем тело запроса к API
+                    # 3. Формируем тело запроса к API с учетом дат производства
                     products_payload = [
                         {
                             "gtin": p['gtin'],
                             "code_template": order_info['dm_template'],
-                            "qty": int(p['total_qty']),
+                            "qty": int(p['dm_quantity']),
                             "unit_type": "UNIT",
                             "release_method": "IMPORT",
-                            "payment_type": 2
+                            "payment_type": 2,
+                            "attributes": {
+                                "production_date": p['production_date'].strftime('%Y-%m-%d')
+                            } if p.get('production_date') else {}
                         } for p in products_data
                     ]
+                    # Удаляем пустые словари атрибутов, если дата не была указана
+                    for p in products_payload:
+                        if not p.get("attributes"):
+                            del p["attributes"]
                     
                     api_payload = {
                         "participant_id": order_info['participant_id'],
@@ -1132,7 +1138,7 @@ def integration_panel():
                     # --- Шаг 1: Собираем данные из нашей БД в DataFrame ---
                     with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute(
-                            "SELECT id, gtin, dm_quantity, production_date, api_id FROM dmkod_aggregation_details WHERE order_id = %s",
+                            "SELECT id, gtin, dm_quantity, production_date, api_id FROM dmkod_aggregation_details WHERE order_id = %s ORDER BY id",
                             (selected_order_id,)
                         )
                         details_data = cur.fetchall()
