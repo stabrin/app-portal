@@ -28,5 +28,15 @@ __pycache__/
 
 # --- Логи и временные файлы ---
 *.log
-*.swp
-*~
+
+# Медиа-файлы, которые загружают пользователи (если будут)
+/media/
+/uploads/
+
+# Кэш сборки Docker
+.dockerignore
+docker-compose.override.yml
+docker-compose.yml
+
+# Directory for API testing scripts
+api_tests/
