@@ -773,8 +773,11 @@ def edit_integration(order_id):
                         df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
 
                         # 3. Группируем по printrun_id, дате производства и сроку годности
-                        grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date'])['DataMatrix'].apply(list).reset_index()
-
+                        # --- ИСПРАВЛЕНО: Используем .agg(list) вместо .apply(list) для избежания MultiIndex ---
+                        grouped_for_api = df_for_json.groupby(
+                            ['printrun_id', 'production_date', 'expiration_date']
+                        ).agg({'DataMatrix': list}).reset_index()
+                        
                         # 4. Формируем DataFrame для upsert
                         def create_payload(row):
                             # --- ИЗМЕНЕНО: Формируем структуру JSON согласно новому требованию ---
