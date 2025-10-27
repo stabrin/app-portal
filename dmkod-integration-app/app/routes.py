@@ -1236,7 +1236,7 @@ def integration_panel():
                         # --- ДОБАВЛЕНО: Задержка между запросами ---
                         if i < len(details_df) - 1: # Не делаем паузу после последнего запроса
                             user_logs.append("  Пауза 5 секунд перед следующим запросом...")
-                            time.sleep(5)
+                            time.sleep(10)
     
                     # --- Шаг 5: Обновление статуса заказа ---
                     with conn_local.cursor() as cur:
