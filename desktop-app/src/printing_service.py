@@ -238,7 +238,8 @@ class PrintingService:
                             # dmtx_encode возвращает специальный объект, а не готовое изображение.
                             # Создаем изображение из его пикселей, ширины и высоты.
                             encoded_dm = dmtx_encode(data_str.encode('utf-8'))
-                            barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels)
+                            # --- ИСПРАВЛЕНИЕ: Преобразуем в 1-битный режим для совместимости с термотрансферными принтерами ---
+                            barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels).convert('1')
                             barcode_image = barcode_image.resize((width, height), Image.Resampling.NEAREST)
                             label_image.paste(barcode_image, (x, y))
                         except Exception as e:
@@ -381,7 +382,7 @@ class PrintingService:
                             # Его нужно сначала преобразовать в изображение Pillow.
                             encoded_dm = dmtx_encode(data_str.encode('utf-8'))
                             if encoded_dm:
-                                barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels)
+                                barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels).convert('1')
                         
                         else:
                             logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
