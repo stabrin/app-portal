@@ -831,6 +831,19 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     if isinstance(child_widget, ttk.Button):
                         child_widget.state([state] if state == "normal" else [state])
 
+    def _toggle_tools_panel(self, active: bool) -> None:
+        """Включает/выключает панель инструментов."""
+        logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
+        state = "normal" if active else "disabled"
+        for child_widget in self.tools_frame.winfo_children():
+            try:
+                # Для кнопок ttk используется метод state
+                if isinstance(child_widget, ttk.Button):
+                    child_widget.state([state] if state == "normal" else [state])
+                else:
+                    child_widget.config(state=state)
+            except tk.TclError:
+                pass # Пропускаем виджеты, которые не поддерживают изменение состояния
     def _update_properties_panel(self) -> None:
         """Обновляет панель свойств для выбранного объекта."""
         logging.debug(f"Обновление панели свойств для объекта ID: {self.selected_object_id}")
