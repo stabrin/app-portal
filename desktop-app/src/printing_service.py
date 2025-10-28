@@ -328,7 +328,7 @@ class PrintingService:
             # Преобразуем изображение Pillow в формат, понятный для GDI
             dib = ImageWin.Dib(final_image)
             # Размещаем изображение в левом верхнем углу (0, 0)
-            dib.draw(dc.GetHandle(), (0, 0, final_image.width, final_image.height))
+            dib.draw(dc.GetSafeHdc(), (0, 0, final_image.width, final_image.height))
 
             dc.EndPage()
             dc.EndDoc()
