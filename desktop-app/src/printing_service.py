@@ -288,127 +288,52 @@ class PrintingService:
             raise ImportError("Библиотека pywin32 не установлена.")
 
         h_printer = None
-        dc = None
         try:
-            # Открываем принтер и создаем DC
+            # --- НОВАЯ ЛОГИКА: Сначала генерируем полное изображение ---
+            label_image = PrintingService.generate_label_image(template_json, data, user_info)
+            if not label_image:
+                logging.error("Не удалось сгенерировать изображение этикетки. Печать отменена.")
+                return
+
+            # --- Открываем принтер и получаем его характеристики ---
             h_printer = win32print.OpenPrinter(printer_name)
             dc = win32ui.CreateDC()
             dc.CreatePrinterDC(printer_name)
-            logging.debug(f"Успешно открыт принтер '{printer_name}'.")
 
-            # Получаем DPI принтера
-            dpi_x = dc.GetDeviceCaps(88)  # LOGPIXELSX
-            dpi_y = dc.GetDeviceCaps(90)  # LOGPIXELSY
-            dots_per_mm_x = dpi_x / 25.4
-            dots_per_mm_y = dpi_y / 25.4
-            logging.debug(f"DPI принтера: x={dpi_x}, y={dpi_y}")
+            # Физические размеры бумаги в пикселях
+            paper_width_px = dc.GetDeviceCaps(win32con.PHYSICALWIDTH)
+            paper_height_px = dc.GetDeviceCaps(win32con.PHYSICALHEIGHT)
+            logging.info(f"Физический размер бумаги: {paper_width_px}x{paper_height_px} px.")
 
-            # Начинаем печать
+            label_width_px, label_height_px = label_image.size
+            logging.info(f"Размер сгенерированного макета: {label_width_px}x{label_height_px} px.")
+
+            final_image = label_image
+            # --- Логика масштабирования и позиционирования ---
+            if label_width_px > paper_width_px or label_height_px > paper_height_px:
+                logging.info("Макет больше бумаги. Масштабирую для вписывания.")
+                # Сохраняем пропорции
+                ratio = min(paper_width_px / label_width_px, paper_height_px / label_height_px)
+                new_width = int(label_width_px * ratio)
+                new_height = int(label_height_px * ratio)
+                final_image = label_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                logging.info(f"Новый размер макета: {new_width}x{new_height} px.")
+            else:
+                logging.info("Макет меньше или равен бумаге. Масштабирование не требуется.")
+
+            # --- Печать подготовленного изображения ---
             dc.StartDoc(f"Label from TildaKod: {template_json.get('name', 'N/A')}")
             dc.StartPage()
 
-            for obj in template_json.get("objects", []):
-                logging.debug(f"Обработка объекта: тип='{obj.get('type')}', источник='{obj.get('data_source')}'")
-                
-                required_fields = ["type", "x_mm", "y_mm", "width_mm", "height_mm", "data_source"]
-                missing_fields = [f for f in required_fields if f not in obj]
-                if missing_fields:
-                    logging.warning(f"Пропуск объекта: отсутствуют поля {missing_fields}.")
-                    continue
-
-                obj_data = data.get(obj["data_source"])
-                if obj_data is None and obj["data_source"] and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
-                    logging.debug(f"Данные для '{obj['data_source']}' не найдены в data, попытка получения из БД.")
-                    obj_data = PrintingService._fetch_data_from_db(user_info, obj["data_source"])
-                
-                if obj_data is None:
-                    logging.warning(f"Данные для '{obj['data_source']}' не найдены. Пропуск объекта.")
-                    continue
-
-                try:
-                    x = int(float(obj["x_mm"]) * dots_per_mm_x)
-                    y = int(float(obj["y_mm"]) * dots_per_mm_y)
-                    width = int(float(obj["width_mm"]) * dots_per_mm_x)
-                    height = int(float(obj["height_mm"]) * dots_per_mm_y)
-                    logging.debug(f"Рассчитанные размеры (px): x={x}, y={y}, width={width}, height={height}")
-                except (ValueError, TypeError) as e:
-                    logging.error(f"Ошибка преобразования координат для объекта: {e}")
-                    continue
-
-                if obj["type"] == "text":
-                    logging.debug("Обработка как 'text'")
-                    try:
-                        font_height = -int(height * 0.8)
-                        font = win32ui.CreateFont({
-                            'name': obj.get("font_name", "Arial"),
-                            'height': font_height,
-                            'weight': 400,
-                            'charset': 204  # RUSSIAN_CHARSET
-                        })
-                        dc.SelectObject(font)
-                        dc.TextOut(x, y, str(obj_data))
-                        win32gui.DeleteObject(font.GetHandle())
-                    except Exception as e:
-                        logging.error(f"Ошибка отрисовки текста: {e}")
-                        continue
-                
-                elif obj["type"] == "barcode":
-                    barcode_type = obj.get("barcode_type", "QR").upper()
-                    logging.debug(f"Обработка как 'barcode', подтип: '{barcode_type}'")
-                    
-                    if not all([qrcode, Image, ImageWin]):
-                        logging.warning("Библиотеки для штрихкодов (qrcode, Pillow, ImageWin) не установлены.")
-                        continue
-
-                    barcode_image = None
-                    try:
-                        data_str = str(obj_data).strip()
-                        if not data_str:
-                            logging.warning("Данные для штрихкода пусты. Пропуск.")
-                            continue
-
-                        if barcode_type == "QR":
-                            qr_gen = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=1)
-                            qr_gen.add_data(data_str)
-                            qr_gen.make(fit=True)
-                            barcode_image = qr_gen.make_image(fill_color="black", back_color="white")
-                        
-                        elif barcode_type == "DATAMATRIX":
-                            if not dmtx_encode:
-                                logging.warning("Библиотека pylibdmtx не установлена. Пропуск DataMatrix.")
-                                continue
-                            # --- ИСПРАВЛЕНИЕ: Логика приведена в соответствие с generate_label_image ---
-                            # dmtx_encode возвращает объект с пикселями, а не готовое изображение.
-                            # Его нужно сначала преобразовать в изображение Pillow.
-                            encoded_dm = dmtx_encode(data_str.encode('utf-8'))
-                            if encoded_dm:
-                                barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels).convert('1')
-                        
-                        else:
-                            logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
-                            continue
-
-                        if barcode_image:
-                            scaled_image = barcode_image.resize((width, height), Image.Resampling.LANCZOS)
-                            if scaled_image.mode != 'RGB':
-                                scaled_image = scaled_image.convert('RGB')
-                            dib = ImageWin.Dib(scaled_image)
-                            bmp = win32ui.CreateBitmap()
-                            bmp.CreateCompatibleBitmap(dc, width, height)
-                            mem_dc = dc.CreateCompatibleDC()
-                            mem_dc.SelectObject(bmp)
-                            dib.draw(mem_dc.GetSafeHdc(), (0, 0, width, height))
-                            dc.BitBlt((x, y), (width, height), mem_dc, (0, 0), win32con.SRCCOPY)
-                            mem_dc.DeleteDC()
-                            win32gui.DeleteObject(bmp.GetHandle())
-                    except Exception as e:
-                        logging.error(f"Ошибка генерации штрихкода '{barcode_type}': {e}")
-                        continue
+            # Преобразуем изображение Pillow в формат, понятный для GDI
+            dib = ImageWin.Dib(final_image)
+            # Размещаем изображение в левом верхнем углу (0, 0)
+            dib.draw(dc.GetHandle(), (0, 0, final_image.width, final_image.height))
 
             dc.EndPage()
             dc.EndDoc()
             logging.info(f"Этикетка успешно напечатана на '{printer_name}'.")
-        
+
         except pywin_error as e:
             logging.error(f"Ошибка Win32 API при прямой печати: {e}")
             raise RuntimeError(f"Ошибка печати (Win32): {e.strerror}") from e
@@ -416,9 +341,6 @@ class PrintingService:
             logging.error(f"Неизвестная ошибка при прямой печати: {e}")
             raise RuntimeError(f"Неизвестная ошибка прямой печати: {e}")
         finally:
-            if dc:
-                dc.DeleteDC()
-                logging.debug("Device Context освобожден.")
             if h_printer:
                 win32print.ClosePrinter(h_printer)
                 logging.debug(f"Принтер '{printer_name}' закрыт.")
