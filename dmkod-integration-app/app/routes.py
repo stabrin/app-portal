@@ -428,10 +428,20 @@ def create_integration():
 @api_token_required
 def edit_integration(order_id):
     conn = get_db_connection()
+    order = None # Инициализируем переменную order
     try:
+        # Загружаем информацию о заказе в самом начале, чтобы она была доступна и для GET, и для POST.
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT o.*, pg.display_name as product_group_name
+                FROM orders o
+                LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
+                WHERE o.id = %s
+            """, (order_id,))
+            order = cur.fetchone()
+
         if request.method == 'POST':
             action = request.form.get('action')
-
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 if action == 'delete_details':
                     cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
@@ -557,7 +567,7 @@ def edit_integration(order_id):
                     
                     # Проверка статуса заказа: загрузка CSV-файла "Дельта" разрешена только для заказов со статусом 'delta'
                     if order['status'] != 'delta':
-                        flash('CSV-файл с результатами "Дельта" не был выбран.', 'danger')
+                        flash(f'Загрузка CSV-файла "Дельта" не разрешена для заказа со статусом "{order["status"]}".', 'danger')
                         return redirect(url_for('.edit_integration', order_id=order_id))
 
                     try:
@@ -822,14 +832,6 @@ def edit_integration(order_id):
 
         # --- GET-запрос: загрузка данных для отображения ---
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # 1. Основная информация о заказе
-            cur.execute("""
-                SELECT o.*, pg.display_name as product_group_name
-                FROM orders o
-                LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
-                WHERE o.id = %s
-            """, (order_id,))
-            order = cur.fetchone()
 
             if not order:
                 flash(f'Заказ с ID {order_id} не найден.', 'danger')
