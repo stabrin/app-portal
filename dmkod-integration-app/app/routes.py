@@ -554,6 +554,11 @@ def edit_integration(order_id):
                     if not delta_csv_file:
                         flash('CSV-файл с результатами "Дельта" не был выбран.', 'danger')
                         return redirect(url_for('.edit_integration', order_id=order_id))
+                    
+                    # Проверка статуса заказа: загрузка CSV-файла "Дельта" разрешена только для заказов со статусом 'delta'
+                    if order['status'] != 'delta':
+                        flash('CSV-файл с результатами "Дельта" не был выбран.', 'danger')
+                        return redirect(url_for('.edit_integration', order_id=order_id))
 
                     try:
                         # 1. Валидация имени файла
