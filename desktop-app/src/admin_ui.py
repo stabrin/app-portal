@@ -488,16 +488,19 @@ def display_qr_sequence(title, chunks, parent):
 
 class PreviewLabelsDialog(tk.Toplevel):
     """Новый класс для окна предпросмотра сгенерированных этикеток."""
-    def __init__(self, parent, images, on_print_callback):
+    def __init__(self, parent, images, on_print_all_callback, on_print_current_callback):
         super().__init__(parent)
         self.title("Предпросмотр этикеток")
         self.geometry("600x500")
         self.transient(parent)
         self.grab_set()
 
+        self.parent_dialog = parent
         self.images = images
-        self.on_print_callback = on_print_callback
+        self.on_print_all_callback = on_print_all_callback
+        self.on_print_current_callback = on_print_current_callback
         self.current_index = 0
+
 
         self.info_label = ttk.Label(self, text="", font=("Arial", 12))
         self.info_label.pack(pady=10)
@@ -511,8 +514,11 @@ class PreviewLabelsDialog(tk.Toplevel):
         self.prev_button = ttk.Button(nav_frame, text="<< Назад", command=self._show_prev)
         self.prev_button.pack(side=tk.LEFT, padx=10)
 
-        self.print_button = ttk.Button(nav_frame, text="Напечатать все", command=self._confirm_print)
-        self.print_button.pack(side=tk.LEFT, padx=10)
+        self.print_all_button = ttk.Button(nav_frame, text="Напечатать все", command=self._print_all)
+        self.print_all_button.pack(side=tk.LEFT, padx=10)
+
+        self.print_current_button = ttk.Button(nav_frame, text="Напечатать текущую", command=self._print_current)
+        self.print_current_button.pack(side=tk.LEFT, padx=10)
 
         self.next_button = ttk.Button(nav_frame, text="Далее >>", command=self._show_next)
         self.next_button.pack(side=tk.LEFT, padx=10)
@@ -544,9 +550,14 @@ class PreviewLabelsDialog(tk.Toplevel):
     def _show_prev(self):
         if self.current_index > 0: self._show_image(self.current_index - 1)
 
-    def _confirm_print(self):
-        self.on_print_callback()
+    def _print_all(self):
+        self.on_print_all_callback()
         self.destroy()
+
+    def _print_current(self):
+        # Вызываем callback, передавая индекс текущего изображения
+        self.on_print_current_callback(self.current_index)
+        # Окно не закрываем
 
 class PrintWorkplaceLabelsDialog(tk.Toplevel):
     """Диалог для выбора параметров печати этикеток рабочих мест."""
@@ -558,8 +569,7 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         win32print = None
         win32api = None
     # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
-    def __init__(self, parent, user_info, title_name, items_to_print=None):
+    def __init__(self, parent, user_info, title_name, items_to_print=None, preselected_layout=None):
         super().__init__(parent)
         self.title(f"Печать: '{title_name}'")
         self.geometry("500x400")
@@ -570,6 +580,7 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         self.user_info = user_info
         self.warehouse_name = title_name if items_to_print is None else None # Для обратной совместимости
         self.layouts = [] # Список загруженных макетов
+        self.preselected_layout = preselected_layout # Для предустановки макета
 
         if not self.win32print:
             messagebox.showerror("Ошибка", "Библиотека 'pywin32' не установлена.\nФункционал печати недоступен.", parent=self)
@@ -651,6 +662,9 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             layout_names = [l['name'] for l in self.layouts]
             self.layout_combo['values'] = layout_names
             if layout_names:
+                if self.preselected_layout and self.preselected_layout in layout_names:
+                    self.layout_combo.set(self.preselected_layout)
+                else:
                 self.layout_combo.current(0)
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить макеты: {e}", parent=self)
@@ -726,19 +740,29 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
                 messagebox.showwarning("Внимание", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
                 return
 
-            # Функция, которая будет вызвана, если пользователь нажмет "Напечатать" в окне предпросмотра
+            # Callback для кнопки "Напечатать все"
             def perform_actual_printing():
                 try:
                     PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data, self.user_info)
                     messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
                     self.destroy() # Закрываем диалог печати после успешной отправки
                 except Exception as e_print:
-                    error_details = traceback.format_exc()
-                    logging.error(f"Ошибка при фактической печати: {e_print}\n{error_details}")
+                    logging.error(f"Ошибка при фактической печати: {e_print}\n{traceback.format_exc()}")
+                    messagebox.showerror("Ошибка печати", f"Произошла ошибка: {e_print}\nПодробности в app.log.", parent=self)
+
+            # Callback для кнопки "Напечатать текущую"
+            def perform_single_print(index):
+                try:
+                    item_to_print = all_items_data[index]
+                    PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], [item_to_print], self.user_info)
+                    messagebox.showinfo("Успех", f"Задание на печать 1 этикетки отправлено на принтер.", parent=self)
+                    # Диалог не закрываем
+                except Exception as e_print:
+                    logging.error(f"Ошибка при печати одной этикетки: {e_print}\n{traceback.format_exc()}")
                     messagebox.showerror("Ошибка печати", f"Произошла ошибка: {e_print}\nПодробности в app.log.", parent=self)
 
             # Открываем окно предпросмотра
-            PreviewLabelsDialog(self, images_to_preview, perform_actual_printing)
+            PreviewLabelsDialog(self, images_to_preview, perform_actual_printing, perform_single_print)
         except Exception as e:
             error_details = traceback.format_exc()
             logging.error(f"Ошибка печати этикеток рабочих мест: {e}\n{error_details}")

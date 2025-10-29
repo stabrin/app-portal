@@ -548,12 +548,17 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
     def _open_preview(self):
         """Открывает окно предпросмотра с тестовыми данными."""
+        # --- НОВАЯ ЛОГИКА: Сохраняем макет и открываем диалог печати ---
         if not self.template:
-            messagebox.showwarning("Внимание", "Нет активного макета для предпросмотра.", parent=self)
+            messagebox.showwarning("Внимание", "Нет активного макета.", parent=self)
             return
 
         try:
-            test_data = self._get_test_data_for_template()
+            # 1. Сохраняем текущий макет
+            self._save_layout(show_success_message=False) # Сохраняем без всплывающего окна
+
+            # 2. Получаем тестовые данные
+            test_data = self._get_test_data_for_template() # Используем существующий метод
             if not test_data:
                 messagebox.showwarning("Внимание", "Не удалось найти тестовые данные для предпросмотра.", parent=self)
                 return
@@ -561,15 +566,9 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             images = []
             # Генерируем по одному изображению для каждого набора данных
             for item_data in test_data:
-                img = self.generate_label_image(self.template, item_data, self.user_info)
-                images.append(img)
-            
-            if not images:
-                messagebox.showerror("Ошибка", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
-                return
-
-            # Используем новый класс для предпросмотра
-            PreviewWindow(self, images)
+                # 3. Открываем стандартный диалог печати, передавая ему данные
+                from .admin_ui import PrintWorkplaceLabelsDialog
+                PrintWorkplaceLabelsDialog(self, self.user_info, f"Предпросмотр: {self.template['name']}", test_data, preselected_layout=self.template['name'])
 
         except Exception as e:
             logging.error(f"Ошибка при создании предпросмотра: {e}", exc_info=True)
@@ -798,7 +797,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     """, (layout_name, json.dumps(self.template)))
                 conn.commit()
             logging.info(f"Макет '{layout_name}' успешно сохранен в БД.")
-            messagebox.showinfo("Сохранено", f"Макет '{layout_name}' успешно сохранен.", parent=self)
+            if show_success_message:
+                messagebox.showinfo("Сохранено", f"Макет '{layout_name}' успешно сохранен.", parent=self)
             self.title(f"Редактор макетов - {layout_name}")
         except Exception as e:
             logging.error(f"Ошибка сохранения макета '{layout_name}': {e}")
@@ -938,17 +938,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
     def _toggle_properties_panel(self, active: bool) -> None:
         """Включает/выключает панель свойств."""
         logging.debug(f"Переключение панели свойств: {'вкл' if active else 'выкл'}")
-        # --- ИСПРАВЛЕНИЕ: Панель свойств не должна влиять на панель инструментов ---
-        # Теперь этот метод скрывает/показывает панель, а не меняет состояние виджетов.
+        # --- ИСПРАВЛЕНИЕ: Возвращаем логику скрытия/показа панели, а не изменения состояния виджетов.
+        # Это предотвращает случайное отключение других панелей.
         if active:
             if not self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack(fill=tk.X, pady=10)
         else:
             if self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack_forget()
-    def _toggle_tools_panel(self, active: bool) -> None:
-        """Включает/выключает панель инструментов."""
-        logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
         state = "normal" if active else "disabled"
         for child_widget in self.tools_frame.winfo_children():
             try:
@@ -959,6 +956,19 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     child_widget.config(state=state)
             except tk.TclError:
                 pass # Пропускаем виджеты, которые не поддерживают изменение состояния
+
+    def _toggle_tools_panel(self, active: bool) -> None:
+        """Включает/выключает панель инструментов."""
+        logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
+        state = "normal" if active else "disabled"
+        for child_widget in self.tools_frame.winfo_children():
+            try:
+                if isinstance(child_widget, ttk.Button):
+                    child_widget.state([state] if state == "normal" else [state])
+                else:
+                    child_widget.config(state=state)
+            except tk.TclError:
+                pass
     def _update_properties_panel(self) -> None:
         """Обновляет панель свойств для выбранного объекта."""
         logging.debug(f"Обновление панели свойств для объекта ID: {self.selected_object_id}")
@@ -1022,12 +1032,13 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
 class PreviewWindow(tk.Toplevel):
     """Новое окно для предпросмотра и печати отдельных этикеток."""
-    def __init__(self, parent, images: list):
+    def __init__(self, parent, images: list, on_print_all_callback, on_print_current_callback):
         super().__init__(parent)
         self.parent = parent
         self.images = images
         self.current_index = 0
-
+        self.on_print_all_callback = on_print_all_callback
+        self.on_print_current_callback = on_print_current_callback
         self.title("Предпросмотр этикеток")
         self.geometry("600x500")
         self.transient(parent)
@@ -1049,8 +1060,10 @@ class PreviewWindow(tk.Toplevel):
         self.prev_button = ttk.Button(nav_frame, text="<< Назад", command=self._show_prev)
         self.prev_button.pack(side=tk.LEFT, padx=10)
 
-        self.print_button = ttk.Button(nav_frame, text="Напечатать текущую", command=self._print_current)
-        self.print_button.pack(side=tk.LEFT, padx=10)
+        self.print_all_button = ttk.Button(nav_frame, text="Напечатать все", command=self._print_all)
+        self.print_all_button.pack(side=tk.LEFT, padx=10)
+        self.print_current_button = ttk.Button(nav_frame, text="Напечатать текущую", command=self._print_current)
+        self.print_current_button.pack(side=tk.LEFT, padx=10)
 
         self.next_button = ttk.Button(nav_frame, text="Далее >>", command=self._show_next)
         self.next_button.pack(side=tk.LEFT, padx=10)
@@ -1079,6 +1092,12 @@ class PreviewWindow(tk.Toplevel):
     def _show_prev(self):
         if self.current_index > 0: self._show_image(self.current_index - 1)
 
+    def _print_all(self):
+        """Вызывает callback для печати всех этикеток."""
+        self.on_print_all_callback()
+        self.destroy()
+
     def _print_current(self):
-        """Вызывает диалог печати для текущей этикетки."""
-        self.parent._open_test_print_dialog()
+        """Вызывает callback для печати текущей этикетки."""
+        self.on_print_current_callback(self.current_index)
+        # Окно не закрываем, чтобы можно было напечатать другие страницы
