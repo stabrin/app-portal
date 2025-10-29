@@ -709,13 +709,13 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
                     # Загружаем один SSCC для всех этикеток
                     if "packages.sscc_code" in data_sources:
-                        cur.execute("SELECT sscc_code FROM packages LIMIT 1")
+                        cur.execute("SELECT distinct sscc as sscc_code FROM packages p left join items i on p.id = i.package_id where order_id=1")
                         package = cur.fetchone()
                         if package: base_test_data['packages.sscc_code'] = package['sscc_code']
 
                     # Загружаем данные для QR-кода рабочего места
                     if "QR: Конфигурация рабочего места" in data_sources:
-                        cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces LIMIT 1")
+                        cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces where warehouse_name='Тестовый склад'")
                         wp = cur.fetchone()
                         if wp:
                             base_test_data["QR: Конфигурация рабочего места"] = json.dumps({
@@ -732,7 +732,9 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             table, field = source.split('.')
                             cur.execute(sql.SQL("SELECT {} FROM {} LIMIT 1").format(sql.Identifier(field), sql.Identifier(table)))
                             data = cur.fetchone()
-                            if data: base_test_data[source] = data[field] if data[field] is not None else ""
+                            # --- ИСПРАВЛЕНИЕ: Проверяем, что data не None, ПЕРЕД обращением по ключу ---
+                            if data and data[field] is not None:
+                                base_test_data[source] = data[field]
 
                     # --- НОВАЯ ЛОГИКА: Загружаем ВСЕ DataMatrix коды и создаем несколько этикеток ---
                     datamatrix_codes = []
