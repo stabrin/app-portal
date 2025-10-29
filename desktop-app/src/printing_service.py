@@ -543,9 +543,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self._on_canvas_click)
 
-        self._toggle_properties_panel(False)
-        self._toggle_tools_panel(False)
-
     def _open_preview(self):
         """Открывает окно предпросмотра с тестовыми данными."""
         # --- НОВАЯ ЛОГИКА: Сохраняем макет и открываем диалог печати ---
@@ -681,7 +678,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self.title(f"Редактор макетов - {layout_name}")
             self.editor_view_frame.pack(fill=tk.BOTH, expand=True)
             self._draw_canvas_background()
-            self._toggle_tools_panel(True) # <--- ИСПРАВЛЕНИЕ: Активируем панель инструментов при переключении на редактор
+            # --- НОВАЯ ЛОГИКА: Панель инструментов всегда активна в редакторе ---
+            # Просто включаем все кнопки один раз при переходе в режим редактора.
+            for child_widget in self.tools_frame.winfo_children():
+                try:
+                    if isinstance(child_widget, ttk.Button):
+                        child_widget.state(["!disabled"])
+                except tk.TclError:
+                    pass
         
         self.active_view = view_name
         logging.info(f"Активный вид: {view_name}")
@@ -722,7 +726,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.selected_object_id = None
         self.canvas_objects.clear()
         self._switch_view('editor')
-        self._toggle_properties_panel(False)
+        self._toggle_properties_panel(False) # Очищаем и деактивируем панель свойств
         logging.info(f"Создан новый макет: {name} ({width_mm}x{height_mm} мм)")
 
     def _edit_selected_layout(self) -> None:
@@ -741,7 +745,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self.selected_object_id = None
             self.canvas_objects.clear()
             self._switch_view('editor')
-            self._toggle_properties_panel(False)
+            self._toggle_properties_panel(False) # Очищаем и деактивируем панель свойств
             logging.info(f"Открыт для редактирования макет: {layout_name}")
 
     def _delete_selected_layout(self) -> None:
