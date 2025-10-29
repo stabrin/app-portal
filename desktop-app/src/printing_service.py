@@ -450,6 +450,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
     def _create_widgets(self) -> None:
         """Создает виджеты редактора."""
+        logging.debug("LabelEditorWindow: _create_widgets - Начало создания виджетов.")
         logging.debug("Создание виджетов редактора.")
         self.list_view_frame = ttk.Frame(self, padding="10")
         self._create_list_view_widgets()
@@ -458,10 +459,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self._create_editor_view_widgets()
 
         self._switch_view('list')
+        logging.debug("LabelEditorWindow: _create_widgets - Завершение создания виджетов.")
 
     def _create_list_view_widgets(self) -> None:
         """Создает виджеты для списка макетов."""
         logging.debug("Создание виджетов для списка макетов.")
+        logging.debug("LabelEditorWindow: _create_list_view_widgets - Начало.")
         list_controls_frame = ttk.Frame(self.list_view_frame)
         list_controls_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
 
@@ -484,10 +487,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._load_layouts_to_tree()
+        logging.debug("LabelEditorWindow: _create_list_view_widgets - Завершено.")
 
     def _create_editor_view_widgets(self) -> None:
         """Создает виджеты для редактора."""
         logging.debug("Создание виджетов для редактора.")
+        logging.debug("LabelEditorWindow: _create_editor_view_widgets - Начало.")
         paned_window = ttk.PanedWindow(self.editor_view_frame, orient=tk.HORIZONTAL)
         paned_window.pack(fill=tk.BOTH, expand=True)
 
@@ -544,7 +549,9 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.canvas.bind("<Button-1>", self._on_canvas_click)
 
         self._toggle_properties_panel(False)
+        logging.debug("LabelEditorWindow: _create_editor_view_widgets - Панель свойств инициализирована как выключенная.")
         self._toggle_tools_panel(False)
+        logging.debug("LabelEditorWindow: _create_editor_view_widgets - Панель инструментов инициализирована как выключенная. Завершено.")
 
     def _open_preview(self):
         """Открывает окно предпросмотра с тестовыми данными."""
