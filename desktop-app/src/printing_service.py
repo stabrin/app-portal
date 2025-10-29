@@ -49,7 +49,7 @@ except ImportError:
 
 # Конфигурация логирования
 logging.basicConfig(
-    level=logging.DEBUG, # ИЗМЕНЕНИЕ: Включаем подробное логирование для отладки
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [printing_service] - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -450,7 +450,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
     def _create_widgets(self) -> None:
         """Создает виджеты редактора."""
-        logging.debug("LabelEditorWindow: _create_widgets - Начало создания виджетов.")
         logging.debug("Создание виджетов редактора.")
         self.list_view_frame = ttk.Frame(self, padding="10")
         self._create_list_view_widgets()
@@ -459,12 +458,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self._create_editor_view_widgets()
 
         self._switch_view('list')
-        logging.debug("LabelEditorWindow: _create_widgets - Завершение создания виджетов.")
 
     def _create_list_view_widgets(self) -> None:
         """Создает виджеты для списка макетов."""
         logging.debug("Создание виджетов для списка макетов.")
-        logging.debug("LabelEditorWindow: _create_list_view_widgets - Начало.")
         list_controls_frame = ttk.Frame(self.list_view_frame)
         list_controls_frame.pack(side=tk.TOP, fill=tk.X, pady=5)
 
@@ -487,12 +484,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._load_layouts_to_tree()
-        logging.debug("LabelEditorWindow: _create_list_view_widgets - Завершено.")
 
     def _create_editor_view_widgets(self) -> None:
         """Создает виджеты для редактора."""
         logging.debug("Создание виджетов для редактора.")
-        logging.debug("LabelEditorWindow: _create_editor_view_widgets - Начало.")
         paned_window = ttk.PanedWindow(self.editor_view_frame, orient=tk.HORIZONTAL)
         paned_window.pack(fill=tk.BOTH, expand=True)
 
@@ -549,9 +544,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.canvas.bind("<Button-1>", self._on_canvas_click)
 
         self._toggle_properties_panel(False)
-        logging.debug("LabelEditorWindow: _create_editor_view_widgets - Панель свойств инициализирована как выключенная.")
         self._toggle_tools_panel(False)
-        logging.debug("LabelEditorWindow: _create_editor_view_widgets - Панель инструментов инициализирована как выключенная. Завершено.")
 
     def _open_preview(self):
         """Открывает окно предпросмотра с тестовыми данными."""
@@ -951,21 +944,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         else:
             if self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack_forget()
-
-    def _toggle_tools_panel(self, active: bool) -> None:
-        """Включает/выключает панель инструментов."""
-        logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
-        state = "normal" if active else "disabled"
-        for child_widget in self.tools_frame.winfo_children():
-            try:
-                if isinstance(child_widget, ttk.Button):
-                    child_widget.state([state] if state == "normal" else [state])
-                else:
-                    child_widget.config(state=state)
-            except tk.TclError:
-                # Пропускаем виджеты, которые не поддерживают изменение состояния (например, Separator)
-                pass
-
     def _update_properties_panel(self) -> None:
         """Обновляет панель свойств для выбранного объекта."""
         logging.debug(f"Обновление панели свойств для объекта ID: {self.selected_object_id}")
