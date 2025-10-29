@@ -3,6 +3,7 @@ import logging
 import json
 import os
 import tempfile
+import textwrap
 from typing import Dict, Any, Optional
 from psycopg2 import sql
 import psycopg2
@@ -143,6 +144,83 @@ class PrintingService:
                 logging.debug("Соединение с БД закрыто.")
 
     @staticmethod
+    def _get_multiline_fitting_font(text: str, font_name: str, max_width: int, max_height: int) -> tuple[ImageFont.FreeTypeFont, str]:
+        """
+        Подбирает шрифт и переносит текст по словам, чтобы он поместился в заданные рамки.
+        """
+        font_size = max_height
+        font = None
+        wrapped_text = text
+
+        def load_font(size):
+            try:
+                return ImageFont.truetype(f"{font_name.lower()}.ttf", size=size)
+            except IOError:
+                try:
+                    return ImageFont.truetype("arial.ttf", size=size)
+                except IOError:
+                    return ImageFont.load_default()
+
+        while font_size > 5:
+            font = load_font(font_size)
+            if not hasattr(font, 'getbbox'):
+                return font, text
+
+            # Оцениваем среднюю ширину символа для этого шрифта
+            avg_char_width = font.getbbox("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")[2] / 62
+            if avg_char_width == 0: # Избегаем деления на ноль
+                avg_char_width = 1
+            
+            # Примерное количество символов, которое поместится в строку
+            wrap_width = int(max_width / avg_char_width)
+            if wrap_width <= 0:
+                font_size -= 1
+                continue
+
+            # Разбиваем текст на строки
+            wrapper = textwrap.TextWrapper(width=wrap_width, replace_whitespace=False)
+            lines = wrapper.wrap(text)
+            wrapped_text = "\n".join(lines)
+            
+            # Проверяем высоту получившегося текста
+            if font.getbbox(wrapped_text)[3] <= max_height:
+                return font, wrapped_text # Шрифт и текст подходят
+            font_size -= 1
+        
+        return font, wrapped_text # Возвращаем лучшее из того, что получилось
+    @staticmethod
+    def _get_fitting_font(text: str, font_name: str, max_width: int, max_height: int) -> ImageFont.FreeTypeFont:
+        """
+        Подбирает максимальный размер шрифта, чтобы текст поместился в заданные рамки.
+        """
+        font_size = max_height  # Начинаем с максимальной высоты
+        font = None
+        
+        # Пытаемся загрузить указанный шрифт, с фолбэком на Arial и дефолтный
+        def load_font(size):
+            try:
+                return ImageFont.truetype(f"{font_name.lower()}.ttf", size=size)
+            except IOError:
+                try:
+                    return ImageFont.truetype("arial.ttf", size=size)
+                except IOError:
+                    return ImageFont.load_default()
+
+        while font_size > 5:  # Минимальный размер шрифта
+            font = load_font(font_size)
+            
+            # Для растровых шрифтов (load_default) getbbox может не работать как надо
+            if not hasattr(font, 'getbbox'):
+                return font # Возвращаем как есть
+
+            bbox = font.getbbox(text)
+            text_width = bbox[2] - bbox[0]
+            if text_width <= max_width:
+                return font  # Шрифт подходит по ширине и высоте (т.к. начали с max_height)
+            font_size -= 1
+        
+        return font # Возвращаем самый маленький из попробованных, если ничего не подошло
+    @staticmethod
     def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any]) -> Optional[Image.Image]:
         """Генерирует изображение этикетки с помощью Pillow."""
         logging.info("Начало генерации изображения этикетки.")
@@ -203,12 +281,8 @@ class PrintingService:
 
                 if obj["type"] == "text":
                     logging.debug("Обработка как 'text'")
-                    try:
-                        font = ImageFont.truetype("arial.ttf", size=int(height * 0.8))
-                    except IOError:
-                        logging.warning("Шрифт Arial не найден, используется шрифт по умолчанию.")
-                        font = ImageFont.load_default()
-                    draw.text((x, y), str(obj_data), fill="black", font=font)
+                    font, wrapped_text = PrintingService._get_multiline_fitting_font(str(obj_data), obj.get("font_name", "arial"), width, height)
+                    draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la") # anchor 'la' - left, ascent
                 
                 elif obj["type"] == "barcode":
                     barcode_type = obj.get("barcode_type", "QR").upper()
@@ -626,7 +700,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
                     # Данные для DataMatrix и SSCC (из первого заказа)
                     if any(s.startswith('items.') or s.startswith('packages.') for s in data_sources):
-                        cur.execute("SELECT datamatrix FROM items LIMIT 1")
+                        cur.execute("SELECT datamatrix FROM items where order_id=1")
                         item = cur.fetchone()
                         if item:
                             test_data_set['items.datamatrix'] = item['datamatrix']
