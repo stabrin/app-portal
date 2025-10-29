@@ -150,49 +150,43 @@ class PrintingService:
         """
         Подбирает шрифт и переносит текст по словам, чтобы он поместился в заданные рамки.
         """
-        font_size = max_height
+        font_size = min(max_height, 72) # Начинаем с разумного максимального размера шрифта
         font = None
         wrapped_text = text
 
         def load_font(size):
             try:
-                return ImageFont.truetype(f"{font_name.lower()}.ttf", size=size)
+                return ImageFont.truetype(f"{font_name.lower()}.ttf", size=size, encoding='unic')
             except IOError:
                 try:
-                    return ImageFont.truetype("arial.ttf", size=size)
+                    return ImageFont.truetype("arial.ttf", size=size, encoding='unic')
                 except IOError:
                     return ImageFont.load_default()
 
-        # Ищем подходящий размер шрифта, начиная с большего и уменьшая
-        while font_size > 4: # Минимальный размер шрифта 5px
+        while font_size > 4: # Минимальный размер шрифта
             font = load_font(font_size)
-            if not hasattr(font, 'getbbox'):
-                return font, text
 
-            # Для Pillow 10+ getbbox возвращает (left, top, right, bottom)
-            # Для Pillow < 10 getsize возвращает (width, height)
-            # Используем getbbox для более точного измерения
-            
-            # Сначала пробуем обернуть текст с текущим размером шрифта
-            # Оценим ширину символа для textwrap.TextWrapper
-            # Используем 'W' как один из самых широких символов для более надежного расчета ширины
-            try:
-                avg_char_width = font.getbbox('W')[2] - font.getbbox('W')[0] if text else 1
-            except TypeError: # Для старых версий Pillow или некоторых шрифтов
-                avg_char_width = font.getsize('W')[0] if text else 1
-            wrap_width = max(1, int(max_width / avg_char_width)) # Ширина в символах
+            # --- НОВЫЙ, БОЛЕЕ ТОЧНЫЙ АЛГОРИТМ ПЕРЕНОСА СТРОК ---
+            lines = []
+            words = text.split()
+            if not words:
+                return font, ""
 
-            wrapper = textwrap.TextWrapper(width=wrap_width, replace_whitespace=False, break_long_words=True)
-            lines = wrapper.wrap(text)
+            current_line = words[0]
+            for word in words[1:]:
+                # Проверяем ширину текущей строки + новое слово
+                if draw.textbbox((0,0), current_line + " " + word, font=font)[2] <= max_width:
+                    current_line += " " + word
+                else:
+                    # Если не помещается, завершаем текущую строку и начинаем новую
+                    lines.append(current_line)
+                    current_line = word
+            lines.append(current_line) # Добавляем последнюю строку
+
             wrapped_text = "\n".join(lines)
+            text_height = draw.textbbox((0,0), wrapped_text, font=font)[3]
 
-            # Получаем реальные размеры всего обернутого текста
-            text_bbox = draw.textbbox((0,0), wrapped_text, font=font) # Используем draw.textbbox для многострочного текста
-            text_width = text_bbox[2] - text_bbox[0] # right - left
-            text_height = text_bbox[3] - text_bbox[1] # bottom - top
-
-            # Проверяем, вписывается ли текст и по ширине, и по высоте
-            if text_width <= max_width and text_height <= max_height:
+            if text_height <= max_height:
                 return font, wrapped_text # Шрифт и текст подходят
             else:
                 # Если не помещается, уменьшаем размер шрифта и пробуем снова
@@ -253,6 +247,9 @@ class PrintingService:
             height_px = int(template_json["height_mm"] * dots_per_mm)
             logging.debug(f"Размеры этикетки: {width_px}x{height_px} пикселей (DPI={DPI})")
 
+            # --- НОВОЕ: Кэш для рассчитанных текстовых объектов ---
+            custom_text_cache = {}
+
             label_image = Image.new('RGB', (width_px, height_px), 'white')
             draw = ImageDraw.Draw(label_image)
 
@@ -294,8 +291,20 @@ class PrintingService:
 
                 if obj["type"] == "text":
                     logging.debug("Обработка как 'text'")
-                    font, wrapped_text = PrintingService._get_multiline_fitting_font(draw, str(obj_data), obj.get("font_name", "arial"), width, height)
-                    draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la") # anchor 'la' - left, ascent
+                    # --- НОВАЯ ЛОГИКА: Используем кэш для произвольного текста ---
+                    if obj.get("is_custom_text"):
+                        cache_key = obj['data_source'] # Ключ - сам текст
+                        if cache_key not in custom_text_cache:
+                            # Если в кэше нет, рассчитываем и сохраняем
+                            logging.debug(f"Кэширование произвольного текста: '{cache_key[:30]}...'")
+                            font, wrapped_text = PrintingService._get_multiline_fitting_font(draw, str(obj_data), obj.get("font_name", "arial"), width, height)
+                            custom_text_cache[cache_key] = (font, wrapped_text)
+                        else:
+                            # Если в кэше есть, берем готовый результат
+                            logging.debug("Использование кэшированного произвольного текста.")
+                            font, wrapped_text = custom_text_cache[cache_key]
+                        draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
+
                 
                 elif obj["type"] == "barcode":
                     barcode_type = obj.get("barcode_type", "QR").upper()
