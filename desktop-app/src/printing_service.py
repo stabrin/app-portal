@@ -737,18 +737,18 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     # --- ИЗМЕНЕНИЕ: Загружаем текстовые поля, только если они есть в макете ---
                     for source in data_sources:
                         # --- ИЗМЕНЕНИЕ: Убираем 'items.datamatrix' из этого цикла ---
-                        if '.' in source and not source.startswith('QR:') and source != 'items.datamatrix':
+                        if source and '.' in source and not source.startswith('QR:') and source != 'items.datamatrix':
                             # Пропускаем уже обработанные поля
                             if source in ["packages.sscc_code", "ap_workplaces.warehouse_name", "ap_workplaces.workplace_number"]:
                                 continue
+                            # --- ИСПРАВЛЕНИЕ: Переносим split внутрь условия, чтобы избежать NameError ---
                             table, field = source.split('.')
-                            # --- ИСПРАВЛЕНИЕ: Упрощаем запрос, чтобы избежать ошибки "got type instead" ---
-                            # Запрос теперь просто выбирает все значения из нужной колонки.
                             query = sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(
                                 sql.Identifier(field),
                                 sql.Identifier(table),
                                 sql.Identifier(field) # Добавляем недостающий параметр для WHERE
                             )
+                            logging.debug(f"Выполнение запроса для тестовых данных: {query.as_string(conn)}")
                             cur.execute(query)
                             all_data = cur.fetchall()
                             logging.debug(f"Для источника '{source}' загружено {len(all_data)} строк.")
