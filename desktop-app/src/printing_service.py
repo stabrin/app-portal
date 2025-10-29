@@ -693,13 +693,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         if not self.template:
             return []
 
+        # --- ИЗМЕНЕНИЕ: Собираем только те источники, что есть в макете ---
         data_sources = {
             obj['data_source'] for obj in self.template.get('objects', []) if not obj.get('is_custom_text')
         }
         
-        # --- НОВАЯ ЛОГИКА: Создаем базовый набор данных с заглушками ---
+        # Создаем базовый набор данных с заглушками только для нужных источников
         base_test_data = {}
-        for source in self.available_text_sources + self.available_qr_sources + self.available_sscc_sources + self.available_datamatrix_sources:
+        for source in data_sources:
             base_test_data[source] = f"<{source}>"
 
         # --- НОВАЯ ЛОГИКА: Загружаем реальные данные для заглушек ---
@@ -707,14 +708,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             # Используем один коннект для всех запросов
             with self._get_client_db_connection() as conn:
                 with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
-                    # Загружаем один SSCC для всех этикеток
+                    # --- ИЗМЕНЕНИЕ: Загружаем SSCC, только если он нужен ---
                     if "packages.sscc_code" in data_sources:
                         cur.execute("SELECT distinct sscc as sscc_code FROM packages p left join items i on p.id = i.package_id where order_id=1")
                         package = cur.fetchone()
                         if package: base_test_data['packages.sscc_code'] = package['sscc_code']
 
-                    # Загружаем данные для QR-кода рабочего места
-                    if "QR: Конфигурация рабочего места" in data_sources:
+                    # --- ИЗМЕНЕНИЕ: Загружаем данные для QR, только если они нужны ---
+                    if "QR: Конфигурация рабочего места" in data_sources or "ap_workplaces.warehouse_name" in data_sources or "ap_workplaces.workplace_number" in data_sources:
                         cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces where warehouse_name='Тестовый склад'")
                         wp = cur.fetchone()
                         if wp:
@@ -726,18 +727,19 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             base_test_data["ap_workplaces.warehouse_name"] = wp['warehouse_name']
                             base_test_data["ap_workplaces.workplace_number"] = wp['workplace_number']
 
-                    # Загружаем данные для остальных текстовых полей
+                    # --- ИЗМЕНЕНИЕ: Загружаем текстовые поля, только если они есть в макете ---
                     for source in data_sources:
                         if '.' in source and not source.startswith('QR:'):
+                            # Пропускаем уже обработанные поля
+                            if source in ["packages.sscc_code", "ap_workplaces.warehouse_name", "ap_workplaces.workplace_number"]:
+                                continue
                             table, field = source.split('.')
-                            # --- ИСПРАВЛЕНИЕ: Добавляем проверку на пустые таблицы ---
-                            # Используем `COUNT` чтобы избежать ошибки, если таблица пуста.
                             cur.execute(sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(sql.Identifier(field), sql.Identifier(table), sql.Identifier(field)))
                             data = cur.fetchone()
-                            if data: # data будет None, если запрос ничего не вернул
+                            if data:
                                 base_test_data[source] = data[field]
 
-                    # --- НОВАЯ ЛОГИКА: Загружаем ВСЕ DataMatrix коды и создаем несколько этикеток ---
+                    # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
                     datamatrix_codes = []
                     if "items.datamatrix" in data_sources:
                         cur.execute("SELECT datamatrix FROM items WHERE order_id=1")
