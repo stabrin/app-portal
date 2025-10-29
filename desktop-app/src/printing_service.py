@@ -710,9 +710,49 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             with self._get_client_db_connection() as conn:
                 logging.debug(f"Соединение с БД получено: {conn}, тип: {type(conn)}")
                 with conn.cursor(cursor_factory=RealDictCursor) as cur: # Явно указываем cursor_factory
-                    # --- ВРЕМЕННОЕ ИЗМЕНЕНИЕ ДЛЯ ДИАГНОСТИКИ ---
-                    # Закомментированы все блоки получения данных, кроме DataMatrix.
-                    # logging.debug("Блоки получения SSCC, QR и других текстовых полей временно отключены.")
+                    # --- ВОССТАНОВЛЕННЫЙ БЛОК: Загружаем SSCC, если он нужен ---
+                    sscc_needed = "packages.sscc_code" in data_sources
+                    logging.debug(f"Проверка 'packages.sscc_code' в data_sources: {sscc_needed}")
+                    if sscc_needed:
+                        cur.execute("SELECT distinct sscc as sscc_code FROM packages p left join items i on p.id = i.package_id where order_id=1")
+                        packages = cur.fetchall()
+                        logging.debug(f"Получено {len(packages)} строк с SSCC кодами.")
+                        if packages: base_test_data['packages.sscc_code'] = packages[0]['sscc_code']
+
+                    # --- ВОССТАНОВЛЕННЫЙ БЛОК: Загружаем данные для QR, если они нужны ---
+                    qr_workplace_needed = "QR: Конфигурация рабочего места" in data_sources
+                    wp_name_needed = "ap_workplaces.warehouse_name" in data_sources
+                    wp_num_needed = "ap_workplaces.workplace_number" in data_sources
+                    logging.debug(f"Проверка 'QR: Конфигурация рабочего места' и 'ap_workplaces.*' в data_sources: {qr_workplace_needed or wp_name_needed or wp_num_needed}")
+                    if qr_workplace_needed or wp_name_needed or wp_num_needed:
+                        cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces where warehouse_name='Тестовый склад'")
+                        wps = cur.fetchall()
+                        logging.debug(f"Получено {len(wps)} строк с данными о рабочих местах.")
+                        if wps:
+                            wp = wps[0]
+                            base_test_data["QR: Конфигурация рабочего места"] = json.dumps({
+                                "type": "workplace_config",
+                                "warehouse": wp['warehouse_name'],
+                                "workplace": wp['workplace_number']
+                            }, ensure_ascii=False)
+                            base_test_data["ap_workplaces.warehouse_name"] = wp['warehouse_name']
+                            base_test_data["ap_workplaces.workplace_number"] = wp['workplace_number']
+
+                    # --- ВОССТАНОВЛЕННЫЙ БЛОК: Загружаем текстовые поля, если они есть в макете ---
+                    for source in data_sources:
+                        # Пропускаем уже обработанные поля и DataMatrix
+                        if source and '.' in source and not source.startswith('QR:') and source != 'items.datamatrix' and \
+                           source not in ["packages.sscc_code", "ap_workplaces.warehouse_name", "ap_workplaces.workplace_number"]:
+                            table, field = source.split('.')
+                            query = sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(
+                                sql.Identifier(field), sql.Identifier(table), sql.Identifier(field)
+                            )
+                            logging.debug(f"Выполнение запроса для тестовых данных: {query.as_string(conn)}")
+                            cur.execute(query)
+                            all_data = cur.fetchall()
+                            logging.debug(f"Для источника '{source}' загружено {len(all_data)} строк.")
+                            if all_data:
+                                base_test_data[source] = all_data[0][field]
 
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
                     datamatrix_needed = "items.datamatrix" in data_sources
