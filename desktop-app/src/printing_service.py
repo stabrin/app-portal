@@ -495,7 +495,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         paned_window.add(controls_frame, weight=1)
 
         ttk.Button(controls_frame, text="<< К списку макетов", command=lambda: self._switch_view('list')).pack(fill=tk.X, pady=5)
-        ttk.Button(controls_frame, text="Сохранить макет", command=self._save_layout).pack(fill=tk.X, pady=5)
+        ttk.Button(controls_frame, text="Сохранить макет", command=lambda: self._save_layout(show_success_message=True)).pack(fill=tk.X, pady=5)
         ttk.Separator(controls_frame).pack(fill=tk.X, pady=10)
         # --- НОВЫЕ КНОПКИ ---
         ttk.Button(controls_frame, text="Предпросмотр", command=self._open_preview).pack(fill=tk.X, pady=2)
@@ -742,7 +742,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self.selected_object_id = None
             self.canvas_objects.clear()
             self._switch_view('editor')
-            self._toggle_tools_panel(True)
             self._toggle_properties_panel(False)
             logging.info(f"Открыт для редактирования макет: {layout_name}")
 
@@ -772,7 +771,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             logging.error(f"Ошибка удаления макета '{layout_name}': {e}")
             messagebox.showerror("Ошибка", f"Не удалось удалить макет: {e}", parent=self)
 
-    def _save_layout(self) -> None:
+    def _save_layout(self, show_success_message=True) -> None:
         """Сохраняет текущий макет в БД."""
         logging.debug("Сохранение макета.")
         if not self.template:
@@ -946,19 +945,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         else:
             if self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack_forget()
-
-    def _toggle_tools_panel(self, active: bool) -> None:
-        """Включает/выключает панель инструментов."""
-        logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
-        state = "normal" if active else "disabled"
-        for child_widget in self.tools_frame.winfo_children():
-            try:
-                if isinstance(child_widget, ttk.Button):
-                    child_widget.state([state] if state == "normal" else [state])
-                else:
-                    child_widget.config(state=state)
-            except tk.TclError:
-                pass
     def _update_properties_panel(self) -> None:
         """Обновляет панель свойств для выбранного объекта."""
         logging.debug(f"Обновление панели свойств для объекта ID: {self.selected_object_id}")
