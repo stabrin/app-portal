@@ -665,7 +665,7 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
                 if self.preselected_layout and self.preselected_layout in layout_names:
                     self.layout_combo.set(self.preselected_layout)
                 else:
-                self.layout_combo.current(0)
+                    self.layout_combo.current(0)
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить макеты: {e}", parent=self)
 
