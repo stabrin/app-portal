@@ -772,7 +772,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             logging.error(f"Ошибка удаления макета '{layout_name}': {e}")
             messagebox.showerror("Ошибка", f"Не удалось удалить макет: {e}", parent=self)
 
-    def _save_layout(self, show_success_message=True) -> None:
+    def _save_layout(self) -> None:
         """Сохраняет текущий макет в БД."""
         logging.debug("Сохранение макета.")
         if not self.template:
