@@ -166,12 +166,12 @@ class PrintingService:
             if not hasattr(font, 'getbbox'):
                 return font, text
 
-            # Оцениваем среднюю ширину символа для этого шрифта
-            avg_char_width = font.getbbox("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")[2] / 62
-            if avg_char_width == 0: # Избегаем деления на ноль
-                avg_char_width = 1
+            # --- ИСПРАВЛЕНИЕ: Более точный расчет ширины для переноса ---
+            # textwrap.wrap работает с количеством символов, а не пикселями.
+            # Мы должны оценить, сколько символов поместится в max_width.
+            # Для этого найдем ширину одного "среднего" символа 'm'.
+            avg_char_width = font.getbbox('m')[2]
             
-            # Примерное количество символов, которое поместится в строку
             wrap_width = int(max_width / avg_char_width)
             if wrap_width <= 0:
                 font_size -= 1
@@ -688,7 +688,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         if not self.template:
             return []
 
-        data_sources = {obj['data_source'] for obj in self.template.get('objects', [])}
+        # --- ИСПРАВЛЕНИЕ: Корректно собираем источники данных, игнорируя произвольный текст ---
+        data_sources = {
+            obj['data_source'] for obj in self.template.get('objects', []) if not obj.get('is_custom_text')
+        }
         test_data_set = {}
         
         # Заполняем заглушками, чтобы избежать ошибок
