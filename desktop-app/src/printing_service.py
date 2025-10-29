@@ -560,6 +560,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self.title(f"Редактор макетов - {layout_name}")
             self.editor_view_frame.pack(fill=tk.BOTH, expand=True)
             self._draw_canvas_background()
+            self._toggle_tools_panel(True) # <--- ИСПРАВЛЕНИЕ: Активируем панель инструментов при переключении на редактор
         
         self.active_view = view_name
         logging.info(f"Активный вид: {view_name}")
