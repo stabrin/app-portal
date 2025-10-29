@@ -709,52 +709,9 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             # Используем один коннект для всех запросов
             with self._get_client_db_connection() as conn:
                 with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
-                    # --- ИЗМЕНЕНИЕ: Загружаем SSCC, только если он нужен ---
-                    sscc_needed = "packages.sscc_code" in data_sources
-                    logging.debug(f"Проверка 'packages.sscc_code' в data_sources: {sscc_needed}")
-                    if sscc_needed:
-                        cur.execute("SELECT distinct sscc as sscc_code FROM packages p left join items i on p.id = i.package_id where order_id=1")
-                        packages = cur.fetchall()
-                        logging.debug(f"Получено {len(packages)} строк с SSCC кодами.")
-                        if packages: base_test_data['packages.sscc_code'] = packages[0]['sscc_code']
-
-                    logging.debug(f"Проверка 'QR: Конфигурация рабочего места' и 'ap_workplaces.*' в data_sources: {'QR: Конфигурация рабочего места' in data_sources or 'ap_workplaces.warehouse_name' in data_sources or 'ap_workplaces.workplace_number' in data_sources}")
-                    # --- ИЗМЕНЕНИЕ: Загружаем данные для QR, только если они нужны ---
-                    if "QR: Конфигурация рабочего места" in data_sources or "ap_workplaces.warehouse_name" in data_sources or "ap_workplaces.workplace_number" in data_sources:
-                        cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces where warehouse_name='Тестовый склад'")
-                        wps = cur.fetchall()
-                        logging.debug(f"Получено {len(wps)} строк с данными о рабочих местах.")
-                        if wps:
-                            wp = wps[0]
-                            base_test_data["QR: Конфигурация рабочего места"] = json.dumps({
-                                "type": "workplace_config",
-                                "warehouse": wp['warehouse_name'],
-                                "workplace": wp['workplace_number']
-                            }, ensure_ascii=False)
-                            base_test_data["ap_workplaces.warehouse_name"] = wp['warehouse_name']
-                            base_test_data["ap_workplaces.workplace_number"] = wp['workplace_number']
-
-                    # --- ИЗМЕНЕНИЕ: Загружаем текстовые поля, только если они есть в макете ---
-                    for source in data_sources:
-                        # --- ИЗМЕНЕНИЕ: Убираем 'items.datamatrix' из этого цикла ---
-                        if source and '.' in source and not source.startswith('QR:') and source != 'items.datamatrix':
-                            # Пропускаем уже обработанные поля
-                            if source in ["packages.sscc_code", "ap_workplaces.warehouse_name", "ap_workplaces.workplace_number"]:
-                                continue
-                            # --- ИСПРАВЛЕНИЕ: Переносим split внутрь условия, чтобы избежать NameError ---
-                            table, field = source.split('.')
-                            query = sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(
-                                sql.Identifier(field),
-                                sql.Identifier(table),
-                                sql.Identifier(field) # Добавляем недостающий параметр для WHERE
-                            )
-                            logging.debug(f"Выполнение запроса для тестовых данных: {query.as_string(conn)}")
-                            cur.execute(query)
-                            all_data = cur.fetchall()
-                            logging.debug(f"Для источника '{source}' загружено {len(all_data)} строк.")
-                            if all_data:
-                                # Используем значение из первой строки для предпросмотра
-                                base_test_data[source] = all_data[0][field]
+                    # --- ВРЕМЕННОЕ ИЗМЕНЕНИЕ ДЛЯ ДИАГНОСТИКИ ---
+                    # Закомментированы все блоки получения данных, кроме DataMatrix.
+                    # logging.debug("Блоки получения SSCC, QR и других текстовых полей временно отключены.")
 
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
                     datamatrix_needed = "items.datamatrix" in data_sources
@@ -769,8 +726,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
             # --- Формируем итоговый список ---
             final_test_data_list = []
+            # Если коды найдены, создаем по этикетке на каждый код
             if datamatrix_codes:
-                # Если коды найдены, создаем по этикетке на каждый код
                 for dm_code in datamatrix_codes:
                     item_data = base_test_data.copy()
                     item_data['items.datamatrix'] = dm_code
