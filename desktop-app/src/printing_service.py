@@ -646,12 +646,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 messagebox.showwarning("Внимание", "Не удалось найти тестовые данные для предпросмотра.", parent=self)
                 return
 
-            images = []
-            # Генерируем по одному изображению для каждого набора данных
-            for item_data in test_data:
-                # 3. Открываем стандартный диалог печати, передавая ему данные
-                from .admin_ui import PrintWorkplaceLabelsDialog
-                PrintWorkplaceLabelsDialog(self, self.user_info, f"Предпросмотр: {self.template['name']}", test_data, preselected_layout=self.template['name'])
+            # --- ИСПРАВЛЕНИЕ: Убираем лишний цикл и вызываем диалог один раз ---
+            # Диалог сам обработает весь список `test_data` и сгенерирует все этикетки.
+            from .admin_ui import PrintWorkplaceLabelsDialog
+            PrintWorkplaceLabelsDialog(self, self.user_info, f"Предпросмотр: {self.template['name']}", test_data, preselected_layout=self.template['name'])
 
         except Exception as e:
             logging.error(f"Ошибка при создании предпросмотра: {e}", exc_info=True)
