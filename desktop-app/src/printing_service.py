@@ -730,10 +730,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     for source in data_sources:
                         if '.' in source and not source.startswith('QR:'):
                             table, field = source.split('.')
-                            cur.execute(sql.SQL("SELECT {} FROM {} LIMIT 1").format(sql.Identifier(field), sql.Identifier(table)))
+                            # --- ИСПРАВЛЕНИЕ: Добавляем проверку на пустые таблицы ---
+                            # Используем `COUNT` чтобы избежать ошибки, если таблица пуста.
+                            cur.execute(sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(sql.Identifier(field), sql.Identifier(table), sql.Identifier(field)))
                             data = cur.fetchone()
-                            # --- ИСПРАВЛЕНИЕ: Проверяем, что data не None, ПЕРЕД обращением по ключу ---
-                            if data and data[field] is not None:
+                            if data: # data будет None, если запрос ничего не вернул
                                 base_test_data[source] = data[field]
 
                     # --- НОВАЯ ЛОГИКА: Загружаем ВСЕ DataMatrix коды и создаем несколько этикеток ---
