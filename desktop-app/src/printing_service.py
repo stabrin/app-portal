@@ -161,31 +161,36 @@ class PrintingService:
                 except IOError:
                     return ImageFont.load_default()
 
-        while font_size > 5:
+        while font_size > 4: # Минимальный размер шрифта 5
             font = load_font(font_size)
             if not hasattr(font, 'getbbox'):
                 return font, text
 
-            # --- ИСПРАВЛЕНИЕ: Более точный расчет ширины для переноса ---
-            # textwrap.wrap работает с количеством символов, а не пикселями.
-            # Мы должны оценить, сколько символов поместится в max_width.
-            # Для этого найдем ширину одного "среднего" символа 'm'.
-            avg_char_width = font.getbbox('m')[2]
+            # Рассчитываем примерную ширину символа.
+            # Используем 'W' как один из самых широких символов для более надежного расчета.
+            avg_char_width = font.getbbox('W')[2] if text else 1
+            if avg_char_width == 0: avg_char_width = 1 # Избегаем деления на ноль
             
-            wrap_width = int(max_width / avg_char_width)
-            if wrap_width <= 0:
-                font_size -= 1
-                continue
+            # Определяем, сколько символов поместится в строку
+            wrap_width = max(1, int(max_width / avg_char_width))
 
-            # Разбиваем текст на строки
-            wrapper = textwrap.TextWrapper(width=wrap_width, replace_whitespace=False)
+            # Разбиваем текст на строки с помощью textwrap
+            wrapper = textwrap.TextWrapper(width=wrap_width, replace_whitespace=False, break_long_words=True)
             lines = wrapper.wrap(text)
             wrapped_text = "\n".join(lines)
             
-            # Проверяем высоту получившегося текста
-            if font.getbbox(wrapped_text)[3] <= max_height:
+            # Получаем реальные размеры многострочного текста
+            # getbbox возвращает (left, top, right, bottom)
+            text_bbox = font.getbbox(wrapped_text)
+            text_width = text_bbox[2] - text_bbox[0]
+            text_height = text_bbox[3] - text_bbox[1]
+
+            # Проверяем, вписывается ли текст и по ширине, и по высоте
+            if text_width <= max_width and text_height <= max_height:
                 return font, wrapped_text # Шрифт и текст подходят
-            font_size -= 1
+            else:
+                # Если не помещается, уменьшаем размер шрифта и пробуем снова
+                font_size -= 1
         
         return font, wrapped_text # Возвращаем лучшее из того, что получилось
     @staticmethod
@@ -688,59 +693,75 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         if not self.template:
             return []
 
-        # --- ИСПРАВЛЕНИЕ: Корректно собираем источники данных, игнорируя произвольный текст ---
         data_sources = {
             obj['data_source'] for obj in self.template.get('objects', []) if not obj.get('is_custom_text')
         }
-        test_data_set = {}
         
-        # Заполняем заглушками, чтобы избежать ошибок
+        # --- НОВАЯ ЛОГИКА: Создаем базовый набор данных с заглушками ---
+        base_test_data = {}
         for source in self.available_text_sources + self.available_qr_sources + self.available_sscc_sources + self.available_datamatrix_sources:
-            test_data_set[source] = f"<{source}>"
+            base_test_data[source] = f"<{source}>"
 
+        # --- НОВАЯ ЛОГИКА: Загружаем реальные данные для заглушек ---
         try:
+            # Используем один коннект для всех запросов
             with self._get_client_db_connection() as conn:
                 with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
-                    # Данные для DataMatrix и SSCC (из первого заказа)
-                    if any(s.startswith('items.') or s.startswith('packages.') for s in data_sources):
-                        cur.execute("SELECT datamatrix FROM items where order_id=1")
-                        item = cur.fetchone()
-                        if item:
-                            test_data_set['items.datamatrix'] = item['datamatrix']
-                        
+                    # Загружаем один SSCC для всех этикеток
+                    if "packages.sscc_code" in data_sources:
                         cur.execute("SELECT sscc_code FROM packages LIMIT 1")
                         package = cur.fetchone()
-                        if package:
-                            test_data_set['packages.sscc_code'] = package['sscc_code']
+                        if package: base_test_data['packages.sscc_code'] = package['sscc_code']
 
-                    # Данные для QR-кодов (из первого рабочего места)
+                    # Загружаем данные для QR-кода рабочего места
                     if "QR: Конфигурация рабочего места" in data_sources:
                         cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces LIMIT 1")
                         wp = cur.fetchone()
                         if wp:
-                            test_data_set["QR: Конфигурация рабочего места"] = json.dumps({
+                            base_test_data["QR: Конфигурация рабочего места"] = json.dumps({
                                 "type": "workplace_config",
                                 "warehouse": wp['warehouse_name'],
                                 "workplace": wp['workplace_number']
                             }, ensure_ascii=False)
-                            test_data_set["ap_workplaces.warehouse_name"] = wp['warehouse_name']
-                            test_data_set["ap_workplaces.workplace_number"] = wp['workplace_number']
+                            base_test_data["ap_workplaces.warehouse_name"] = wp['warehouse_name']
+                            base_test_data["ap_workplaces.workplace_number"] = wp['workplace_number']
 
-                    # Данные для текстовых полей
+                    # Загружаем данные для остальных текстовых полей
                     for source in data_sources:
                         if '.' in source and not source.startswith('QR:'):
                             table, field = source.split('.')
                             cur.execute(sql.SQL("SELECT {} FROM {} LIMIT 1").format(sql.Identifier(field), sql.Identifier(table)))
                             data = cur.fetchone()
-                            if data:
-                                test_data_set[source] = data[field]
+                            if data: base_test_data[source] = data[field]
+
+                    # --- НОВАЯ ЛОГИКА: Загружаем ВСЕ DataMatrix коды и создаем несколько этикеток ---
+                    datamatrix_codes = []
+                    if "items.datamatrix" in data_sources:
+                        cur.execute("SELECT datamatrix FROM items WHERE order_id=1")
+                        results = cur.fetchall()
+                        if results:
+                            datamatrix_codes = [row['datamatrix'] for row in results]
+
+            # --- Формируем итоговый список ---
+            final_test_data_list = []
+            if datamatrix_codes:
+                # Если коды найдены, создаем по этикетке на каждый код
+                for dm_code in datamatrix_codes:
+                    item_data = base_test_data.copy()
+                    item_data['items.datamatrix'] = dm_code
+                    final_test_data_list.append(item_data)
+            else:
+                # Если кодов нет, создаем одну этикетку с DM-заглушкой
+                base_test_data['items.datamatrix'] = f"0104604060006532215!\"#%&'()*+,-./:;<=>?_1234567890ABCDEFGHIJKLM{chr(29)}91EE06{chr(29)}92QUFBQUFBPT0="
+                final_test_data_list.append(base_test_data)
+
+            return final_test_data_list
 
         except Exception as e:
             logging.warning(f"Не удалось получить все тестовые данные из БД: {e}")
             # Не прерываем, используем заглушки
-
-        # Возвращаем список с одним набором данных
-        return [test_data_set]
+            # Возвращаем одну этикетку с базовыми заглушками
+            return [base_test_data]
 
     def _switch_view(self, view_name: str) -> None:
         """Переключает между видом списка и редактора."""
