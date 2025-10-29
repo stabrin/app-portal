@@ -722,7 +722,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.selected_object_id = None
         self.canvas_objects.clear()
         self._switch_view('editor')
-        self._toggle_tools_panel(True)
         self._toggle_properties_panel(False)
         logging.info(f"Создан новый макет: {name} ({width_mm}x{height_mm} мм)")
 
