@@ -722,7 +722,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.selected_object_id = None
         self.canvas_objects.clear()
         self._switch_view('editor')
-        self._toggle_properties_panel(False)
+        # self._toggle_properties_panel(False) # ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ДИАГНОСТИКИ
         logging.info(f"Создан новый макет: {name} ({width_mm}x{height_mm} мм)")
 
     def _edit_selected_layout(self) -> None:
@@ -741,7 +741,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self.selected_object_id = None
             self.canvas_objects.clear()
             self._switch_view('editor')
-            self._toggle_properties_panel(False)
+            # self._toggle_properties_panel(False) # ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ДИАГНОСТИКИ
             logging.info(f"Открыт для редактирования макет: {layout_name}")
 
     def _delete_selected_layout(self) -> None:
