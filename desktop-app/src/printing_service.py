@@ -175,7 +175,11 @@ class PrintingService:
                     logging.warning(f"Пропуск объекта: отсутствуют поля {missing_fields}.")
                     continue
 
-                obj_data = data.get(obj["data_source"])
+                # --- НОВАЯ ЛОГИКА: Обработка произвольного текста ---
+                if obj.get("is_custom_text"):
+                    obj_data = obj.get("data_source") # Для произвольного текста данные хранятся прямо в шаблоне
+                else:
+                    obj_data = data.get(obj["data_source"])
                 if obj_data is None and obj["data_source"] and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
                     logging.debug(f"Данные для '{obj['data_source']}' не найдены в data, попытка получения из БД.")
                     obj_data = PrintingService._fetch_data_from_db(user_info, obj["data_source"])
@@ -506,6 +510,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.tools_frame.pack(fill=tk.X, pady=5)
 
         ttk.Button(self.tools_frame, text="Добавить Текст", command=lambda: self._add_object_to_canvas("text")).pack(fill=tk.X, pady=2)
+        ttk.Button(self.tools_frame, text="Добавить Произвольный текст", command=lambda: self._add_object_to_canvas("custom_text")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить QR-код", command=lambda: self._add_object_to_canvas("QR")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить SSCC", command=lambda: self._add_object_to_canvas("SSCC")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить DataMatrix", command=lambda: self._add_object_to_canvas("DataMatrix")).pack(fill=tk.X, pady=2)
@@ -854,15 +859,19 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             return
 
         new_object = {
-            "type": "text" if obj_type == "text" else "barcode",
+            "type": "text" if obj_type in ["text", "custom_text"] else "barcode",
             "x_mm": 10,
             "y_mm": 10,
-            "width_mm": 40 if obj_type == "text" else 30,
-            "height_mm": 15 if obj_type == "text" else 30
+            "width_mm": 40 if obj_type in ["text", "custom_text"] else 30,
+            "height_mm": 15 if obj_type in ["text", "custom_text"] else 30
         }
         
         if obj_type == "text":
             new_object["data_source"] = self.available_text_sources[0]
+            new_object["font_name"] = "Helvetica"
+        elif obj_type == "custom_text":
+            new_object["is_custom_text"] = True
+            new_object["data_source"] = "Ваш текст" # Текст по умолчанию
             new_object["font_name"] = "Helvetica"
         else:
             new_object["barcode_type"] = obj_type
@@ -894,7 +903,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             return
 
         outline_color = "blue" if object_id == self.selected_object_id else "grey"
-        if obj_data['type'] == 'text':
+        if obj_data.get('type') == 'text':
             fill_color = "lightyellow"
             display_text = "Текст"
         else:
@@ -982,7 +991,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         current_data_source = obj_data.get('data_source', '')
         data_source_widget = None
 
-        if obj_type == 'text':
+        if obj_data.get("is_custom_text"):
+            data_source_widget = ttk.Entry(self.data_source_container_frame)
+            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            data_source_widget.insert(0, current_data_source)
+        elif obj_type == 'text':
             data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             data_source_widget.set(current_data_source or self.available_text_sources[0])
