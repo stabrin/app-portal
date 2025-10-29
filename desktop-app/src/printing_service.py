@@ -739,11 +739,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             if source in ["packages.sscc_code", "ap_workplaces.warehouse_name", "ap_workplaces.workplace_number"]:
                                 continue
                             table, field = source.split('.')
-                            # --- ИЗМЕНЕНИЕ: Убираем LIMIT 1 и добавляем логирование ---
-                            query = sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL").format(
-                                sql.Identifier(field), 
-                                sql.Identifier(table), 
-                                sql.Identifier(field)
+                            # --- ИСПРАВЛЕНИЕ: Упрощаем запрос, чтобы избежать ошибки "got type instead" ---
+                            # Запрос теперь просто выбирает все значения из нужной колонки.
+                            query = sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(
+                                sql.Identifier(field),
+                                sql.Identifier(table),
+                                sql.Identifier(field) # Добавляем недостающий параметр для WHERE
                             )
                             cur.execute(query)
                             all_data = cur.fetchall()
