@@ -759,7 +759,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                         results = cur.fetchall()
                         logging.debug(f"Получено {len(results)} строк с DataMatrix кодами из БД.")
                         if results:
-                            datamatrix_codes = [row['datamatrix'] for row in results]
+                            datamatrix_codes = [str(row['datamatrix']) for row in results]
 
             # --- Формируем итоговый список ---
             final_test_data_list = []
