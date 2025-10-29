@@ -6,6 +6,7 @@ import tempfile
 import textwrap
 from typing import Dict, Any, Optional
 from psycopg2 import sql
+from psycopg2.extras import RealDictCursor # Явно импортируем RealDictCursor
 import psycopg2
 
 # Библиотеки для генерации штрихкодов и работы с Windows API
@@ -78,6 +79,7 @@ class PrintingService:
             'password': db_config.get('db_password')
         }
 
+        logging.debug(f"Параметры подключения к БД: {conn_params}")
         if not all(conn_params.values()):
             logging.error(f"Неполные параметры подключения: {conn_params}")
             raise ValueError("Неполные параметры подключения к базе данных.")
@@ -708,7 +710,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         try:
             # Используем один коннект для всех запросов
             with self._get_client_db_connection() as conn:
-                with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
+                logging.debug(f"Соединение с БД получено: {conn}, тип: {type(conn)}")
+                with conn.cursor(cursor_factory=RealDictCursor) as cur: # Явно указываем cursor_factory
                     # --- ВРЕМЕННОЕ ИЗМЕНЕНИЕ ДЛЯ ДИАГНОСТИКИ ---
                     # Закомментированы все блоки получения данных, кроме DataMatrix.
                     # logging.debug("Блоки получения SSCC, QR и других текстовых полей временно отключены.")
