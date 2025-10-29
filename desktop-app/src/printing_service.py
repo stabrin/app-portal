@@ -732,7 +732,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             table, field = source.split('.')
                             cur.execute(sql.SQL("SELECT {} FROM {} LIMIT 1").format(sql.Identifier(field), sql.Identifier(table)))
                             data = cur.fetchone()
-                            if data: base_test_data[source] = data[field]
+                            if data: base_test_data[source] = data[field] if data[field] is not None else ""
 
                     # --- НОВАЯ ЛОГИКА: Загружаем ВСЕ DataMatrix коды и создаем несколько этикеток ---
                     datamatrix_codes = []
