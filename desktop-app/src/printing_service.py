@@ -146,7 +146,7 @@ class PrintingService:
                 logging.debug("Соединение с БД закрыто.")
 
     @staticmethod
-    def _get_multiline_fitting_font(text: str, font_name: str, max_width: int, max_height: int) -> tuple[ImageFont.FreeTypeFont, str]:
+    def _get_multiline_fitting_font(draw: ImageDraw.Draw, text: str, font_name: str, max_width: int, max_height: int) -> tuple[ImageFont.FreeTypeFont, str]:
         """
         Подбирает шрифт и переносит текст по словам, чтобы он поместился в заданные рамки.
         """
@@ -294,7 +294,7 @@ class PrintingService:
 
                 if obj["type"] == "text":
                     logging.debug("Обработка как 'text'")
-                    font, wrapped_text = PrintingService._get_multiline_fitting_font(str(obj_data), obj.get("font_name", "arial"), width, height)
+                    font, wrapped_text = PrintingService._get_multiline_fitting_font(draw, str(obj_data), obj.get("font_name", "arial"), width, height)
                     draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la") # anchor 'la' - left, ascent
                 
                 elif obj["type"] == "barcode":
