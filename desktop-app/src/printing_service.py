@@ -238,7 +238,7 @@ class PrintingService:
                             # dmtx_encode возвращает специальный объект, а не готовое изображение.
                             # Создаем изображение из его пикселей, ширины и высоты.
                             encoded_dm = dmtx_encode(data_str.encode('utf-8'))
-                            # --- ИСПРАВЛЕНИЕ: Преобразуем в 1-битный режим для совместимости с термотрансферными принтерами ---
+                            # --- ИЗМЕНЕНИЕ: Преобразуем в 1-битный режим для совместимости с термотрансферными принтерами ---
                             barcode_image = Image.frombytes('RGB', (encoded_dm.width, encoded_dm.height), encoded_dm.pixels).convert('1')
                             barcode_image = barcode_image.resize((width, height), Image.Resampling.NEAREST)
                             label_image.paste(barcode_image, (x, y))
@@ -252,7 +252,7 @@ class PrintingService:
                         draw.text((x + 5, y + 5), f"Unsupported:\n{barcode_type}", fill="red")
             
             logging.info("Изображение этикетки успешно сгенерировано.")
-            return label_image
+            return label_image.convert('1') # Принудительно возвращаем Ч/Б изображение
         
         except Exception as e:
             logging.error(f"Ошибка генерации изображения этикетки: {e}")
@@ -497,6 +497,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         ttk.Button(controls_frame, text="<< К списку макетов", command=lambda: self._switch_view('list')).pack(fill=tk.X, pady=5)
         ttk.Button(controls_frame, text="Сохранить макет", command=self._save_layout).pack(fill=tk.X, pady=5)
         ttk.Separator(controls_frame).pack(fill=tk.X, pady=10)
+        # --- НОВЫЕ КНОПКИ ---
+        ttk.Button(controls_frame, text="Предпросмотр", command=self._open_preview).pack(fill=tk.X, pady=2)
+        ttk.Button(controls_frame, text="Тестовая печать", command=self._open_test_print_dialog).pack(fill=tk.X, pady=2)
+        ttk.Separator(controls_frame).pack(fill=tk.X, pady=10)
 
         self.tools_frame = ttk.LabelFrame(controls_frame, text="Инструменты")
         self.tools_frame.pack(fill=tk.X, pady=5)
@@ -541,6 +545,124 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         self._toggle_properties_panel(False)
         self._toggle_tools_panel(False)
+
+    def _open_preview(self):
+        """Открывает окно предпросмотра с тестовыми данными."""
+        if not self.template:
+            messagebox.showwarning("Внимание", "Нет активного макета для предпросмотра.", parent=self)
+            return
+
+        try:
+            test_data = self._get_test_data_for_template()
+            if not test_data:
+                messagebox.showwarning("Внимание", "Не удалось найти тестовые данные для предпросмотра.", parent=self)
+                return
+
+            images = []
+            # Генерируем по одному изображению для каждого набора данных
+            for item_data in test_data:
+                img = self.generate_label_image(self.template, item_data, self.user_info)
+                images.append(img)
+            
+            if not images:
+                messagebox.showerror("Ошибка", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
+                return
+
+            # Используем новый класс для предпросмотра
+            PreviewWindow(self, images)
+
+        except Exception as e:
+            logging.error(f"Ошибка при создании предпросмотра: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось создать предпросмотр: {e}", parent=self)
+
+    def _open_test_print_dialog(self):
+        """Открывает диалог тестовой печати."""
+        if not self.template:
+            messagebox.showwarning("Внимание", "Нет активного макета для печати.", parent=self)
+            return
+
+        try:
+            test_data = self._get_test_data_for_template()
+            if not test_data:
+                messagebox.showwarning("Внимание", "Не удалось найти тестовые данные для печати.", parent=self)
+                return
+
+            # Для тестовой печати используем только первый набор данных
+            item_to_print = test_data[0]
+            
+            # Вызываем стандартный диалог печати, но передаем ему один макет и один набор данных
+            from .admin_ui import PrintWorkplaceLabelsDialog
+            # Создаем "фальшивый" список макетов
+            layout_for_dialog = [{'name': self.template['name'], 'json': self.template}]
+            
+            # Модифицируем конструктор PrintWorkplaceLabelsDialog, чтобы он мог принимать макет напрямую
+            # или создаем новый специализированный диалог.
+            # Пока что используем существующий, но это может потребовать рефакторинга.
+            # Для простоты, мы можем передать данные через items_to_print и заблокировать выбор макета.
+            
+            # Временное решение: используем PrintWorkplaceLabelsDialog, как он есть.
+            # Он сам загрузит макеты, пользователь должен будет выбрать текущий.
+            PrintWorkplaceLabelsDialog(self, self.user_info, f"Тест: {self.template['name']}", [item_to_print])
+
+        except Exception as e:
+            logging.error(f"Ошибка при открытии диалога тестовой печати: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось открыть диалог печати: {e}", parent=self)
+
+    def _get_test_data_for_template(self) -> list:
+        """Собирает тестовые данные для всех источников в макете."""
+        if not self.template:
+            return []
+
+        data_sources = {obj['data_source'] for obj in self.template.get('objects', [])}
+        test_data_set = {}
+        
+        # Заполняем заглушками, чтобы избежать ошибок
+        for source in self.available_text_sources + self.available_qr_sources + self.available_sscc_sources + self.available_datamatrix_sources:
+            test_data_set[source] = f"<{source}>"
+
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
+                    # Данные для DataMatrix и SSCC (из первого заказа)
+                    if any(s.startswith('items.') or s.startswith('packages.') for s in data_sources):
+                        cur.execute("SELECT datamatrix FROM items LIMIT 1")
+                        item = cur.fetchone()
+                        if item:
+                            test_data_set['items.datamatrix'] = item['datamatrix']
+                        
+                        cur.execute("SELECT sscc_code FROM packages LIMIT 1")
+                        package = cur.fetchone()
+                        if package:
+                            test_data_set['packages.sscc_code'] = package['sscc_code']
+
+                    # Данные для QR-кодов (из первого рабочего места)
+                    if "QR: Конфигурация рабочего места" in data_sources:
+                        cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces LIMIT 1")
+                        wp = cur.fetchone()
+                        if wp:
+                            test_data_set["QR: Конфигурация рабочего места"] = json.dumps({
+                                "type": "workplace_config",
+                                "warehouse": wp['warehouse_name'],
+                                "workplace": wp['workplace_number']
+                            }, ensure_ascii=False)
+                            test_data_set["ap_workplaces.warehouse_name"] = wp['warehouse_name']
+                            test_data_set["ap_workplaces.workplace_number"] = wp['workplace_number']
+
+                    # Данные для текстовых полей
+                    for source in data_sources:
+                        if '.' in source and not source.startswith('QR:'):
+                            table, field = source.split('.')
+                            cur.execute(sql.SQL("SELECT {} FROM {} LIMIT 1").format(sql.Identifier(field), sql.Identifier(table)))
+                            data = cur.fetchone()
+                            if data:
+                                test_data_set[source] = data[field]
+
+        except Exception as e:
+            logging.warning(f"Не удалось получить все тестовые данные из БД: {e}")
+            # Не прерываем, используем заглушки
+
+        # Возвращаем список с одним набором данных
+        return [test_data_set]
 
     def _switch_view(self, view_name: str) -> None:
         """Переключает между видом списка и редактора."""
@@ -816,22 +938,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
     def _toggle_properties_panel(self, active: bool) -> None:
         """Включает/выключает панель свойств."""
         logging.debug(f"Переключение панели свойств: {'вкл' if active else 'выкл'}")
-        state = "normal" if active else "disabled"
-        for child_widget in self.properties_frame.winfo_children():
-            if isinstance(child_widget, ttk.Frame):
-                for grand_child_widget in child_widget.winfo_children():
-                    try:
-                        grand_child_widget.config(state=state)
-                    except tk.TclError:
-                        if isinstance(grand_child_widget, (ttk.Entry, ttk.Combobox)):
-                            grand_child_widget.state([state] if state == "normal" else [state])
-            else:
-                try:
-                    child_widget.config(state=state)
-                except tk.TclError:
-                    if isinstance(child_widget, ttk.Button):
-                        child_widget.state([state] if state == "normal" else [state])
-
+        # --- ИСПРАВЛЕНИЕ: Панель свойств не должна влиять на панель инструментов ---
+        # Теперь этот метод скрывает/показывает панель, а не меняет состояние виджетов.
+        if active:
+            if not self.properties_frame.winfo_ismapped():
+                self.properties_frame.pack(fill=tk.X, pady=10)
+        else:
+            if self.properties_frame.winfo_ismapped():
+                self.properties_frame.pack_forget()
     def _toggle_tools_panel(self, active: bool) -> None:
         """Включает/выключает панель инструментов."""
         logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
@@ -905,3 +1019,66 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         except ValueError:
             logging.error("Ошибка: геометрические свойства должны быть числами.")
             messagebox.showerror("Ошибка", "Значения геометрических свойств должны быть числами.", parent=self)
+
+class PreviewWindow(tk.Toplevel):
+    """Новое окно для предпросмотра и печати отдельных этикеток."""
+    def __init__(self, parent, images: list):
+        super().__init__(parent)
+        self.parent = parent
+        self.images = images
+        self.current_index = 0
+
+        self.title("Предпросмотр этикеток")
+        self.geometry("600x500")
+        self.transient(parent)
+        self.grab_set()
+
+        self._create_widgets()
+        self._show_image(0)
+
+    def _create_widgets(self):
+        self.info_label = ttk.Label(self, text="", font=("Arial", 12))
+        self.info_label.pack(pady=10)
+
+        self.image_label = ttk.Label(self)
+        self.image_label.pack(padx=10, pady=10, expand=True, fill="both")
+
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(pady=10)
+
+        self.prev_button = ttk.Button(nav_frame, text="<< Назад", command=self._show_prev)
+        self.prev_button.pack(side=tk.LEFT, padx=10)
+
+        self.print_button = ttk.Button(nav_frame, text="Напечатать текущую", command=self._print_current)
+        self.print_button.pack(side=tk.LEFT, padx=10)
+
+        self.next_button = ttk.Button(nav_frame, text="Далее >>", command=self._show_next)
+        self.next_button.pack(side=tk.LEFT, padx=10)
+
+    def _show_image(self, index):
+        self.current_index = index
+        image = self.images[index]
+
+        max_w, max_h = 500, 350
+        img_w, img_h = image.size
+        ratio = min(max_w / img_w, max_h / img_h)
+        new_size = (int(img_w * ratio), int(img_h * ratio))
+        
+        resized_image = image.resize(new_size, Image.Resampling.LANCZOS)
+        photo = ImageTk.PhotoImage(resized_image)
+
+        self.image_label.config(image=photo)
+        self.image_label.image = photo
+
+        self.info_label.config(text=f"Этикетка {index + 1} из {len(self.images)}")
+        self.prev_button.config(state="normal" if index > 0 else "disabled")
+        self.next_button.config(state="normal" if index < len(self.images) - 1 else "disabled")
+
+    def _show_next(self):
+        if self.current_index < len(self.images) - 1: self._show_image(self.current_index + 1)
+    def _show_prev(self):
+        if self.current_index > 0: self._show_image(self.current_index - 1)
+
+    def _print_current(self):
+        """Вызывает диалог печати для текущей этикетки."""
+        self.parent._open_test_print_dialog()
