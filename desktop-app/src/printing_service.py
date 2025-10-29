@@ -710,12 +710,15 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             with self._get_client_db_connection() as conn:
                 with conn.cursor(psycopg2.extras.RealDictCursor) as cur:
                     # --- ИЗМЕНЕНИЕ: Загружаем SSCC, только если он нужен ---
-                    if "packages.sscc_code" in data_sources:
+                    sscc_needed = "packages.sscc_code" in data_sources
+                    logging.debug(f"Проверка 'packages.sscc_code' в data_sources: {sscc_needed}")
+                    if sscc_needed:
                         cur.execute("SELECT distinct sscc as sscc_code FROM packages p left join items i on p.id = i.package_id where order_id=1")
                         packages = cur.fetchall()
                         logging.debug(f"Получено {len(packages)} строк с SSCC кодами.")
                         if packages: base_test_data['packages.sscc_code'] = packages[0]['sscc_code']
 
+                    logging.debug(f"Проверка 'QR: Конфигурация рабочего места' и 'ap_workplaces.*' в data_sources: {'QR: Конфигурация рабочего места' in data_sources or 'ap_workplaces.warehouse_name' in data_sources or 'ap_workplaces.workplace_number' in data_sources}")
                     # --- ИЗМЕНЕНИЕ: Загружаем данные для QR, только если они нужны ---
                     if "QR: Конфигурация рабочего места" in data_sources or "ap_workplaces.warehouse_name" in data_sources or "ap_workplaces.workplace_number" in data_sources:
                         cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces where warehouse_name='Тестовый склад'")
@@ -754,8 +757,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                                 base_test_data[source] = all_data[0][field]
 
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
+                    datamatrix_needed = "items.datamatrix" in data_sources
                     datamatrix_codes = []
-                    if "items.datamatrix" in data_sources:
+                    logging.debug(f"Проверка 'items.datamatrix' в data_sources: {datamatrix_needed}")
+                    if datamatrix_needed:
                         cur.execute("SELECT datamatrix FROM items WHERE order_id=1")
                         results = cur.fetchall()
                         logging.debug(f"Получено {len(results)} строк с DataMatrix кодами из БД.")
