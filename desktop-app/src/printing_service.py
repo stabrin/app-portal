@@ -702,6 +702,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         base_test_data = {}
         for source in data_sources:
             base_test_data[source] = f"<{source}>"
+        logging.debug(f"Подготовлены заглушки для следующих источников: {list(data_sources)}")
 
         # --- НОВАЯ ЛОГИКА: Загружаем реальные данные для заглушек ---
         try:
@@ -711,14 +712,17 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     # --- ИЗМЕНЕНИЕ: Загружаем SSCC, только если он нужен ---
                     if "packages.sscc_code" in data_sources:
                         cur.execute("SELECT distinct sscc as sscc_code FROM packages p left join items i on p.id = i.package_id where order_id=1")
-                        package = cur.fetchone()
-                        if package: base_test_data['packages.sscc_code'] = package['sscc_code']
+                        packages = cur.fetchall()
+                        logging.debug(f"Получено {len(packages)} строк с SSCC кодами.")
+                        if packages: base_test_data['packages.sscc_code'] = packages[0]['sscc_code']
 
                     # --- ИЗМЕНЕНИЕ: Загружаем данные для QR, только если они нужны ---
                     if "QR: Конфигурация рабочего места" in data_sources or "ap_workplaces.warehouse_name" in data_sources or "ap_workplaces.workplace_number" in data_sources:
                         cur.execute("SELECT warehouse_name, workplace_number FROM ap_workplaces where warehouse_name='Тестовый склад'")
-                        wp = cur.fetchone()
-                        if wp:
+                        wps = cur.fetchall()
+                        logging.debug(f"Получено {len(wps)} строк с данными о рабочих местах.")
+                        if wps:
+                            wp = wps[0]
                             base_test_data["QR: Конфигурация рабочего места"] = json.dumps({
                                 "type": "workplace_config",
                                 "warehouse": wp['warehouse_name'],
@@ -729,15 +733,24 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
                     # --- ИЗМЕНЕНИЕ: Загружаем текстовые поля, только если они есть в макете ---
                     for source in data_sources:
-                        if '.' in source and not source.startswith('QR:'):
+                        # --- ИЗМЕНЕНИЕ: Убираем 'items.datamatrix' из этого цикла ---
+                        if '.' in source and not source.startswith('QR:') and source != 'items.datamatrix':
                             # Пропускаем уже обработанные поля
                             if source in ["packages.sscc_code", "ap_workplaces.warehouse_name", "ap_workplaces.workplace_number"]:
                                 continue
                             table, field = source.split('.')
-                            cur.execute(sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(sql.Identifier(field), sql.Identifier(table), sql.Identifier(field)))
-                            data = cur.fetchone()
-                            if data:
-                                base_test_data[source] = data[field]
+                            # --- ИЗМЕНЕНИЕ: Убираем LIMIT 1 и добавляем логирование ---
+                            query = sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL").format(
+                                sql.Identifier(field), 
+                                sql.Identifier(table), 
+                                sql.Identifier(field)
+                            )
+                            cur.execute(query)
+                            all_data = cur.fetchall()
+                            logging.debug(f"Для источника '{source}' загружено {len(all_data)} строк.")
+                            if all_data:
+                                # Используем значение из первой строки для предпросмотра
+                                base_test_data[source] = all_data[0][field]
 
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
                     datamatrix_codes = []
