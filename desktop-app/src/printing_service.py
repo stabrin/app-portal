@@ -163,29 +163,33 @@ class PrintingService:
                 except IOError:
                     return ImageFont.load_default()
 
-        while font_size > 4: # Минимальный размер шрифта 5
+        # Ищем подходящий размер шрифта, начиная с большего и уменьшая
+        while font_size > 4: # Минимальный размер шрифта 5px
             font = load_font(font_size)
             if not hasattr(font, 'getbbox'):
                 return font, text
 
-            # Рассчитываем примерную ширину символа.
-            # Используем 'W' как один из самых широких символов для более надежного расчета.
-            avg_char_width = font.getbbox('W')[2] if text else 1
-            if avg_char_width == 0: avg_char_width = 1 # Избегаем деления на ноль
+            # Для Pillow 10+ getbbox возвращает (left, top, right, bottom)
+            # Для Pillow < 10 getsize возвращает (width, height)
+            # Используем getbbox для более точного измерения
             
-            # Определяем, сколько символов поместится в строку
-            wrap_width = max(1, int(max_width / avg_char_width))
+            # Сначала пробуем обернуть текст с текущим размером шрифта
+            # Оценим ширину символа для textwrap.TextWrapper
+            # Используем 'W' как один из самых широких символов для более надежного расчета ширины
+            try:
+                avg_char_width = font.getbbox('W')[2] - font.getbbox('W')[0] if text else 1
+            except TypeError: # Для старых версий Pillow или некоторых шрифтов
+                avg_char_width = font.getsize('W')[0] if text else 1
+            wrap_width = max(1, int(max_width / avg_char_width)) # Ширина в символах
 
-            # Разбиваем текст на строки с помощью textwrap
             wrapper = textwrap.TextWrapper(width=wrap_width, replace_whitespace=False, break_long_words=True)
             lines = wrapper.wrap(text)
             wrapped_text = "\n".join(lines)
-            
-            # Получаем реальные размеры многострочного текста
-            # getbbox возвращает (left, top, right, bottom)
-            text_bbox = font.getbbox(wrapped_text)
-            text_width = text_bbox[2] - text_bbox[0]
-            text_height = text_bbox[3] - text_bbox[1]
+
+            # Получаем реальные размеры всего обернутого текста
+            text_bbox = draw.textbbox((0,0), wrapped_text, font=font) # Используем draw.textbbox для многострочного текста
+            text_width = text_bbox[2] - text_bbox[0] # right - left
+            text_height = text_bbox[3] - text_bbox[1] # bottom - top
 
             # Проверяем, вписывается ли текст и по ширине, и по высоте
             if text_width <= max_width and text_height <= max_height:
@@ -194,7 +198,9 @@ class PrintingService:
                 # Если не помещается, уменьшаем размер шрифта и пробуем снова
                 font_size -= 1
         
-        return font, wrapped_text # Возвращаем лучшее из того, что получилось
+        # Если цикл завершился, значит, даже самый маленький шрифт не поместился.
+        # Возвращаем самый маленький шрифт и максимально обернутый текст.
+        return font, wrapped_text
     @staticmethod
     def _get_fitting_font(text: str, font_name: str, max_width: int, max_height: int) -> ImageFont.FreeTypeFont:
         """
@@ -202,7 +208,7 @@ class PrintingService:
         """
         font_size = max_height  # Начинаем с максимальной высоты
         font = None
-        
+
         # Пытаемся загрузить указанный шрифт, с фолбэком на Arial и дефолтный
         def load_font(size):
             try:
@@ -215,13 +221,13 @@ class PrintingService:
 
         while font_size > 5:  # Минимальный размер шрифта
             font = load_font(font_size)
-            
+
             # Для растровых шрифтов (load_default) getbbox может не работать как надо
             if not hasattr(font, 'getbbox'):
                 return font # Возвращаем как есть
 
-            bbox = font.getbbox(text)
-            text_width = bbox[2] - bbox[0]
+            text_bbox = font.getbbox(text)
+            text_width = text_bbox[2] - text_bbox[0]
             if text_width <= max_width:
                 return font  # Шрифт подходит по ширине и высоте (т.к. начали с max_height)
             font_size -= 1
@@ -759,6 +765,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     datamatrix_codes = []
                     logging.debug(f"Проверка 'items.datamatrix' в data_sources: {datamatrix_needed}")
                     if datamatrix_needed:
+                        # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Загружаем ВСЕ коды для предпросмотра ---
                         cur.execute("SELECT datamatrix FROM items WHERE order_id=1")
                         results = cur.fetchall()
                         logging.debug(f"Получено {len(results)} строк с DataMatrix кодами из БД.")
