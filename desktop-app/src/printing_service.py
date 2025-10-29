@@ -49,7 +49,7 @@ except ImportError:
 
 # Конфигурация логирования
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG, # ИЗМЕНЕНИЕ: Включаем подробное логирование для отладки
     format='%(asctime)s - %(levelname)s - [printing_service] - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -951,21 +951,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         else:
             if self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack_forget()
-
-    def _toggle_tools_panel(self, active: bool) -> None:
-        """Включает/выключает панель инструментов."""
-        logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
-        state = "normal" if active else "disabled"
-        for child_widget in self.tools_frame.winfo_children():
-            try:
-                if isinstance(child_widget, ttk.Button):
-                    child_widget.state([state] if state == "normal" else [state])
-                else:
-                    child_widget.config(state=state)
-            except tk.TclError:
-                # Пропускаем виджеты, которые не поддерживают изменение состояния (например, Separator)
-                pass
-
     def _update_properties_panel(self) -> None:
         """Обновляет панель свойств для выбранного объекта."""
         logging.debug(f"Обновление панели свойств для объекта ID: {self.selected_object_id}")
