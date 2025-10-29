@@ -739,6 +739,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     if "items.datamatrix" in data_sources:
                         cur.execute("SELECT datamatrix FROM items WHERE order_id=1")
                         results = cur.fetchall()
+                        logging.debug(f"Получено {len(results)} строк с DataMatrix кодами из БД.")
                         if results:
                             datamatrix_codes = [row['datamatrix'] for row in results]
 
