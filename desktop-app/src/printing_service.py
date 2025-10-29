@@ -722,7 +722,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.selected_object_id = None
         self.canvas_objects.clear()
         self._switch_view('editor')
-        # self._toggle_properties_panel(False) # ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ДИАГНОСТИКИ
+        self._toggle_properties_panel(False)
         logging.info(f"Создан новый макет: {name} ({width_mm}x{height_mm} мм)")
 
     def _edit_selected_layout(self) -> None:
@@ -741,7 +741,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self.selected_object_id = None
             self.canvas_objects.clear()
             self._switch_view('editor')
-            # self._toggle_properties_panel(False) # ВРЕМЕННО ОТКЛЮЧЕНО ДЛЯ ДИАГНОСТИКИ
+            self._toggle_properties_panel(False)
             logging.info(f"Открыт для редактирования макет: {layout_name}")
 
     def _delete_selected_layout(self) -> None:
@@ -936,14 +936,6 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
     def _toggle_properties_panel(self, active: bool) -> None:
         """Включает/выключает панель свойств."""
         logging.debug(f"Переключение панели свойств: {'вкл' if active else 'выкл'}")
-        # --- ИСПРАВЛЕНИЕ: Возвращаем логику скрытия/показа панели, а не изменения состояния виджетов.
-        # Это предотвращает случайное отключение других панелей.
-        if active:
-            if not self.properties_frame.winfo_ismapped():
-                self.properties_frame.pack(fill=tk.X, pady=10)
-        else:
-            if self.properties_frame.winfo_ismapped():
-                self.properties_frame.pack_forget()
 
     def _toggle_tools_panel(self, active: bool) -> None:
         """Включает/выключает панель инструментов."""
