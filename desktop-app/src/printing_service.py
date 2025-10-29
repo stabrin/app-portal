@@ -936,7 +936,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
     def _toggle_properties_panel(self, active: bool) -> None:
         """Включает/выключает панель свойств."""
         logging.debug(f"Переключение панели свойств: {'вкл' if active else 'выкл'}")
-
+        # --- ОКОНЧАТЕЛЬНОЕ ИСПРАВЛЕНИЕ: Управляем только видимостью панели, а не состоянием виджетов. ---
+        # Это простое решение гарантирует, что этот метод не повлияет на другие элементы интерфейса.
+        if active:
+            if not self.properties_frame.winfo_ismapped():
+                self.properties_frame.pack(fill=tk.X, pady=10)
+        else:
+            if self.properties_frame.winfo_ismapped():
+                self.properties_frame.pack_forget()
     def _toggle_tools_panel(self, active: bool) -> None:
         """Включает/выключает панель инструментов."""
         logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
