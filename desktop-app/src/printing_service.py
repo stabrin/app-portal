@@ -1055,8 +1055,9 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             messagebox.showwarning("Внимание", "Сначала создайте новый макет.", parent=self)
             return
 
+        # --- ИСПРАВЛЕНИЕ: Корректно определяем тип объекта ---
         new_object = {
-            "type": "text" if obj_type in ["text", "custom_text"] else "barcode",
+            "type": "text" if obj_type in ["text", "custom_text"] else ("image" if obj_type == "image" else "barcode"),
             "x_mm": 10,
             "y_mm": 10,
             "width_mm": 40 if obj_type in ["text", "custom_text"] else 30,
@@ -1070,6 +1071,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             new_object["is_custom_text"] = True
             new_object["data_source"] = "Ваш текст" # Текст по умолчанию
             new_object["font_name"] = "Helvetica"
+        elif obj_type == "image":
+            new_object["data_source"] = "" # По умолчанию источник не выбран
         else:
             new_object["barcode_type"] = obj_type
             if obj_type == "QR":
