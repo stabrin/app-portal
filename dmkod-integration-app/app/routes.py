@@ -1040,33 +1040,43 @@ def integration_panel():
                         if not products_data:
                             raise Exception("В заказе нет детализации по продуктам (GTIN) для отправки.")
 
-                    # 3. Формируем тело запроса к API с учетом дат производства
+                    # --- НОВАЯ ЛОГИКА: Группировка данных перед отправкой в API ---
+                    # 3. Преобразуем данные в DataFrame для удобной агрегации
+                    products_df = pd.DataFrame(products_data)
+                    
+                    # Группируем по GTIN, суммируем количество и берем самую раннюю дату производства
+                    aggregated_products_df = products_df.groupby('gtin').agg(
+                        dm_quantity=('dm_quantity', 'sum'),
+                        production_date=('production_date', 'min') # Берем самую раннюю дату
+                    ).reset_index()
+
+                    # 4. Формируем тело запроса к API на основе сгруппированных данных
                     products_payload = [
                         {
                             "gtin": p['gtin'],
                             "code_template": order_info['dm_template'],
-                            "qty": int(p['dm_quantity']),
+                            "qty": int(p['dm_quantity']), # Используем суммированное количество
                             "unit_type": "UNIT",
                             "release_method": "IMPORT",
                             "payment_type": 2,
                             "attributes": {
                                 "production_date": p['production_date'].strftime('%Y-%m-%d')
                             } if p.get('production_date') else {}
-                        } for p in products_data
+                        } for index, p in aggregated_products_df.iterrows()
                     ]
                     # Удаляем пустые словари атрибутов, если дата не была указана
                     for p in products_payload:
                         if not p.get("attributes"):
                             del p["attributes"]
                     
-                    api_payload = {
+                    api_payload = { # Название переменной изменено для ясности
                         "participant_id": order_info['participant_id'],
                         "production_order_id": order_info['notes'] or "",
                         "contact_person": current_user.username,
                         "products": products_payload
                     }
 
-                    # 4. Отправляем запрос к API
+                    # 5. Отправляем запрос к API
                     api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
                     full_url = f"{api_base_url}/psp/order/create"
                     headers = {'Authorization': f'Bearer {access_token}'}
@@ -1077,7 +1087,7 @@ def integration_panel():
                     response_data = response.json()
                     api_order_id = response_data.get('order_id')
 
-                    # 5. Обновляем наш заказ, записывая ID из API
+                    # 6. Обновляем наш заказ, записывая ID из API
                     if api_order_id:
                         with conn.cursor() as cur:
                             cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, selected_order_id))
