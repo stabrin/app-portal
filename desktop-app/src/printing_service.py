@@ -468,23 +468,35 @@ class PrintingService:
                 logging.debug(f"Принтер '{printer_name}' закрыт.")
 
     @staticmethod
-    def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list, user_info: Dict[str, Any]) -> None:
-        """Печатает этикетки для списка элементов."""
-        logging.info(f"Начало пакетной печати {len(items_data)} этикеток на принтер '{printer_name}'.")
-        if not items_data:
-            logging.warning("Список элементов для печати пуст.")
+    def print_generated_images(printer_name: str, paper_name: str, images: list, user_info: Dict[str, Any]) -> None:
+        """Печатает список уже сгенерированных изображений Pillow."""
+        logging.info(f"Начало пакетной печати {len(images)} готовых изображений на принтер '{printer_name}'.")
+        if not images:
+            logging.warning("Список изображений для печати пуст.")
             return
 
-        if not paper_name:
-            logging.warning("Формат бумаги не указан.")
-
-        for i, item_data in enumerate(items_data, 1):
-            logging.info(f"Печать этикетки {i}/{len(items_data)}: {item_data}")
+        for i, image in enumerate(images, 1):
+            logging.info(f"Печать изображения {i}/{len(images)}")
             try:
-                PrintingService.print_label_direct(printer_name, template_json, item_data, user_info)
+                # Создаем "пустые" данные, так как изображение уже готово
+                PrintingService.print_label_direct(printer_name, {}, {}, user_info, pregenerated_image=image)
             except Exception as e:
-                logging.error(f"Ошибка печати этикетки {i}: {e}")
-                raise RuntimeError(f"Ошибка печати этикетки {i}/{len(items_data)}: {e}")
+                logging.error(f"Ошибка печати изображения {i}: {e}")
+                raise RuntimeError(f"Ошибка печати изображения {i}/{len(images)}: {e}")
+
+    @staticmethod
+    def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list, user_info: Dict[str, Any]) -> None:
+        """Печатает этикетки для списка элементов."""
+        # --- ИЗМЕНЕНИЕ: Этот метод теперь генерирует изображения и передает их в новый метод печати ---
+        images_to_print = []
+        text_cache = {} # Создаем кэш для этой пачки
+        for i, item_data in enumerate(items_data, 1):
+            img = PrintingService.generate_label_image(template_json, item_data, user_info, text_cache)
+            if img:
+                images_to_print.append(img)
+        
+        if images_to_print:
+            PrintingService.print_generated_images(printer_name, paper_name, images_to_print, user_info)
 
 class LabelEditorWindow(tk.Toplevel if tk else object):
     """Окно визуального редактора макетов этикеток."""

@@ -749,24 +749,17 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
 
             # Callback для кнопки "Напечатать все"
             def perform_actual_printing():
-                try:
-                    PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], all_items_data, self.user_info)
-                    messagebox.showinfo("Успех", f"Задание на печать {len(all_items_data)} этикеток отправлено на принтер.", parent=self)
-                    self.destroy() # Закрываем диалог печати после успешной отправки
-                except Exception as e_print:
-                    logging.error(f"Ошибка при фактической печати: {e_print}\n{traceback.format_exc()}")
-                    messagebox.showerror("Ошибка печати", f"Произошла ошибка: {e_print}\nПодробности в app.log.", parent=self)
+                # --- ИСПРАВЛЕНИЕ: Используем уже сгенерированные изображения ---
+                PrintingService.print_generated_images(printer, paper, images_to_preview, self.user_info)
+                messagebox.showinfo("Успех", f"Задание на печать {len(images_to_preview)} этикеток отправлено на принтер.", parent=self)
+                self.destroy()
 
             # Callback для кнопки "Напечатать текущую"
             def perform_single_print(index):
-                try:
-                    item_to_print = all_items_data[index]
-                    PrintingService.print_labels_for_items(printer, paper, selected_layout['json'], [item_to_print], self.user_info)
-                    messagebox.showinfo("Успех", f"Задание на печать 1 этикетки отправлено на принтер.", parent=self)
-                    # Диалог не закрываем
-                except Exception as e_print:
-                    logging.error(f"Ошибка при печати одной этикетки: {e_print}\n{traceback.format_exc()}")
-                    messagebox.showerror("Ошибка печати", f"Произошла ошибка: {e_print}\nПодробности в app.log.", parent=self)
+                # --- ИСПРАВЛЕНИЕ: Используем уже сгенерированные изображения ---
+                image_to_print = images_to_preview[index]
+                PrintingService.print_generated_images(printer, paper, [image_to_print], self.user_info)
+                messagebox.showinfo("Успех", f"Задание на печать 1 этикетки отправлено на принтер.", parent=self)
 
             # Открываем окно предпросмотра
             PreviewLabelsDialog(self, images_to_preview, perform_actual_printing, perform_single_print)
