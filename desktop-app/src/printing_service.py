@@ -306,6 +306,25 @@ class PrintingService:
                             font, wrapped_text = text_cache[cache_key]
                         draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
 
+                elif obj["type"] == "image":
+                    logging.debug("Обработка как 'image'")
+                    image_name = str(obj_data)
+                    try:
+                        # Пытаемся получить изображение из БД
+                        with PrintingService._get_client_db_connection(user_info) as conn:
+                            with conn.cursor() as cur:
+                                cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
+                                result = cur.fetchone()
+                        if result:
+                            image_bytes = result[0]
+                            img_obj = Image.open(io.BytesIO(image_bytes))
+                            img_obj = img_obj.resize((width, height), Image.Resampling.LANCZOS)
+                            label_image.paste(img_obj, (x, y), img_obj if img_obj.mode == 'RGBA' else None)
+                        else:
+                            logging.warning(f"Изображение с именем '{image_name}' не найдено в БД.")
+                    except Exception as e:
+                        logging.error(f"Ошибка при отрисовке изображения '{image_name}': {e}")
+
                 
                 elif obj["type"] == "barcode":
                     barcode_type = obj.get("barcode_type", "QR").upper()

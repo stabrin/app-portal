@@ -277,6 +277,16 @@ def update_client_db_schema(conn):
             );
         """),
         sql.SQL("COMMENT ON TABLE label_templates IS 'Шаблоны макетов этикеток в формате JSON';"),
+        # --- НОВАЯ ТАБЛИЦА ДЛЯ ИЗОБРАЖЕНИЙ ---
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_images (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                image_data BYTEA NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE ap_images IS 'Хранилище изображений (логотипов) для макетов этикеток';"),
     ]
 
     # === Блок для таблицы видимости приложений (из init_visibility.py) ===
