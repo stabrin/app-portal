@@ -1130,7 +1130,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         if obj_data.get('type') == 'text':
             fill_color = "lightyellow"
             display_text = "Текст"
+        # --- ИСПРАВЛЕНИЕ: Добавляем отдельную обработку для изображений ---
+        elif obj_data.get('type') == 'image':
+            fill_color = "lightgreen" # Другой цвет для наглядности
+            display_text = "IMG"
         else:
+            # Этот блок теперь только для штрихкодов
             fill_color = "lightblue"
             display_text = obj_data['barcode_type']
 
