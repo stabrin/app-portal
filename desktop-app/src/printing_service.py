@@ -631,6 +631,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         ttk.Button(self.tools_frame, text="Добавить SSCC", command=lambda: self._add_object_to_canvas("SSCC")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить DataMatrix", command=lambda: self._add_object_to_canvas("DataMatrix")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить Изображение", command=lambda: self._add_object_to_canvas("image")).pack(fill=tk.X, pady=2)
+        ttk.Separator(self.tools_frame).pack(fill=tk.X, pady=5)
+        ttk.Button(self.tools_frame, text="Удалить выделенное", command=self._delete_selected_object, style="Danger.TButton").pack(fill=tk.X, pady=2)
 
         self.properties_frame = ttk.LabelFrame(controls_frame, text="Свойства объекта")
         self.properties_frame.pack(fill=tk.X, pady=10)
@@ -703,6 +705,28 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         except Exception as e:
             logging.error(f"Ошибка при загрузке изображения: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось загрузить изображение: {e}", parent=self)
+
+    def _delete_selected_object(self):
+        """Удаляет выделенный объект с холста и из шаблона."""
+        logging.debug("Попытка удаления выделенного объекта.")
+        if self.selected_object_id is None:
+            messagebox.showwarning("Внимание", "Нет выделенных объектов для удаления.", parent=self)
+            return
+
+        if not messagebox.askyesno("Подтверждение", "Вы уверены, что хотите удалить выделенный объект?", parent=self):
+            logging.debug("Удаление отменено пользователем.")
+            return
+
+        try:
+            # Удаляем объект из списка
+            del self.template['objects'][self.selected_object_id]
+            logging.info(f"Объект с индексом {self.selected_object_id} удален из шаблона.")
+
+            # Сбрасываем выделение и перерисовываем холст
+            self.selected_object_id = None
+            self._draw_canvas_background()
+        except IndexError:
+            logging.error(f"Ошибка удаления: индекс {self.selected_object_id} вне диапазона.")
 
     def _open_preview(self):
         """Открывает окно предпросмотра с тестовыми данными."""
