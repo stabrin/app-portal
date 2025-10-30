@@ -728,9 +728,12 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         try:
             # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Сначала генерируем изображения для предпросмотра ---
             images_to_preview = []
+            # --- ИСПРАВЛЕНИЕ: Создаем кэш для текстовых объектов здесь, один раз на всю пачку ---
+            text_cache = {}
             for item_data in all_items_data:
                 try: # Передаем user_info для возможности получения данных из БД
-                    img = PrintingService.generate_label_image(selected_layout['json'], item_data, self.user_info)
+                    # Передаем кэш в функцию генерации
+                    img = PrintingService.generate_label_image(selected_layout['json'], item_data, self.user_info, text_cache)
                     images_to_preview.append(img)
                 except Exception as e:
                     logging.error(f"Ошибка генерации изображения для предпросмотра: {e}")

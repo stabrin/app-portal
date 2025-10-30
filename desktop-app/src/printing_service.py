@@ -228,7 +228,7 @@ class PrintingService:
         
         return font # Возвращаем самый маленький из попробованных, если ничего не подошло
     @staticmethod
-    def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any]) -> Optional[Image.Image]:
+    def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], text_cache: Optional[Dict] = None) -> Optional[Image.Image]:
         """Генерирует изображение этикетки с помощью Pillow."""
         logging.info("Начало генерации изображения этикетки.")
         if not all([Image, ImageDraw, ImageFont]):
@@ -247,8 +247,9 @@ class PrintingService:
             height_px = int(template_json["height_mm"] * dots_per_mm)
             logging.debug(f"Размеры этикетки: {width_px}x{height_px} пикселей (DPI={DPI})")
 
-            # --- НОВОЕ: Кэш для рассчитанных текстовых объектов ---
-            custom_text_cache = {}
+            # --- ИСПРАВЛЕНИЕ: Используем переданный кэш или создаем новый, если он не передан ---
+            if text_cache is None:
+                text_cache = {}
 
             label_image = Image.new('RGB', (width_px, height_px), 'white')
             draw = ImageDraw.Draw(label_image)
@@ -294,15 +295,15 @@ class PrintingService:
                     # --- НОВАЯ ЛОГИКА: Используем кэш для произвольного текста ---
                     if obj.get("is_custom_text"):
                         cache_key = obj['data_source'] # Ключ - сам текст
-                        if cache_key not in custom_text_cache:
+                        if cache_key not in text_cache:
                             # Если в кэше нет, рассчитываем и сохраняем
                             logging.debug(f"Кэширование произвольного текста: '{cache_key[:30]}...'")
                             font, wrapped_text = PrintingService._get_multiline_fitting_font(draw, str(obj_data), obj.get("font_name", "arial"), width, height)
-                            custom_text_cache[cache_key] = (font, wrapped_text)
+                            text_cache[cache_key] = (font, wrapped_text)
                         else:
                             # Если в кэше есть, берем готовый результат
                             logging.debug("Использование кэшированного произвольного текста.")
-                            font, wrapped_text = custom_text_cache[cache_key]
+                            font, wrapped_text = text_cache[cache_key]
                         draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
 
                 
