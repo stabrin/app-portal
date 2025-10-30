@@ -630,6 +630,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         ttk.Button(self.tools_frame, text="Добавить QR-код", command=lambda: self._add_object_to_canvas("QR")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить SSCC", command=lambda: self._add_object_to_canvas("SSCC")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить DataMatrix", command=lambda: self._add_object_to_canvas("DataMatrix")).pack(fill=tk.X, pady=2)
+        ttk.Button(self.tools_frame, text="Добавить Изображение", command=lambda: self._add_object_to_canvas("image")).pack(fill=tk.X, pady=2)
 
         self.properties_frame = ttk.LabelFrame(controls_frame, text="Свойства объекта")
         self.properties_frame.pack(fill=tk.X, pady=10)
@@ -661,6 +662,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         paned_window.add(canvas_frame, weight=4)
 
         self.canvas = tk.Canvas(canvas_frame, bg="lightgrey")
+        ttk.Button(controls_frame, text="Загрузить изображение...", command=self._upload_image).pack(fill=tk.X, pady=(10, 2))
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self._on_canvas_click)
 
