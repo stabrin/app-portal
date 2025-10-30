@@ -402,17 +402,22 @@ class PrintingService:
             raise
 
     @staticmethod
-    def print_label_direct(printer_name: str, template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any]) -> None:
+    def print_label_direct(printer_name: str, template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], pregenerated_image: Optional[Image.Image] = None) -> None:
         """Отправляет этикетку на принтер напрямую через GDI."""
         logging.info(f"Прямая печать на принтер '{printer_name}'.")
         if not all([win32print, win32ui]):
             logging.error("pywin32 не установлен. Прямая печать невозможна.")
             raise ImportError("Библиотека pywin32 не установлена.")
 
+        label_image = None
         h_printer = None
         try:
-            # --- НОВАЯ ЛОГИКА: Сначала генерируем полное изображение ---
-            label_image = PrintingService.generate_label_image(template_json, data, user_info)
+            # --- ИСПРАВЛЕНИЕ: Используем готовое изображение, если оно передано ---
+            if pregenerated_image:
+                label_image = pregenerated_image
+            else:
+                label_image = PrintingService.generate_label_image(template_json, data, user_info)
+
             if not label_image:
                 logging.error("Не удалось сгенерировать изображение этикетки. Печать отменена.")
                 return
