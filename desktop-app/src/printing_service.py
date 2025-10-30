@@ -666,6 +666,44 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<Button-1>", self._on_canvas_click)
 
+    def _upload_image(self):
+        """Открывает диалог для загрузки изображения и сохранения его в БД."""
+        logging.debug("Запуск процесса загрузки изображения.")
+        if not tk:
+            return
+
+        file_path = tk.filedialog.askopenfilename(
+            title="Выберите изображение",
+            filetypes=[("Изображения", "*.png *.jpg *.jpeg *.bmp"), ("Все файлы", "*.*")],
+            parent=self
+        )
+        if not file_path:
+            logging.debug("Выбор файла отменен.")
+            return
+
+        image_name = simpledialog.askstring("Имя изображения", "Введите уникальное имя для этого изображения:", parent=self)
+        if not image_name:
+            logging.debug("Ввод имени отменен.")
+            return
+
+        try:
+            with open(file_path, 'rb') as f:
+                image_data = f.read()
+
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO ap_images (name, image_data) VALUES (%s, %s) ON CONFLICT (name) DO UPDATE SET image_data = EXCLUDED.image_data;",
+                        (image_name, image_data)
+                    )
+                conn.commit()
+            
+            logging.info(f"Изображение '{image_name}' успешно загружено/обновлено в БД.")
+            messagebox.showinfo("Успех", f"Изображение '{image_name}' успешно загружено.", parent=self)
+        except Exception as e:
+            logging.error(f"Ошибка при загрузке изображения: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось загрузить изображение: {e}", parent=self)
+
     def _open_preview(self):
         """Открывает окно предпросмотра с тестовыми данными."""
         # --- НОВАЯ ЛОГИКА: Сохраняем макет и открываем диалог печати ---
@@ -1158,6 +1196,20 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             data_source_widget.set(current_data_source or self.available_text_sources[0])
+        elif obj_type == 'image':
+            # Для изображений мы тоже используем Combobox, чтобы пользователь мог выбрать из загруженных
+            try:
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT name FROM ap_images ORDER BY name;")
+                        image_names = [row[0] for row in cur.fetchall()]
+                data_source_widget = ttk.Combobox(self.data_source_container_frame, values=image_names, state="readonly")
+                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                data_source_widget.set(current_data_source or (image_names[0] if image_names else ''))
+            except Exception as e:
+                logging.error(f"Не удалось загрузить список изображений: {e}")
+                data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
+                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
         elif obj_type == 'barcode':
             barcode_type = obj_data.get('barcode_type', '').upper()
             values = {
