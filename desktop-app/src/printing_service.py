@@ -317,8 +317,10 @@ class PrintingService:
                                 result = cur.fetchone()
                         if result:
                             image_bytes = result[0]
-                            img_obj = Image.open(io.BytesIO(image_bytes))
-                            img_obj = img_obj.resize((width, height), Image.Resampling.LANCZOS)
+                            img_obj = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+                            # --- УЛУЧШЕНИЕ: Используем thumbnail для сохранения пропорций ---
+                            # Это предотвратит искажение изображения, если его пропорции не совпадают с объектом.
+                            img_obj.thumbnail((width, height), Image.Resampling.LANCZOS)
                             label_image.paste(img_obj, (x, y), img_obj if img_obj.mode == 'RGBA' else None)
                         else:
                             logging.warning(f"Изображение с именем '{image_name}' не найдено в БД.")
