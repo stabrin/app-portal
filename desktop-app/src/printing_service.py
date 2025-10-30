@@ -1196,20 +1196,30 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             data_source_widget.set(current_data_source or self.available_text_sources[0])
+
         elif obj_type == 'image':
-            # Для изображений мы тоже используем Combobox, чтобы пользователь мог выбрать из загруженных
-            try:
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT name FROM ap_images ORDER BY name;")
-                        image_names = [row[0] for row in cur.fetchall()]
-                data_source_widget = ttk.Combobox(self.data_source_container_frame, values=image_names, state="readonly")
-                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                data_source_widget.set(current_data_source or (image_names[0] if image_names else ''))
-            except Exception as e:
-                logging.error(f"Не удалось загрузить список изображений: {e}")
-                data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
-                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            # --- НОВАЯ ЛОГИКА: Кнопка для вызова диалога выбора изображения ---
+            data_source_widget = ttk.Entry(self.data_source_container_frame, state="readonly")
+            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            data_source_widget.config(state="normal")
+            data_source_widget.delete(0, tk.END)
+            data_source_widget.insert(0, current_data_source)
+            data_source_widget.config(state="readonly")
+
+            def open_dialog():
+                dialog = ImageSelectionDialog(self, self.user_info)
+                self.wait_window(dialog) # Ждем закрытия диалога
+                if dialog.selected_image_name:
+                    # Обновляем поле ввода
+                    current_entry = self.prop_entries.get("data_source")
+                    if current_entry:
+                        current_entry.config(state="normal")
+                        current_entry.delete(0, tk.END)
+                        current_entry.insert(0, dialog.selected_image_name)
+                        current_entry.config(state="readonly")
+
+            ttk.Button(self.data_source_container_frame, text="Выбрать...", command=open_dialog).pack(side=tk.LEFT, padx=(5,0))
+
         elif obj_type == 'barcode':
             barcode_type = obj_data.get('barcode_type', '').upper()
             values = {
@@ -1246,6 +1256,80 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         except ValueError:
             logging.error("Ошибка: геометрические свойства должны быть числами.")
             messagebox.showerror("Ошибка", "Значения геометрических свойств должны быть числами.", parent=self)
+
+class ImageSelectionDialog(tk.Toplevel if tk else object):
+    """Диалог для визуального выбора изображения из базы данных."""
+    def __init__(self, parent, user_info):
+        super().__init__(parent)
+        self.title("Выбор изображения")
+        self.geometry("600x500")
+        self.transient(parent)
+        self.grab_set()
+
+        self.user_info = user_info
+        self.selected_image_name = None
+        self.image_references = [] # Для предотвращения удаления изображений сборщиком мусора
+
+        # --- Создание прокручиваемой области ---
+        main_frame = ttk.Frame(self)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        canvas = tk.Canvas(main_frame)
+        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
+        self.scrollable_frame = ttk.Frame(canvas)
+
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        self._load_images()
+
+    def _get_client_db_connection(self):
+        # Используем метод из основного сервиса
+        return PrintingService._get_client_db_connection(self.user_info)
+
+    def _load_images(self):
+        """Загружает изображения из БД и отображает их."""
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT name, image_data FROM ap_images ORDER BY name;")
+                    images = cur.fetchall()
+
+            for name, image_data in images:
+                item_frame = ttk.Frame(self.scrollable_frame, padding=5, borderwidth=1, relief="solid")
+                item_frame.pack(fill=tk.X, padx=5, pady=5)
+
+                # Отображение миниатюры
+                try:
+                    img = Image.open(io.BytesIO(image_data))
+                    img.thumbnail((80, 80), Image.Resampling.LANCZOS)
+                    photo = ImageTk.PhotoImage(img)
+                    self.image_references.append(photo) # Сохраняем ссылку
+
+                    img_label = ttk.Label(item_frame, image=photo)
+                    img_label.pack(side=tk.LEFT, padx=5)
+                except Exception as e:
+                    logging.warning(f"Не удалось создать миниатюру для '{name}': {e}")
+
+                # Имя и кнопка
+                ttk.Label(item_frame, text=name, font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=10)
+                ttk.Button(item_frame, text="Выбрать", command=lambda n=name: self._select_and_close(n)).pack(side=tk.RIGHT, padx=10)
+
+        except Exception as e:
+            logging.error(f"Ошибка загрузки изображений для диалога выбора: {e}")
+            messagebox.showerror("Ошибка", f"Не удалось загрузить список изображений: {e}", parent=self)
+
+    def _select_and_close(self, name):
+        self.selected_image_name = name
+        self.destroy()
 
 class PreviewWindow(tk.Toplevel):
     """Новое окно для предпросмотра и печати отдельных этикеток."""
