@@ -381,32 +381,44 @@ def create_integration():
                             'Окончание срока годности': 'expiry_date'
                         }, inplace=True)
 
+                        # --- НОВАЯ ЛОГИКА: Группировка и суммирование ---
+                        # Преобразуем dm_quantity в числовой тип, обрабатывая возможные ошибки
+                        df['dm_quantity'] = pd.to_numeric(df['dm_quantity'], errors='coerce').fillna(0)
+
+                        # Группируем по GTIN, суммируем количество, а для остальных полей берем первое значение
+                        aggregated_df = df.groupby('gtin').agg({
+                            'dm_quantity': 'sum',
+                            'aggregation_level': 'first',
+                            'production_date': 'first',
+                            'shelf_life_years': 'first',
+                            'expiry_date': 'first'
+                        }).reset_index()
+
                         details_to_insert = []
-                        for index, row in df.iterrows():
+                        # Теперь итерируемся по сгруппированному DataFrame
+                        for index, row in aggregated_df.iterrows():
                             prod_date = pd.to_datetime(row.get('production_date'), errors='coerce')
                             exp_date = pd.to_datetime(row.get('expiry_date'), errors='coerce')
                             shelf_life = pd.to_numeric(row.get('shelf_life_years'), errors='coerce')
-
+                        
                             # Логика расчета срока годности
                             if pd.notna(prod_date) and pd.notna(shelf_life) and pd.isna(exp_date):
                                 exp_date = prod_date + relativedelta(years=int(shelf_life))
-
+                        
                             details_to_insert.append((
                                 order_id,
                                 str(row.get('gtin', '')),
                                 int(row.get('dm_quantity', 0)),
-                                int(row.get('aggregation_level', 0)),
+                                int(pd.to_numeric(row.get('aggregation_level'), errors='coerce', downcast='integer').fillna(0)),
                                 None if pd.isna(prod_date) else prod_date.date(),
                                 None if pd.isna(exp_date) else exp_date.date()
                             ))
-                        
+
                         # Массовая вставка в dmkod_aggregation_details
                         if details_to_insert:
-                            insert_query = sql.SQL("""
-                                INSERT INTO dmkod_aggregation_details (order_id, gtin, dm_quantity, aggregation_level, production_date, expiry_date) 
-                                VALUES {}
-                            """).format(sql.SQL(',').join(map(sql.Literal, details_to_insert)))
-                            cur.execute(insert_query)
+                            from psycopg2.extras import execute_values
+                            insert_query = "INSERT INTO dmkod_aggregation_details (order_id, gtin, dm_quantity, aggregation_level, production_date, expiry_date) VALUES %s"
+                            execute_values(cur, insert_query, details_to_insert)
 
                     except Exception as e:
                         raise Exception(f"Ошибка при обработке файла детализации: {e}")
