@@ -566,10 +566,10 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         import win32print
         import win32api
     except ImportError:
-        win32print = None
+        win32print = None # type: ignore
         win32api = None
     # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-    def __init__(self, parent, user_info, title_name, items_to_print=None, preselected_layout=None):
+    def __init__(self, parent, user_info, title_name, items_to_print=None, preselected_layout=None, pregenerated_images=None):
         super().__init__(parent)
         self.title(f"Печать: '{title_name}'")
         self.geometry("500x400")
@@ -581,6 +581,7 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
         self.warehouse_name = title_name if items_to_print is None else None # Для обратной совместимости
         self.layouts = [] # Список загруженных макетов
         self.preselected_layout = preselected_layout # Для предустановки макета
+        self.pregenerated_images = pregenerated_images # Для предпросмотра из редактора
 
         if not self.win32print:
             messagebox.showerror("Ошибка", "Библиотека 'pywin32' не установлена.\nФункционал печати недоступен.", parent=self)
@@ -725,20 +726,23 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
             messagebox.showwarning("Внимание", "Нет данных для генерации этикеток.", parent=self)
             return
 
-        try:
-            # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Сначала генерируем изображения для предпросмотра ---
-            images_to_preview = []
-            # --- ИСПРАВЛЕНИЕ: Создаем кэш для текстовых объектов здесь, один раз на всю пачку ---
-            text_cache = {}
-            for item_data in all_items_data:
-                try: # Передаем user_info для возможности получения данных из БД
-                    # Передаем кэш в функцию генерации
-                    img = PrintingService.generate_label_image(selected_layout['json'], item_data, self.user_info, text_cache)
-                    images_to_preview.append(img)
-                except Exception as e:
-                    logging.error(f"Ошибка генерации изображения для предпросмотра: {e}")
-                    # Можно продолжить или прервать
-
+        images_to_preview = []
+        # Если изображения уже были сгенерированы (например, из редактора), используем их
+        if self.pregenerated_images:
+            images_to_preview = self.pregenerated_images
+        else:
+            # Иначе генерируем их сейчас
+            try:
+                text_cache = {}
+                for item_data in all_items_data:
+                    try:
+                        img = PrintingService.generate_label_image(selected_layout['json'], item_data, self.user_info, text_cache)
+                        images_to_preview.append(img)
+                    except Exception as e:
+                        logging.error(f"Ошибка генерации изображения для предпросмотра: {e}")
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось сгенерировать изображения для предпросмотра: {e}", parent=self)
+                return
             if not images_to_preview:
                 messagebox.showwarning("Внимание", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
                 return
@@ -766,10 +770,6 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
 
             # Открываем окно предпросмотра
             PreviewLabelsDialog(self, images_to_preview, perform_actual_printing, perform_single_print)
-        except Exception as e:
-            error_details = traceback.format_exc()
-            logging.error(f"Ошибка печати этикеток рабочих мест: {e}\n{error_details}")
-            messagebox.showerror("Ошибка печати", f"Произошла ошибка: {e}\nПодробности в app.log.", parent=self)
 
 def open_user_management_window(parent_widget, user_info):
     """Открывает окно для управления пользователями клиента."""

@@ -745,10 +745,19 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 messagebox.showwarning("Внимание", "Не удалось найти тестовые данные для предпросмотра.", parent=self)
                 return
 
-            # --- ИСПРАВЛЕНИЕ: Убираем лишний цикл и вызываем диалог один раз ---
-            # Диалог сам обработает весь список `test_data` и сгенерирует все этикетки.
+            # --- ИСПРАВЛЕНИЕ: Создаем кэш для текстовых объектов здесь, чтобы он не пересчитывался для каждой этикетки в предпросмотре ---
+            text_cache = {}
+            images_to_preview = []
+            for item_data in test_data:
+                try:
+                    img = self.generate_label_image(self.template, item_data, self.user_info, text_cache)
+                    images_to_preview.append(img)
+                except Exception as e_gen:
+                    logging.error(f"Ошибка генерации изображения для предпросмотра: {e_gen}")
+
+            # Открываем диалог предпросмотра с уже сгенерированными изображениями
             from .admin_ui import PrintWorkplaceLabelsDialog
-            PrintWorkplaceLabelsDialog(self, self.user_info, f"Предпросмотр: {self.template['name']}", test_data, preselected_layout=self.template['name'])
+            PrintWorkplaceLabelsDialog(self, self.user_info, f"Предпросмотр: {self.template['name']}", test_data, preselected_layout=self.template['name'], pregenerated_images=images_to_preview)
 
         except Exception as e:
             logging.error(f"Ошибка при создании предпросмотра: {e}", exc_info=True)
@@ -1129,18 +1138,41 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         outline_color = "blue" if object_id == self.selected_object_id else "grey"
         if obj_data.get('type') == 'text':
             fill_color = "lightyellow"
-            display_text = "Текст"
+            self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill=fill_color, outline=outline_color, width=2, tags=(canvas_tag, "object"))
+            self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text="Текст", tags=(canvas_tag, "object_text"))
+
         # --- ИСПРАВЛЕНИЕ: Добавляем отдельную обработку для изображений ---
         elif obj_data.get('type') == 'image':
-            fill_color = "lightgreen" # Другой цвет для наглядности
-            display_text = "IMG"
+            # --- НОВАЯ ЛОГИКА: Отрисовываем реальное изображение на холсте ---
+            image_name = obj_data.get('data_source')
+            if image_name:
+                try:
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
+                            result = cur.fetchone()
+                    if result:
+                        img = Image.open(io.BytesIO(result[0]))
+                        img.thumbnail((width_px, height_px), Image.Resampling.LANCZOS)
+                        photo = ImageTk.PhotoImage(img)
+                        # Сохраняем ссылку, чтобы сборщик мусора не удалил изображение
+                        self.canvas.image_references = getattr(self.canvas, 'image_references', {})
+                        self.canvas.image_references[object_id] = photo
+                        self.canvas.create_image(x_px, y_px, image=photo, anchor=tk.NW, tags=(canvas_tag, "object"))
+                        self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, outline=outline_color, width=2, tags=(canvas_tag, "object_outline"))
+                except Exception as e:
+                    logging.warning(f"Не удалось загрузить превью для изображения '{image_name}': {e}")
+            else:
+                # Если изображение не выбрано, рисуем заглушку
+                self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill="lightgreen", outline=outline_color, width=2, tags=(canvas_tag, "object"))
+                self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text="IMG", tags=(canvas_tag, "object_text"))
         else:
             # Этот блок теперь только для штрихкодов
             fill_color = "lightblue"
             display_text = obj_data['barcode_type']
+            self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill=fill_color, outline=outline_color, width=2, tags=(canvas_tag, "object"))
+            self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=display_text, tags=(canvas_tag, "object_text"))
 
-        self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill=fill_color, outline=outline_color, width=2, tags=(canvas_tag, "object"))
-        self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=display_text, tags=(canvas_tag, "object_text"))
         logging.debug(f"Объект ID {object_id} отрисован на холсте.")
 
     def _on_canvas_click(self, event: tk.Event) -> None:
