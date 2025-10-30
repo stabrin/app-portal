@@ -1210,13 +1210,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 dialog = ImageSelectionDialog(self, self.user_info)
                 self.wait_window(dialog) # Ждем закрытия диалога
                 if dialog.selected_image_name:
-                    # Обновляем поле ввода
-                    current_entry = self.prop_entries.get("data_source")
-                    if current_entry:
-                        current_entry.config(state="normal")
-                        current_entry.delete(0, tk.END)
-                        current_entry.insert(0, dialog.selected_image_name)
-                        current_entry.config(state="readonly")
+                    # --- ИСПРАВЛЕНИЕ: Сразу обновляем данные в шаблоне и перерисовываем ---
+                    if self.selected_object_id is not None:
+                        self.template['objects'][self.selected_object_id]['data_source'] = dialog.selected_image_name
+                        self._update_properties_panel() # Обновляем панель, чтобы показать новое значение
+                        self._draw_canvas_background() # Перерисовываем холст
 
             ttk.Button(self.data_source_container_frame, text="Выбрать...", command=open_dialog).pack(side=tk.LEFT, padx=(5,0))
 
