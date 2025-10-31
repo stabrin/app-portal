@@ -114,3 +114,5 @@
     # Удаляем ветку на удаленном сервере
     git push origin --delete feature/new-reporting-system
     ```
+
+    .venv\Scripts\Activate.ps1
