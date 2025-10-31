@@ -881,6 +881,17 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             if all_data:
                                 base_test_data[source] = all_data[0][field]
 
+                    # --- НОВЫЙ БЛОК: Загружаем имя изображения, если оно нужно ---
+                    # Ищем, есть ли в макете хотя бы один объект типа 'image'
+                    image_needed = any(obj.get('type') == 'image' for obj in self.template.get('objects', []))
+                    if image_needed:
+                        # Ищем источник данных для первого попавшегося объекта-изображения
+                        image_source = next((obj['data_source'] for obj in self.template['objects'] if obj.get('type') == 'image'), None)
+                        if image_source:
+                             cur.execute("SELECT name FROM ap_images LIMIT 1")
+                             image_record = cur.fetchone()
+                             if image_record: base_test_data[image_source] = image_record['name']
+
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
                     datamatrix_needed = "items.datamatrix" in data_sources
                     datamatrix_codes = []
