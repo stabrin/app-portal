@@ -885,7 +885,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             for item_data in test_data:
                 try:
                     # Передаем оба кэша в генератор
-                    img = self.generate_label_image(self.template, item_data, self.user_info, text_cache, static_layers_cache)
+                    img = PrintingService.generate_label_image(self.template, item_data, self.user_info, text_cache, static_layers_cache)
                     images_to_preview.append(img)
                 except Exception as e_gen:
                     logging.error(f"Ошибка генерации изображения для предпросмотра: {e_gen}")
