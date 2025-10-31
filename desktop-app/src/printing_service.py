@@ -745,6 +745,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.prop_entries["data_source"] = None
         
         # --- НОВЫЙ БЛОК: Поле для источника изображения в композитном объекте ---
+        self.is_custom_text_var = tk.BooleanVar()
+        self.is_custom_text_checkbutton = ttk.Checkbutton(self.properties_frame, text="Произвольный текст", variable=self.is_custom_text_var, command=self._on_toggle_custom_text)
+        self.is_custom_text_checkbutton.pack(anchor=tk.W, padx=5)
+
+
         self.image_source_container_frame = ttk.Frame(self.properties_frame)
         ttk.Label(self.image_source_container_frame, text="Источник картинки:", width=15).pack(side=tk.LEFT)
         self.prop_entries["image_source"] = None
@@ -1263,7 +1268,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             result = cur.fetchone()
                     if result:
                         img = Image.open(io.BytesIO(result[0]))
-                        img.thumbnail((width_px, height_px), Image.Resampling.LANCZOS)
+                        img.thumbnail((int(width_px), int(height_px)), Image.Resampling.LANCZOS)
                         photo = ImageTk.PhotoImage(img)
                         # Сохраняем ссылку, чтобы сборщик мусора не удалил изображение
                         self.canvas.image_references = getattr(self.canvas, 'image_references', {})
@@ -1340,6 +1345,24 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             if self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack_forget()
     def _toggle_tools_panel(self, active: bool) -> None:
+
+    def _on_toggle_custom_text(self):
+        """Обработчик для чекбокса 'Произвольный текст'."""
+        if self.selected_object_id is None:
+            return
+
+        is_custom = self.is_custom_text_var.get()
+        obj_data = self.template['objects'][self.selected_object_id]
+        obj_data['is_custom_text'] = is_custom
+
+        if is_custom:
+            # Если переключились на произвольный текст, ставим заглушку
+            obj_data['data_source'] = "Ваш текст"
+        else:
+            # Если переключились на источник из БД, ставим первый доступный
+            obj_data['data_source'] = self.available_text_sources[0]
+
+        self._update_properties_panel() # Перерисовываем панель свойств
         """Включает/выключает панель инструментов."""
         logging.debug(f"Переключение панели инструментов: {'вкл' if active else 'выкл'}")
         state = "normal" if active else "disabled"
@@ -1375,9 +1398,18 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 widget.destroy()
         self.image_source_container_frame.pack_forget() # Скрываем по умолчанию
 
+        # Скрываем чекбокс по умолчанию
+        self.is_custom_text_checkbutton.pack_forget()
+
         obj_type = obj_data['type']
         current_data_source = obj_data.get('data_source', '')
         data_source_widget = None
+
+        # Показываем чекбокс для текстовых полей и композитного объекта
+        if obj_type in ['text', 'text_with_image']:
+            self.is_custom_text_checkbutton.pack(anchor=tk.W, padx=5)
+            self.is_custom_text_var.set(obj_data.get("is_custom_text", False))
+
 
         if obj_data.get("is_custom_text"):
             data_source_widget = ttk.Entry(self.data_source_container_frame)
@@ -1421,17 +1453,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             data_source_widget.set(current_data_source or values[0] if values else '')
         else:
             # --- НОВЫЙ БЛОК: Обработка свойств для композитного объекта ---
-            if obj_type == 'text_with_image':
-                # --- ИЗМЕНЕНИЕ: Виджет для источника текста теперь зависит от флага is_custom_text ---
-                if obj_data.get("is_custom_text"):
-                    data_source_widget = ttk.Entry(self.data_source_container_frame)
-                    data_source_widget.insert(0, current_data_source)
-                else:
-                    data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
-                    data_source_widget.set(current_data_source or self.available_text_sources[0])
-                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-                # 2. Показываем и настраиваем виджет для источника изображения
+            if obj_type == 'text_with_image': # Эта ветка теперь обрабатывает только изображение
                 self.image_source_container_frame.pack(fill=tk.X, padx=5, pady=2)
                 current_image_source = obj_data.get('image_source', '')
                 
@@ -1452,11 +1474,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                         self._draw_canvas_background()
 
                 ttk.Button(self.image_source_container_frame, text="Выбрать...", command=open_image_dialog_for_composite).pack(side=tk.LEFT, padx=(5,0))
-            # --- КОНЕЦ НОВОГО БЛОКА ---
-
-            data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
-            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            data_source_widget.insert(0, "Неизвестный тип объекта")
+            else:
+                # Для всех остальных неизвестных типов показываем заглушку
+                data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
+                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                data_source_widget.insert(0, "Неизвестный тип объекта")
 
         self.prop_entries["data_source"] = data_source_widget
         logging.debug("Панель свойств обновлена.")
@@ -1471,6 +1493,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             for key, entry in self.prop_entries.items():
                 if key == 'data_source':
                     self.template['objects'][self.selected_object_id][key] = entry.get()
+                    self.template['objects'][self.selected_object_id]['is_custom_text'] = self.is_custom_text_var.get()
                 elif key == 'image_source' and entry: # Проверяем, что виджет существует
                     self.template['objects'][self.selected_object_id][key] = entry.get()
                 else:
