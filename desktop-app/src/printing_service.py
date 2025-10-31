@@ -306,6 +306,58 @@ class PrintingService:
                             font, wrapped_text = text_cache[cache_key]
                         draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
 
+                # --- НОВЫЙ БЛОК: Обработка композитного объекта "Текст с изображением" ---
+                elif obj["type"] == "text_with_image":
+                    logging.debug("Обработка как 'text_with_image'")
+                    
+                    # 1. Получаем данные для текста и изображения
+                    text_data_source = obj.get("data_source")
+                    image_data_source = obj.get("image_source")
+                    
+                    text_content = data.get(text_data_source, f"<{text_data_source}>")
+                    image_name = data.get(image_data_source, f"<{image_data_source}>")
+
+                    # 2. Определяем геометрию
+                    # Предположим, что 30% ширины объекта отводится под изображение
+                    image_area_width = int(width * 0.3)
+                    text_area_width = width - image_area_width
+                    
+                    # Позиция и размер области для изображения (слева)
+                    img_x, img_y = x, y
+                    img_w, img_h = image_area_width, height
+
+                    # Позиция и размер области для текста (справа)
+                    text_x = x + image_area_width
+                    text_y = y
+                    text_w = text_area_width
+                    text_h = height
+
+                    # 3. Рендерим изображение (логика взята из объекта "image")
+                    try:
+                        with PrintingService._get_client_db_connection(user_info) as conn:
+                            with conn.cursor() as cur:
+                                cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
+                                result = cur.fetchone()
+                        if result:
+                            img_obj = Image.open(io.BytesIO(result[0])).convert("RGBA")
+                            img_obj.thumbnail((img_w, img_h), Image.Resampling.LANCZOS)
+                            
+                            # Центрируем изображение по вертикали в его области
+                            paste_y = img_y + (img_h - img_obj.height) // 2
+                            label_image.paste(img_obj, (img_x, paste_y), img_obj)
+                        else:
+                            logging.warning(f"Изображение '{image_name}' не найдено для объекта text_with_image.")
+                    except Exception as e:
+                        logging.error(f"Ошибка при отрисовке встроенного изображения '{image_name}': {e}")
+
+                    # 4. Рендерим текст (логика взята из объекта "text")
+                    # Используем _get_multiline_fitting_font для области текста
+                    font, wrapped_text = PrintingService._get_multiline_fitting_font(
+                        draw, str(text_content), obj.get("font_name", "arial"), text_w, text_h
+                    )
+                    # Рисуем текст в его области
+                    draw.text((text_x, text_y), wrapped_text, fill="black", font=font, anchor="la")
+
                 elif obj["type"] == "image":
                     logging.debug("Обработка как 'image'")
                     image_name = str(obj_data)
@@ -650,6 +702,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         ttk.Button(self.tools_frame, text="Добавить SSCC", command=lambda: self._add_object_to_canvas("SSCC")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить DataMatrix", command=lambda: self._add_object_to_canvas("DataMatrix")).pack(fill=tk.X, pady=2)
         ttk.Button(self.tools_frame, text="Добавить Изображение", command=lambda: self._add_object_to_canvas("image")).pack(fill=tk.X, pady=2)
+        ttk.Button(self.tools_frame, text="Добавить Текст+Картинка", command=lambda: self._add_object_to_canvas("text_with_image")).pack(fill=tk.X, pady=2)
         ttk.Separator(self.tools_frame).pack(fill=tk.X, pady=5)
         ttk.Button(self.tools_frame, text="Удалить выделенное", command=self._delete_selected_object, style="Danger.TButton").pack(fill=tk.X, pady=2)
 
@@ -675,6 +728,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.data_source_container_frame.pack(fill=tk.X, padx=5, pady=2)
         ttk.Label(self.data_source_container_frame, text="Источник данных:", width=15).pack(side=tk.LEFT)
         self.prop_entries["data_source"] = None
+        
+        # --- НОВЫЙ БЛОК: Поле для источника изображения в композитном объекте ---
+        self.image_source_container_frame = ttk.Frame(self.properties_frame)
+        ttk.Label(self.image_source_container_frame, text="Источник картинки:", width=15).pack(side=tk.LEFT)
+        self.prop_entries["image_source"] = None
 
         self.apply_props_button = ttk.Button(self.properties_frame, text="Применить", command=self._apply_properties)
         self.apply_props_button.pack(pady=5)
@@ -1120,7 +1178,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         # --- ИСПРАВЛЕНИЕ: Корректно определяем тип объекта ---
         new_object = {
-            "type": "text" if obj_type in ["text", "custom_text"] else ("image" if obj_type == "image" else "barcode"),
+            "type": "text" if obj_type in ["text", "custom_text"] else ("image" if obj_type == "image" else ("text_with_image" if obj_type == "text_with_image" else "barcode")),
             "x_mm": 10,
             "y_mm": 10,
             "width_mm": 40 if obj_type in ["text", "custom_text"] else 30,
@@ -1136,6 +1194,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             new_object["font_name"] = "Helvetica"
         elif obj_type == "image":
             new_object["data_source"] = "" # По умолчанию источник не выбран
+        elif obj_type == "text_with_image":
+            new_object["data_source"] = self.available_text_sources[0] # Источник для текста
+            new_object["image_source"] = "" # Источник для картинки
+            new_object["font_name"] = "Helvetica"
+            new_object["width_mm"], new_object["height_mm"] = 60, 30 # Увеличим размер по умолчанию
         else:
             new_object["barcode_type"] = obj_type
             if obj_type == "QR":
@@ -1197,6 +1260,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill="lightgreen", outline=outline_color, width=2, tags=(canvas_tag, "object"))
                 self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text="IMG", tags=(canvas_tag, "object_text"))
         else:
+            # --- НОВЫЙ БЛОК: Отрисовка композитного объекта на холсте ---
+            if obj_data.get('type') == 'text_with_image':
+                fill_color = "lightcyan"
+                self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill=fill_color, outline=outline_color, width=2, tags=(canvas_tag, "object"))
+                self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text="Текст+IMG", tags=(canvas_tag, "object_text"))
+                logging.debug(f"Объект ID {object_id} отрисован на холсте.")
             # Этот блок теперь только для штрихкодов
             fill_color = "lightblue"
             display_text = obj_data['barcode_type']
@@ -1246,6 +1315,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             if not self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack(fill=tk.X, pady=10)
         else:
+            # --- НОВЫЙ БЛОК: Также скрываем панель для источника изображения ---
+            if self.image_source_container_frame.winfo_ismapped():
+                self.image_source_container_frame.pack_forget()
+            # --- КОНЕЦ НОВОГО БЛОКА ---
+
             if self.properties_frame.winfo_ismapped():
                 self.properties_frame.pack_forget()
     def _toggle_tools_panel(self, active: bool) -> None:
@@ -1277,6 +1351,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         for widget in self.data_source_container_frame.winfo_children():
             if widget != self.data_source_container_frame.winfo_children()[0]:
                 widget.destroy()
+
+        # --- НОВЫЙ БЛОК: Очищаем виджеты для источника изображения ---
+        for widget in self.image_source_container_frame.winfo_children():
+            if widget != self.image_source_container_frame.winfo_children()[0]:
+                widget.destroy()
+        self.image_source_container_frame.pack_forget() # Скрываем по умолчанию
 
         obj_type = obj_data['type']
         current_data_source = obj_data.get('data_source', '')
@@ -1323,6 +1403,36 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             data_source_widget.set(current_data_source or values[0] if values else '')
         else:
+            # --- НОВЫЙ БЛОК: Обработка свойств для композитного объекта ---
+            if obj_type == 'text_with_image':
+                # 1. Виджет для источника текста
+                data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
+                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                data_source_widget.set(current_data_source or self.available_text_sources[0])
+
+                # 2. Показываем и настраиваем виджет для источника изображения
+                self.image_source_container_frame.pack(fill=tk.X, padx=5, pady=2)
+                current_image_source = obj_data.get('image_source', '')
+                
+                image_source_widget = ttk.Entry(self.image_source_container_frame, state="readonly")
+                image_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                image_source_widget.config(state="normal")
+                image_source_widget.delete(0, tk.END)
+                image_source_widget.insert(0, current_image_source)
+                image_source_widget.config(state="readonly")
+                self.prop_entries["image_source"] = image_source_widget
+
+                def open_image_dialog_for_composite():
+                    dialog = ImageSelectionDialog(self, self.user_info)
+                    self.wait_window(dialog)
+                    if dialog.selected_image_name and self.selected_object_id is not None:
+                        self.template['objects'][self.selected_object_id]['image_source'] = dialog.selected_image_name
+                        self._update_properties_panel()
+                        self._draw_canvas_background()
+
+                ttk.Button(self.image_source_container_frame, text="Выбрать...", command=open_image_dialog_for_composite).pack(side=tk.LEFT, padx=(5,0))
+            # --- КОНЕЦ НОВОГО БЛОКА ---
+
             data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             data_source_widget.insert(0, "Неизвестный тип объекта")
@@ -1339,6 +1449,8 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         try:
             for key, entry in self.prop_entries.items():
                 if key == 'data_source':
+                    self.template['objects'][self.selected_object_id][key] = entry.get()
+                elif key == 'image_source' and entry: # Проверяем, что виджет существует
                     self.template['objects'][self.selected_object_id][key] = entry.get()
                 else:
                     value = float(entry.get())
