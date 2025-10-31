@@ -890,9 +890,22 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 except Exception as e_gen:
                     logging.error(f"Ошибка генерации изображения для предпросмотра: {e_gen}")
 
-            # Открываем диалог предпросмотра с уже сгенерированными изображениями
-            from .admin_ui import PrintWorkplaceLabelsDialog
-            PrintWorkplaceLabelsDialog(self, self.user_info, f"Предпросмотр: {self.template['name']}", test_data, preselected_layout=self.template['name'], pregenerated_images=images_to_preview)
+            if not images_to_preview:
+                messagebox.showwarning("Внимание", "Не удалось сгенерировать изображения для предпросмотра.", parent=self)
+                return
+
+            # --- ИСПРАВЛЕНИЕ: Открываем окно предпросмотра напрямую, минуя диалог печати ---
+            from .admin_ui import PreviewLabelsDialog
+
+            # Создаем "пустые" callback-функции, так как печать из этого окна не требуется
+            def print_all_dummy():
+                messagebox.showinfo("Информация", "Печать всех этикеток запускается из диалога 'Тестовая печать'.", parent=self)
+
+            def print_current_dummy(index):
+                messagebox.showinfo("Информация", "Печать одной этикетки запускается из диалога 'Тестовая печать'.", parent=self)
+
+            # Открываем окно предпросмотра напрямую
+            PreviewLabelsDialog(self, images_to_preview, print_all_dummy, print_current_dummy)
 
         except Exception as e:
             logging.error(f"Ошибка при создании предпросмотра: {e}", exc_info=True)
