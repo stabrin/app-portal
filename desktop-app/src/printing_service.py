@@ -965,23 +965,16 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             if all_data:
                                 base_test_data[source] = all_data[0][field]
 
-                    # --- ИСПРАВЛЕНИЕ: Загружаем имя изображения для всех объектов, использующих изображения ---
-                    all_image_sources_in_template = set()
+                    # --- ИСПРАВЛЕНИЕ: Корректно обрабатываем имена изображений, указанные в макете ---
+                    # Вместо загрузки случайного изображения, мы напрямую используем то, что указано в объекте.
+                    # Это гарантирует, что в предпросмотре будет именно выбранная картинка.
                     for obj in self.template.get('objects', []):
-                        if obj.get('type') == 'image' and 'data_source' in obj:
-                            all_image_sources_in_template.add(obj['data_source'])
-                        elif obj.get('type') == 'text_with_image' and 'image_source' in obj:
-                            all_image_sources_in_template.add(obj['image_source'])
-
-                    if all_image_sources_in_template:
-                        # Пытаемся найти одно реальное имя изображения из БД
-                        cur.execute("SELECT name FROM ap_images LIMIT 1")
-                        image_record = cur.fetchone()
-                        if image_record:
-                            real_image_name = image_record['name']
-                            # Присваиваем это реальное имя изображения всем источникам изображений, найденным в шаблоне
-                            for img_src_key in all_image_sources_in_template:
-                                base_test_data[img_src_key] = real_image_name
+                        if obj.get('type') == 'image':
+                            image_source_key = obj.get('data_source')
+                            if image_source_key: base_test_data[image_source_key] = image_source_key
+                        elif obj.get('type') == 'text_with_image':
+                            image_source_key = obj.get('image_source')
+                            if image_source_key: base_test_data[image_source_key] = image_source_key
 
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
                     datamatrix_needed = "items.datamatrix" in data_sources
