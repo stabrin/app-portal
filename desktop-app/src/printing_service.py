@@ -305,6 +305,17 @@ class PrintingService:
                             logging.debug("Использование кэшированного произвольного текста.")
                             font, wrapped_text = text_cache[cache_key]
                         draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
+                    else:
+                        # Старая логика для текста из БД
+                        cache_key = (str(obj_data), width, height)
+                        if cache_key not in text_cache:
+                            logging.debug(f"Кэширование текста из БД: '{str(obj_data)[:30]}...'")
+                            font, wrapped_text = PrintingService._get_multiline_fitting_font(draw, str(obj_data), obj.get("font_name", "arial"), width, height)
+                            text_cache[cache_key] = (font, wrapped_text)
+                        else:
+                            logging.debug("Использование кэшированного текста из БД.")
+                            font, wrapped_text = text_cache[cache_key]
+                        draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
 
                 # --- НОВЫЙ БЛОК: Обработка композитного объекта "Текст с изображением" ---
                 elif obj["type"] == "text_with_image":
@@ -314,7 +325,11 @@ class PrintingService:
                     text_data_source = obj.get("data_source")
                     image_data_source = obj.get("image_source")
                     
-                    text_content = data.get(text_data_source, f"<{text_data_source}>")
+                    # --- ИЗМЕНЕНИЕ: Текст теперь может быть произвольным ---
+                    if obj.get("is_custom_text"):
+                        text_content = text_data_source # Данные - это сам текст
+                    else:
+                        text_content = data.get(text_data_source, f"<{text_data_source}>")
                     image_name = data.get(image_data_source, f"<{image_data_source}>")
 
                     # 2. Определяем геометрию
@@ -1195,7 +1210,9 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         elif obj_type == "image":
             new_object["data_source"] = "" # По умолчанию источник не выбран
         elif obj_type == "text_with_image":
-            new_object["data_source"] = self.available_text_sources[0] # Источник для текста
+            # --- ИЗМЕНЕНИЕ: Текстовая часть теперь по умолчанию произвольная ---
+            new_object["is_custom_text"] = True
+            new_object["data_source"] = "Ваш текст" # Источник для текста - сам текст
             new_object["image_source"] = "" # Источник для картинки
             new_object["font_name"] = "Helvetica"
             new_object["width_mm"], new_object["height_mm"] = 60, 30 # Увеличим размер по умолчанию
@@ -1405,10 +1422,14 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         else:
             # --- НОВЫЙ БЛОК: Обработка свойств для композитного объекта ---
             if obj_type == 'text_with_image':
-                # 1. Виджет для источника текста
-                data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
+                # --- ИЗМЕНЕНИЕ: Виджет для источника текста теперь зависит от флага is_custom_text ---
+                if obj_data.get("is_custom_text"):
+                    data_source_widget = ttk.Entry(self.data_source_container_frame)
+                    data_source_widget.insert(0, current_data_source)
+                else:
+                    data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
+                    data_source_widget.set(current_data_source or self.available_text_sources[0])
                 data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                data_source_widget.set(current_data_source or self.available_text_sources[0])
 
                 # 2. Показываем и настраиваем виджет для источника изображения
                 self.image_source_container_frame.pack(fill=tk.X, padx=5, pady=2)
