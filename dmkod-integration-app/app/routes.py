@@ -409,7 +409,13 @@ def create_integration():
                                 order_id,
                                 str(row.get('gtin', '')),
                                 int(row.get('dm_quantity', 0)),
-                                int(pd.to_numeric(row.get('aggregation_level'), errors='coerce', downcast='integer').fillna(0)),
+                                # --- ИСПРАВЛЕННАЯ ЛОГИКА ---
+                                # Сначала преобразуем в число, обрабатывая ошибки. Результатом может быть float или NaN.
+                                # Затем используем fillna, если это необходимо (если результат - Series/NaN).
+                                # И только потом преобразуем в int.
+                                int(pd.to_numeric(row.get('aggregation_level'), errors='coerce') or 0),
+                                # Старый код: int(pd.to_numeric(row.get('aggregation_level'), errors='coerce', downcast='integer').fillna(0)),
+                                # --------------------------
                                 None if pd.isna(prod_date) else prod_date.date(),
                                 None if pd.isna(exp_date) else exp_date.date()
                             ))
