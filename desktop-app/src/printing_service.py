@@ -228,12 +228,17 @@ class PrintingService:
         
         return font # Возвращаем самый маленький из попробованных, если ничего не подошло
     @staticmethod
-    def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], text_cache: Optional[Dict] = None) -> Optional[Image.Image]:
+    def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], text_cache: Optional[Dict] = None, static_layers_cache: Optional[Dict] = None) -> Optional[Image.Image]:
         """Генерирует изображение этикетки с помощью Pillow."""
         logging.info("Начало генерации изображения этикетки.")
         if not all([Image, ImageDraw, ImageFont]):
             logging.error("Pillow не установлен. Генерация изображения невозможна.")
             raise ImportError("Библиотека Pillow не установлена.")
+
+        # --- НОВЫЙ БЛОК: Инициализация кэшей ---
+        if text_cache is None: text_cache = {}
+        if static_layers_cache is None: static_layers_cache = {}
+        # --- КОНЕЦ НОВОГО БЛОКА ---
 
         try:
             # Проверяем обязательные параметры шаблона
@@ -247,12 +252,9 @@ class PrintingService:
             height_px = int(template_json["height_mm"] * dots_per_mm)
             logging.debug(f"Размеры этикетки: {width_px}x{height_px} пикселей (DPI={DPI})")
 
-            # --- ИСПРАВЛЕНИЕ: Используем переданный кэш или создаем новый, если он не передан ---
-            if text_cache is None:
-                text_cache = {}
-
             label_image = Image.new('RGB', (width_px, height_px), 'white')
             draw = ImageDraw.Draw(label_image)
+            static_layer_drawn = False
 
             for obj in template_json.get("objects", []):
                 logging.info(f"Обработка объекта: тип='{obj.get('type')}', источник='{obj.get('data_source')}'")
@@ -264,8 +266,26 @@ class PrintingService:
                     logging.warning(f"Пропуск объекта: отсутствуют поля {missing_fields}.")
                     continue
 
-                # --- НОВАЯ ЛОГИКА: Обработка произвольного текста ---
-                if obj.get("is_custom_text"):
+                # --- НОВАЯ ЛОГИКА: Определяем, является ли объект статичным ---
+                is_static = False
+                if obj.get("type") == "text" and obj.get("is_custom_text"):
+                    is_static = True
+                elif obj.get("type") == "text_with_image":
+                    is_static = True # Текст произвольный, картинка выбирается в редакторе
+                elif obj.get("type") == "image":
+                    # Изображение статично, если его источник не является полем из БД
+                    # (т.е. это просто имя файла, выбранное в редакторе)
+                    is_static = '.' not in obj.get('data_source', '')
+
+                if is_static:
+                    # Если объект статичный, пытаемся взять его из кэша слоев
+                    obj_json_str = json.dumps(obj, sort_keys=True)
+                    if obj_json_str in static_layers_cache:
+                        cached_layer = static_layers_cache[obj_json_str]
+                        label_image.paste(cached_layer, (0, 0), cached_layer)
+                        continue # Переходим к следующему объекту
+
+                if obj.get("is_custom_text") or (obj.get("type") == "text_with_image"):
                     obj_data = obj.get("data_source") # Для произвольного текста данные хранятся прямо в шаблоне
                 else:
                     obj_data = data.get(obj["data_source"])
@@ -290,6 +310,13 @@ class PrintingService:
                     logging.error(f"Ошибка преобразования координат для объекта: {e}")
                     continue
 
+                # --- НОВАЯ ЛОГИКА: Рисуем на временном слое, если объект статичный ---
+                target_draw = draw
+                temp_layer = None
+                if is_static:
+                    temp_layer = Image.new('RGBA', (width_px, height_px), (0,0,0,0))
+                    target_draw = ImageDraw.Draw(temp_layer)
+
                 if obj["type"] == "text":
                     logging.debug("Обработка как 'text'")
                     # --- НОВАЯ ЛОГИКА: Используем кэш для произвольного текста ---
@@ -304,7 +331,7 @@ class PrintingService:
                             # Если в кэше есть, берем готовый результат
                             logging.debug("Использование кэшированного произвольного текста.")
                             font, wrapped_text = text_cache[cache_key]
-                        draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
+                        target_draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
                     else:
                         # Старая логика для текста из БД
                         cache_key = (str(obj_data), width, height)
@@ -325,11 +352,8 @@ class PrintingService:
                     text_data_source = obj.get("data_source")
                     image_data_source = obj.get("image_source")
                     
-                    # --- ИЗМЕНЕНИЕ: Текст теперь может быть произвольным ---
-                    if obj.get("is_custom_text"):
-                        text_content = text_data_source # Данные - это сам текст
-                    else:
-                        text_content = data.get(text_data_source, f"<{text_data_source}>")
+                    # Текст всегда произвольный для этого объекта
+                    text_content = text_data_source
                     image_name = data.get(image_data_source, f"<{image_data_source}>")
 
                     # 2. Определяем геометрию
@@ -359,7 +383,7 @@ class PrintingService:
                             
                             # Центрируем изображение по вертикали в его области
                             paste_y = img_y + (img_h - img_obj.height) // 2
-                            label_image.paste(img_obj, (img_x, paste_y), img_obj)
+                            temp_layer.paste(img_obj, (img_x, paste_y), img_obj)
                         else:
                             logging.warning(f"Изображение '{image_name}' не найдено для объекта text_with_image.")
                     except Exception as e:
@@ -371,7 +395,7 @@ class PrintingService:
                         draw, str(text_content), obj.get("font_name", "arial"), text_w, text_h
                     )
                     # Рисуем текст в его области
-                    draw.text((text_x, text_y), wrapped_text, fill="black", font=font, anchor="la")
+                    target_draw.text((text_x, text_y), wrapped_text, fill="black", font=font, anchor="la")
 
                 elif obj["type"] == "image":
                     logging.debug("Обработка как 'image'")
@@ -388,7 +412,7 @@ class PrintingService:
                             # --- УЛУЧШЕНИЕ: Используем thumbnail для сохранения пропорций ---
                             # Это предотвратит искажение изображения, если его пропорции не совпадают с объектом.
                             img_obj.thumbnail((width, height), Image.Resampling.LANCZOS)
-                            label_image.paste(img_obj, (x, y), img_obj if img_obj.mode == 'RGBA' else None)
+                            target_draw.paste(img_obj, (x, y), img_obj if img_obj.mode == 'RGBA' else None)
                         else:
                             logging.warning(f"Изображение с именем '{image_name}' не найдено в БД.")
                     except Exception as e:
@@ -439,6 +463,12 @@ class PrintingService:
                         logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
                         draw.rectangle([x, y, x + width, y + height], outline="red", fill="white")
                         draw.text((x + 5, y + 5), f"Unsupported:\n{barcode_type}", fill="red")
+
+                # --- НОВАЯ ЛОГИКА: Сохраняем статичный слой в кэш и накладываем его ---
+                if is_static and temp_layer:
+                    obj_json_str = json.dumps(obj, sort_keys=True)
+                    static_layers_cache[obj_json_str] = temp_layer
+                    label_image.paste(temp_layer, (0, 0), temp_layer)
             
             logging.info("Изображение этикетки успешно сгенерировано.")
             return label_image.convert('1') # Принудительно возвращаем Ч/Б изображение
@@ -560,10 +590,11 @@ class PrintingService:
     def print_labels_for_items(printer_name: str, paper_name: str, template_json: Dict[str, Any], items_data: list, user_info: Dict[str, Any]) -> None:
         """Печатает этикетки для списка элементов."""
         # --- ИЗМЕНЕНИЕ: Этот метод теперь генерирует изображения и передает их в новый метод печати ---
+        # --- НОВЫЙ БЛОК: Создаем кэши для этой пачки ---
         images_to_print = []
-        text_cache = {} # Создаем кэш для этой пачки
+        text_cache, static_layers_cache = {}, {}
         for i, item_data in enumerate(items_data, 1):
-            img = PrintingService.generate_label_image(template_json, item_data, user_info, text_cache)
+            img = PrintingService.generate_label_image(template_json, item_data, user_info, text_cache, static_layers_cache)
             if img:
                 images_to_print.append(img)
         
@@ -849,11 +880,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 return
 
             # --- ИСПРАВЛЕНИЕ: Создаем кэш для текстовых объектов здесь, чтобы он не пересчитывался для каждой этикетки в предпросмотре ---
-            text_cache = {}
+            text_cache, static_layers_cache = {}, {}
             images_to_preview = []
             for item_data in test_data:
                 try:
-                    img = self.generate_label_image(self.template, item_data, self.user_info, text_cache)
+                    # Передаем оба кэша в генератор
+                    img = self.generate_label_image(self.template, item_data, self.user_info, text_cache, static_layers_cache)
                     images_to_preview.append(img)
                 except Exception as e_gen:
                     logging.error(f"Ошибка генерации изображения для предпросмотра: {e_gen}")
