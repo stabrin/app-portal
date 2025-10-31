@@ -763,7 +763,13 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         self.canvas = tk.Canvas(canvas_frame, bg="lightgrey")
         ttk.Button(controls_frame, text="Загрузить изображение...", command=self._upload_image).pack(fill=tk.X, pady=(10, 2))
         self.canvas.pack(fill=tk.BOTH, expand=True)
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        # --- ИЗМЕНЕНИЕ: Добавляем обработчики для перемещения и изменения размера ---
+        self.canvas.bind("<Button-1>", self._on_mouse_down)
+        self.canvas.bind("<B1-Motion>", self._on_mouse_drag)
+        self.canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
+        self.canvas.bind("<Motion>", self._on_mouse_move)
+        self.drag_data = {"x": 0, "y": 0, "item": None, "mode": None}
+        self.resize_handles = {}
 
     def _upload_image(self):
         """Открывает диалог для загрузки изображения и сохранения его в БД."""
@@ -1294,6 +1300,10 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             self.canvas.create_rectangle(x_px, y_px, x_px + width_px, y_px + height_px, fill=fill_color, outline=outline_color, width=2, tags=(canvas_tag, "object"))
             self.canvas.create_text(x_px + width_px / 2, y_px + height_px / 2, text=display_text, tags=(canvas_tag, "object_text"))
 
+        # --- НОВЫЙ БЛОК: Рисуем маркеры изменения размера для выделенного объекта ---
+        if object_id == self.selected_object_id:
+            self._draw_resize_handles(x_px, y_px, width_px, height_px)
+
         logging.debug(f"Объект ID {object_id} отрисован на холсте.")
 
     def _on_canvas_click(self, event: tk.Event) -> None:
@@ -1313,6 +1323,112 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                 except (ValueError, IndexError):
                     continue
         self._select_object(None)
+
+    def _draw_resize_handles(self, x, y, w, h):
+        """Рисует маркеры изменения размера вокруг объекта."""
+        self.resize_handles.clear()
+        handle_size = 8
+        positions = {
+            "nw": (x, y), "n": (x + w/2, y), "ne": (x + w, y),
+            "w": (x, y + h/2), "e": (x + w, y + h/2),
+            "sw": (x, y + h), "s": (x + w/2, y + h), "se": (x + w, y + h)
+        }
+        for cursor, (px, py) in positions.items():
+            handle_id = self.canvas.create_rectangle(
+                px - handle_size/2, py - handle_size/2,
+                px + handle_size/2, py + handle_size/2,
+                fill="blue", outline="white", tags="resize_handle"
+            )
+            self.resize_handles[handle_id] = cursor
+
+    def _on_mouse_down(self, event: tk.Event):
+        """Обрабатывает нажатие кнопки мыши."""
+        clicked_items = self.canvas.find_withtag(tk.CURRENT)
+        self.drag_data["x"], self.drag_data["y"] = event.x, event.y
+
+        if not clicked_items:
+            self._select_object(None)
+            return
+
+        item_id = clicked_items[0]
+        tags = self.canvas.gettags(item_id)
+
+        if "resize_handle" in tags:
+            self.drag_data["item"] = self.selected_object_id
+            self.drag_data["mode"] = self.resize_handles.get(item_id)
+        elif "object" in tags or "object_outline" in tags:
+            for tag in tags:
+                if tag.startswith("obj_"):
+                    object_id = int(tag.split("_")[1])
+                    self._select_object(object_id)
+                    self.drag_data["item"] = object_id
+                    self.drag_data["mode"] = "move"
+                    return
+        else:
+            self._select_object(None)
+
+    def _on_mouse_drag(self, event: tk.Event):
+        """Обрабатывает перемещение мыши с зажатой кнопкой."""
+        if not self.drag_data["mode"] or self.drag_data["item"] is None:
+            return
+
+        dx = (event.x - self.drag_data["x"]) / self.canvas_scale
+        dy = (event.y - self.drag_data["y"]) / self.canvas_scale
+
+        obj = self.template["objects"][self.drag_data["item"]]
+
+        if self.drag_data["mode"] == "move":
+            obj["x_mm"] += dx
+            obj["y_mm"] += dy
+        else: # Режим изменения размера
+            mode = self.drag_data["mode"]
+            if 'n' in mode:
+                obj["y_mm"] += dy
+                obj["height_mm"] -= dy
+            if 's' in mode:
+                obj["height_mm"] += dy
+            if 'w' in mode:
+                obj["x_mm"] += dx
+                obj["width_mm"] -= dx
+            if 'e' in mode:
+                obj["width_mm"] += dx
+
+        # Предотвращаем отрицательные размеры
+        if obj["width_mm"] < 1: obj["width_mm"] = 1
+        if obj["height_mm"] < 1: obj["height_mm"] = 1
+
+        self.drag_data["x"], self.drag_data["y"] = event.x, event.y
+        self._draw_canvas_background()
+
+    def _on_mouse_up(self, event: tk.Event):
+        """Обрабатывает отпускание кнопки мыши."""
+        if self.drag_data["item"] is not None:
+            self._update_properties_panel() # Обновляем панель свойств после изменения
+        self.drag_data = {"x": 0, "y": 0, "item": None, "mode": None}
+
+    def _on_mouse_move(self, event: tk.Event):
+        """Изменяет курсор при наведении на маркеры."""
+        clicked_items = self.canvas.find_withtag(tk.CURRENT)
+        if clicked_items:
+            item_id = clicked_items[0]
+            tags = self.canvas.gettags(item_id)
+            if "resize_handle" in tags:
+                cursor_name = self.resize_handles.get(item_id)
+                # Словарь соответствия направлений и курсоров
+                cursor_map = {
+                    "n": "sb_v_double_arrow", "s": "sb_v_double_arrow",
+                    "e": "sb_h_double_arrow", "w": "sb_h_double_arrow",
+                    "nw": "size_nw_se", "se": "size_nw_se",
+                    "ne": "size_ne_sw", "sw": "size_ne_sw"
+                }
+                self.canvas.config(cursor=cursor_map.get(cursor_name, "arrow"))
+                return
+            elif "object" in tags or "object_outline" in tags:
+                self.canvas.config(cursor="fleur")
+                return
+
+        self.canvas.config(cursor="arrow")
+
 
     def _select_object(self, object_id: Optional[int]) -> None:
         """Выделяет объект и обновляет UI."""
@@ -1405,41 +1521,24 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
         current_data_source = obj_data.get('data_source', '')
         data_source_widget = None
 
-        # Показываем чекбокс для текстовых полей и композитного объекта
-        if obj_type in ['text', 'text_with_image']:
+        # Показываем чекбокс только для обычных текстовых полей
+        if obj_type == 'text':
             self.is_custom_text_checkbutton.pack(anchor=tk.W, padx=5)
             self.is_custom_text_var.set(obj_data.get("is_custom_text", False))
-
-
-        if obj_data.get("is_custom_text"):
-            data_source_widget = ttk.Entry(self.data_source_container_frame)
+        
+        if obj_type == 'text':
+            if obj_data.get("is_custom_text"):
+                data_source_widget = ttk.Entry(self.data_source_container_frame)
+                data_source_widget.insert(0, current_data_source)
+            else:
+                data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
+                data_source_widget.set(current_data_source or self.available_text_sources[0])
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            data_source_widget.insert(0, current_data_source)
-        elif obj_type == 'text':
+
+        elif obj_type == 'image':
             data_source_widget = ttk.Combobox(self.data_source_container_frame, values=self.available_text_sources, state="readonly")
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             data_source_widget.set(current_data_source or self.available_text_sources[0])
-
-        elif obj_type == 'image':
-            # --- НОВАЯ ЛОГИКА: Кнопка для вызова диалога выбора изображения ---
-            data_source_widget = ttk.Entry(self.data_source_container_frame, state="readonly")
-            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-            data_source_widget.config(state="normal")
-            data_source_widget.delete(0, tk.END)
-            data_source_widget.insert(0, current_data_source)
-            data_source_widget.config(state="readonly")
-
-            def open_dialog():
-                dialog = ImageSelectionDialog(self, self.user_info)
-                self.wait_window(dialog) # Ждем закрытия диалога
-                if dialog.selected_image_name:
-                    # --- ИСПРАВЛЕНИЕ: Сразу обновляем данные в шаблоне и перерисовываем ---
-                    if self.selected_object_id is not None:
-                        self.template['objects'][self.selected_object_id]['data_source'] = dialog.selected_image_name
-                        self._update_properties_panel() # Обновляем панель, чтобы показать новое значение
-                        self._draw_canvas_background() # Перерисовываем холст
-
-            ttk.Button(self.data_source_container_frame, text="Выбрать...", command=open_dialog).pack(side=tk.LEFT, padx=(5,0))
 
         elif obj_type == 'barcode':
             barcode_type = obj_data.get('barcode_type', '').upper()
@@ -1451,34 +1550,39 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             data_source_widget = ttk.Combobox(self.data_source_container_frame, values=values, state="readonly")
             data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
             data_source_widget.set(current_data_source or values[0] if values else '')
+        
+        elif obj_type == 'text_with_image':
+            # 1. Поле для ввода текста (всегда Entry)
+            data_source_widget = ttk.Entry(self.data_source_container_frame)
+            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            data_source_widget.insert(0, current_data_source)
+
+            # 2. Поле для выбора изображения
+            self.image_source_container_frame.pack(fill=tk.X, padx=5, pady=2)
+            current_image_source = obj_data.get('image_source', '')
+            
+            image_source_widget = ttk.Entry(self.image_source_container_frame, state="readonly")
+            image_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            image_source_widget.config(state="normal")
+            image_source_widget.delete(0, tk.END)
+            image_source_widget.insert(0, current_image_source)
+            image_source_widget.config(state="readonly")
+            self.prop_entries["image_source"] = image_source_widget
+
+            def open_image_dialog_for_composite():
+                dialog = ImageSelectionDialog(self, self.user_info)
+                self.wait_window(dialog)
+                if dialog.selected_image_name and self.selected_object_id is not None:
+                    self.template['objects'][self.selected_object_id]['image_source'] = dialog.selected_image_name
+                    self._update_properties_panel()
+                    self._draw_canvas_background()
+
+            ttk.Button(self.image_source_container_frame, text="Выбрать...", command=open_image_dialog_for_composite).pack(side=tk.LEFT, padx=(5,0))
+
         else:
-            # --- НОВЫЙ БЛОК: Обработка свойств для композитного объекта ---
-            if obj_type == 'text_with_image': # Эта ветка теперь обрабатывает только изображение
-                self.image_source_container_frame.pack(fill=tk.X, padx=5, pady=2)
-                current_image_source = obj_data.get('image_source', '')
-                
-                image_source_widget = ttk.Entry(self.image_source_container_frame, state="readonly")
-                image_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                image_source_widget.config(state="normal")
-                image_source_widget.delete(0, tk.END)
-                image_source_widget.insert(0, current_image_source)
-                image_source_widget.config(state="readonly")
-                self.prop_entries["image_source"] = image_source_widget
-
-                def open_image_dialog_for_composite():
-                    dialog = ImageSelectionDialog(self, self.user_info)
-                    self.wait_window(dialog)
-                    if dialog.selected_image_name and self.selected_object_id is not None:
-                        self.template['objects'][self.selected_object_id]['image_source'] = dialog.selected_image_name
-                        self._update_properties_panel()
-                        self._draw_canvas_background()
-
-                ttk.Button(self.image_source_container_frame, text="Выбрать...", command=open_image_dialog_for_composite).pack(side=tk.LEFT, padx=(5,0))
-            else:
-                # Для всех остальных неизвестных типов показываем заглушку
-                data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
-                data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
-                data_source_widget.insert(0, "Неизвестный тип объекта")
+            data_source_widget = ttk.Entry(self.data_source_container_frame, state="disabled")
+            data_source_widget.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            data_source_widget.insert(0, "Неизвестный тип объекта")
 
         self.prop_entries["data_source"] = data_source_widget
         logging.debug("Панель свойств обновлена.")
@@ -1491,14 +1595,17 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
         try:
             for key, entry in self.prop_entries.items():
+                if not entry: continue # Пропускаем пустые виджеты (например, image_source)
+
                 if key == 'data_source':
                     self.template['objects'][self.selected_object_id][key] = entry.get()
-                    self.template['objects'][self.selected_object_id]['is_custom_text'] = self.is_custom_text_var.get()
+                    if self.template['objects'][self.selected_object_id]['type'] == 'text':
+                        self.template['objects'][self.selected_object_id]['is_custom_text'] = self.is_custom_text_var.get()
                 elif key == 'image_source' and entry: # Проверяем, что виджет существует
                     self.template['objects'][self.selected_object_id][key] = entry.get()
                 else:
                     value = float(entry.get())
-                    self.template['objects'][self.selected_object_id][key] = value
+                    self.template['objects'][self.selected_object_id][key] = round(value, 2)
             self._draw_canvas_background()
             logging.info(f"Свойства объекта ID {self.selected_object_id} обновлены.")
         except ValueError:
