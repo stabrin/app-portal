@@ -965,16 +965,23 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             if all_data:
                                 base_test_data[source] = all_data[0][field]
 
-                    # --- НОВЫЙ БЛОК: Загружаем имя изображения, если оно нужно ---
-                    # Ищем, есть ли в макете хотя бы один объект типа 'image'
-                    image_needed = any(obj.get('type') == 'image' for obj in self.template.get('objects', []))
-                    if image_needed:
-                        # Ищем источник данных для первого попавшегося объекта-изображения
-                        image_source = next((obj['data_source'] for obj in self.template['objects'] if obj.get('type') == 'image'), None)
-                        if image_source:
-                             cur.execute("SELECT name FROM ap_images LIMIT 1")
-                             image_record = cur.fetchone()
-                             if image_record: base_test_data[image_source] = image_record['name']
+                    # --- ИСПРАВЛЕНИЕ: Загружаем имя изображения для всех объектов, использующих изображения ---
+                    all_image_sources_in_template = set()
+                    for obj in self.template.get('objects', []):
+                        if obj.get('type') == 'image' and 'data_source' in obj:
+                            all_image_sources_in_template.add(obj['data_source'])
+                        elif obj.get('type') == 'text_with_image' and 'image_source' in obj:
+                            all_image_sources_in_template.add(obj['image_source'])
+
+                    if all_image_sources_in_template:
+                        # Пытаемся найти одно реальное имя изображения из БД
+                        cur.execute("SELECT name FROM ap_images LIMIT 1")
+                        image_record = cur.fetchone()
+                        if image_record:
+                            real_image_name = image_record['name']
+                            # Присваиваем это реальное имя изображения всем источникам изображений, найденным в шаблоне
+                            for img_src_key in all_image_sources_in_template:
+                                base_test_data[img_src_key] = real_image_name
 
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
                     datamatrix_needed = "items.datamatrix" in data_sources
