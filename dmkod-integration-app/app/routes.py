@@ -1500,19 +1500,22 @@ def integration_panel():
                     try:
                         conn_local = get_db_connection()
                         with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
-                            # 1. Получаем все необработанные записи из delta_result
+                            # 1. Получаем все необработанные записи из delta_result, где еще не был получен ID загрузки
                             cur.execute(
-                                "SELECT id, codes_json FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NULL",
+                                "SELECT id, printrun_id, codes_json FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NULL",
                                 (selected_order_id,)
                             )
                             results_to_process = cur.fetchall()
 
                         if not results_to_process:
-                            flash("Нет новых данных от 'Дельта' для подготовки сведений.", 'info')
+                            # --- ИЗМЕНЕНО: Проверяем, есть ли вообще записи. Если есть, но все обработаны - это успех. ---
+                            with conn_local.cursor() as cur:
+                                cur.execute("SELECT EXISTS (SELECT 1 FROM delta_result WHERE order_id = %s)", (selected_order_id,))
+                                has_any_results = cur.fetchone()[0]
+                            flash("Все ранее загруженные сведения от 'Дельта' уже подготовлены и отправлены в API." if has_any_results else "Нет данных от 'Дельта' для подготовки сведений.", 'info')
                             return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
                         api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
-                        full_url = f"{api_base_url}/psp/utilisation/upload"
                         headers = {'Authorization': f'Bearer {access_token}'}
                         user_logs.append(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки.")
                         
@@ -1520,8 +1523,12 @@ def integration_panel():
                         with conn_local.cursor() as cur:
                             for i, result in enumerate(results_to_process):
                                 payload = result['codes_json'] # JSON уже готов
-                                user_logs.append(f"--- {i+1}/{len(results_to_process)}: Отправка данных для записи ID {result['id']} ---")
+                                user_logs.append(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {result['printrun_id']} (запись #{result['id']}) ---")
                                 
+                                # --- ИЗМЕНЕНО: URL зависит от наличия атрибутов ---
+                                # Если в JSON есть ключ 'attributes', используем /psp/utilisation/upload, иначе /psp/utilisation/upload/include
+                                full_url = f"{api_base_url}/psp/utilisation/upload" if 'attributes' in payload else f"{api_base_url}/psp/utilisation/upload/include"
+
                                 response = requests.post(full_url, headers=headers, json=payload, timeout=120)
                                 user_logs.append(f"  Статус ответа: {response.status_code}")
                                 response.raise_for_status()
@@ -1563,23 +1570,26 @@ def integration_panel():
                 try:
                     conn_local = get_db_connection()
                     with conn_local.cursor(cursor_factory=RealDictCursor) as cur:
-                        # Получаем все необходимые данные одним запросом, объединяя таблицы
+                        # --- ИЗМЕНЕНО: Выбираем только те строки, где сведения еще не были подготовлены (utilisation_upload_id IS NULL) ---
                         cur.execute(
                             """
                             SELECT 
                                 d.api_id, d.gtin, d.production_date, d.expiry_date,
-                                o.fias_code
+                                o.fias_code,
+                                d.id as detail_id
                             FROM dmkod_aggregation_details d
                             JOIN orders o ON d.order_id = o.id
-                            WHERE d.order_id = %s AND d.api_id IS NOT NULL 
+                            WHERE d.order_id = %s AND d.api_id IS NOT NULL AND d.utilisation_upload_id IS NULL
                             ORDER BY d.id
                             """,
                             (selected_order_id,)
                         )
                         details_to_process = cur.fetchall()
 
+                    # --- ИЗМЕНЕНО: Сообщение пользователю, если все уже обработано ---
                     if not details_to_process:
-                        raise Exception("Не найдено позиций с ID тиража (api_id) для обработки.")
+                        flash("Все сведения для данного заказа уже были подготовлены и отправлены в API.", 'info')
+                        return redirect(url_for('.integration_panel', order_id=selected_order_id))
 
                     api_base_url = os.getenv('API_BASE_URL', '').rstrip('/')
                     full_url = f"{api_base_url}/psp/utilisation/upload"
@@ -1587,41 +1597,53 @@ def integration_panel():
                     
                     user_logs.append(f"Найдено {len(details_to_process)} позиций для подготовки сведений.")
 
-                    for i, detail in enumerate(details_to_process):
-                        attributes = {}
-                        if detail.get('production_date'):
-                            attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
-                        if detail.get('expiry_date'):
-                            attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
-                        if detail.get('fias_code'):
-                            attributes['fias_id'] = detail['fias_code']
-
-                        payload = {"all_from_printrun": detail['api_id']}
-                        if attributes:
-                            payload['attributes'] = attributes
-
-                        user_logs.append(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
-                        
-                        # РЕКОМЕНДАЦИЯ: Запускайте Gunicorn с увеличенным таймаутом, например:
-                        # gunicorn --workers 3 --timeout 300 'app:create_app()'
-                        # Увеличиваем таймаут для одного запроса, чтобы дать API больше времени на обработку.
-                        response = requests.post(full_url, headers=headers, json=payload, timeout=240)
-                        
-                        user_logs.append(f"  URL: {full_url}")
-                        user_logs.append(f"  Тело: {json.dumps(payload)}")
-                        user_logs.append(f"  Статус ответа: {response.status_code}")
-                        
-                        response.raise_for_status()
-
-                    # Обновляем статус заказа в нашей БД
+                    # --- ИЗМЕНЕНО: Оборачиваем отправку в транзакцию ---
                     with conn_local.cursor() as cur:
+                        for i, detail in enumerate(details_to_process):
+                            attributes = {}
+                            if detail.get('production_date'):
+                                attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
+                            if detail.get('expiry_date'):
+                                attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
+                            if detail.get('fias_code'):
+                                attributes['fias_id'] = detail['fias_code']
+
+                            payload = {"all_from_printrun": detail['api_id']}
+                            if attributes:
+                                payload['attributes'] = attributes
+
+                            user_logs.append(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+                            
+                            # РЕКОМЕНДАЦИЯ: Запускайте Gunicorn с увеличенным таймаутом, например:
+                            # gunicorn --workers 3 --timeout 300 'app:create_app()'
+                            # Увеличиваем таймаут для одного запроса, чтобы дать API больше времени на обработку.
+                            response = requests.post(full_url, headers=headers, json=payload, timeout=240)
+                            
+                            user_logs.append(f"  URL: {full_url}")
+                            user_logs.append(f"  Тело: {json.dumps(payload)}")
+                            user_logs.append(f"  Статус ответа: {response.status_code}")
+                            
+                            response.raise_for_status()
+
+                            # --- НОВАЯ ЛОГИКА: Сохраняем ID ответа ---
+                            response_data = response.json()
+                            utilisation_upload_id = response_data.get('utilisation_upload_id')
+                            if not utilisation_upload_id:
+                                raise Exception(f"API не вернуло 'utilisation_upload_id' в ответе. Ответ: {json.dumps(response_data)}")
+
+                            cur.execute(
+                                "UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s",
+                                (utilisation_upload_id, detail['detail_id'])
+                            )
+                            user_logs.append(f"  Записи детализации ID {detail['detail_id']} присвоен utilisation_upload_id: {utilisation_upload_id}")
+
+                        # Обновляем статус заказа в нашей БД только после успешной обработки всех позиций
                         cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (selected_order_id,))
-                    conn_local.commit()
+                    conn_local.commit() # Коммитим все изменения разом
 
                     flash('Операция "Подготовить сведения" успешно выполнена. Статус заказа обновлен.', 'success')
                     # Перенаправляем, чтобы обновить состояние кнопок
                     return redirect(url_for('.integration_panel', order_id=selected_order_id))
-                    api_response = {'status_code': 200, 'body': "\n".join(user_logs)}
 
                 except Exception as e:
                     error_body = response.text if 'response' in locals() and hasattr(response, 'text') else ""
