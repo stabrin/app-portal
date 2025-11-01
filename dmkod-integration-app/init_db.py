@@ -39,10 +39,14 @@ def update_schema(conn):
     # Список команд для обновления схемы
     sql_commands = [
         # 1. Создание таблицы товарных групп 'dmkod_product_groups'
+        # --- ИЗМЕНЕНИЕ: Удаляем ограничение уникальности для group_name ---
+        # Сначала удаляем существующее ограничение, если оно есть, для обратной совместимости.
+        # Имя ограничения 'dmkod_product_groups_group_name_key' является стандартным для PostgreSQL.
+        sql.SQL("ALTER TABLE {pg_table} DROP CONSTRAINT IF EXISTS dmkod_product_groups_group_name_key;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("""
         CREATE TABLE IF NOT EXISTS {pg_table} (
             id SERIAL PRIMARY KEY,
-            group_name VARCHAR(100) NOT NULL UNIQUE,
+            group_name VARCHAR(100) NOT NULL,
             display_name VARCHAR(255) NOT NULL,
             fias_required BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
