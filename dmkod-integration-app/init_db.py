@@ -97,6 +97,9 @@ def update_schema(conn):
         # Безопасное добавление колонки для JSON с кодами
         sql.SQL("ALTER TABLE {agg_details} ADD COLUMN IF NOT EXISTS api_codes_json JSONB;").format(agg_details=sql.Identifier(aggregation_details_table)),
         sql.SQL("COMMENT ON COLUMN {agg_details}.api_codes_json IS 'JSON с кодами маркировки, полученными от API для этого тиража';").format(agg_details=sql.Identifier(aggregation_details_table)),
+        # --- НОВАЯ КОЛОНКА для отслеживания отправки сведений о нанесении ---
+        sql.SQL("ALTER TABLE {agg_details} ADD COLUMN IF NOT EXISTS utilisation_upload_id INTEGER;").format(agg_details=sql.Identifier(aggregation_details_table)),
+        sql.SQL("COMMENT ON COLUMN {agg_details}.utilisation_upload_id IS 'ID загрузки сведений о нанесении из API';").format(agg_details=sql.Identifier(aggregation_details_table)),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_agg_details_order_id ON {agg_details}(order_id);").format(agg_details=sql.Identifier(aggregation_details_table)),
 
         # 4. Создание таблицы для хранения оригинальных файлов заказа
