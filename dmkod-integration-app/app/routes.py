@@ -1532,19 +1532,17 @@ def integration_panel():
                                 response = requests.post(full_url, headers=headers, json=payload, timeout=120)
                                 user_logs.append(f"  Статус ответа: {response.status_code}")
                                 response.raise_for_status()
-
-                                response_data = response.json()
-                                utilisation_upload_id = response_data.get('utilisation_upload_id')
-
-                                if not utilisation_upload_id:
-                                    raise Exception(f"API не вернуло 'utilisation_upload_id' в ответе. Ответ: {json.dumps(response_data)}")
-
+                                
+                                # --- ИЗМЕНЕНО: Генерируем собственный ID вместо получения из API ---
+                                # Формула: (ID заказа * 1000) + (индекс цикла + 1)
+                                generated_upload_id = (selected_order_id * 1000) + (i + 1)
+                                
                                 # Обновляем запись в delta_result
                                 cur.execute(
                                     "UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s",
-                                    (utilisation_upload_id, result['id'])
+                                    (generated_upload_id, result['id'])
                                 )
-                                user_logs.append(f"  Записи ID {result['id']} присвоен utilisation_upload_id: {utilisation_upload_id}")
+                                user_logs.append(f"  Записи ID {result['id']} присвоен сгенерированный ID: {generated_upload_id}")
                                 updated_count += 1
                         
                         conn_local.commit()
@@ -1625,17 +1623,15 @@ def integration_panel():
                             
                             response.raise_for_status()
 
-                            # --- НОВАЯ ЛОГИКА: Сохраняем ID ответа ---
-                            response_data = response.json()
-                            utilisation_upload_id = response_data.get('utilisation_upload_id')
-                            if not utilisation_upload_id:
-                                raise Exception(f"API не вернуло 'utilisation_upload_id' в ответе. Ответ: {json.dumps(response_data)}")
-
+                            # --- ИЗМЕНЕНО: Генерируем собственный ID вместо получения из API ---
+                            # Формула: (ID заказа * 1000) + (индекс цикла + 1)
+                            generated_upload_id = (selected_order_id * 1000) + (i + 1)
+                            
                             cur.execute(
                                 "UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s",
-                                (utilisation_upload_id, detail['detail_id'])
+                                (generated_upload_id, detail['detail_id'])
                             )
-                            user_logs.append(f"  Записи детализации ID {detail['detail_id']} присвоен utilisation_upload_id: {utilisation_upload_id}")
+                            user_logs.append(f"  Записи детализации ID {detail['detail_id']} присвоен сгенерированный ID: {generated_upload_id}")
 
                         # Обновляем статус заказа в нашей БД только после успешной обработки всех позиций
                         cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (selected_order_id,))
