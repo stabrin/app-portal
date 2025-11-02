@@ -1,0 +1,28 @@
+# Для работы с базой данных PostgreSQL
+psycopg2-binary
+
+# Для хеширования паролей
+bcrypt
+
+# Для работы с переменными окружения из .env файла
+python-dotenv
+
+# Для генерации PDF-документов и штрихкодов
+reportlab
+
+# Для генерации QR-кодов
+qrcode
+
+# Для обработки изображений (нужна для qrcode)
+Pillow
+
+# Для взаимодействия с API Windows (печать, терминал)
+# Устанавливается только на Windows
+pywin32
+
+# Для работы с Redis (используется в manual-aggregation-app)
+redis
+
+# Для отправки HTTP-запросов (используется в api_tests)
+requests
+pylibdmtx

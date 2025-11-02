@@ -8,8 +8,15 @@ services:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
+    # Используем стандартную команду, которая указывает PostgreSQL использовать наши файлы конфигурации.
+    command: postgres -c listen_addresses='*' -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
     volumes:
-      - ./postgres:/var/lib/postgresql/data
+      - ./postgres/data:/var/lib/postgresql/data
+      # Монтируем наши файлы конфигурации в стандартное место, откуда их прочитает команда выше
+      - ./postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      # Монтируем сертификаты в стандартное для SSL место, чтобы избежать конфликта с томом /var/lib/postgresql/data
+      - ./secrets/postgres:/etc/ssl/certs/postgres
     ports:
       - "5432:5432"
     # Healthcheck проверяет, готова ли БД принимать подключения,
@@ -44,6 +51,8 @@ services:
     # Этот сервис не зависит от БД, но может зависеть от Redis
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   # --- 4. Приложение Datamatrix ---
