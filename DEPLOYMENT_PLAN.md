@@ -90,23 +90,64 @@
     git pull origin main
     ```
 
-3.  **Обновите `.env` файл.** Добавьте в него новые переменные, необходимые для подключения к PostgreSQL по SSL. Путь к сертификату должен быть абсолютным внутри контейнера.
+3.  **Сгенерируйте сертификаты для продуктового сервера.** Запустите скрипт `prepare_certs.sh`, указав **домен и IP-адрес вашего продуктового сервера**.
+
+    ```bash
+    # Пример для вымышленного сервера my-prod.com с IP 1.2.3.4
+    ./prepare_certs.sh my-prod.com 1.2.3.4
+    ```
+    Скрипт создаст папку `secrets/postgres` с файлами `server.crt` и `server.key`.
+
+4.  **Установите правильные права на ключ.** Это критически важно для PostgreSQL.
+
+    ```bash
+    sudo chown 70:70 ./secrets/postgres/server.key
+    sudo chmod 600 ./secrets/postgres/server.key
+    ```
+
+5.  **Обновите `docker-compose.yml`**.
+    *   Добавьте в сервис базы данных (`db`) команды для включения SSL и монтирование папки с сертификатами.
+    *   **Явно укажите подсеть** для вашей внутренней сети. Это повысит безопасность и позволит `pg_hba.conf` работать корректно.
+
+    ```yaml
+    # docker-compose.yml
+
+    services:
+      db: # или postgres, как он у вас называется
+        # ... ваши текущие настройки ...
+        volumes:
+          - ./secrets/postgres:/etc/ssl/postgres:ro # Монтируем сертификаты
+          - ./pg_hba.conf:/etc/postgresql/pg_hba.conf:ro # Монтируем наш кастомный pg_hba.conf
+          - pg_data:/var/lib/postgresql/data
+        command: >
+          -c ssl=on
+          -c ssl_cert_file=/etc/ssl/postgres/server.crt
+          -c ssl_key_file=/etc/ssl/postgres/server.key
+          -c hba_file=/etc/postgresql/pg_hba.conf # Явно указываем путь к нашему файлу
+
+    networks:
+      default:
+        driver: bridge
+        ipam:
+          config:
+            - subnet: 172.19.0.0/16 # Убедитесь, что эта подсеть совпадает с той, что в pg_hba.conf
+    ```
+
+6.  **Проверьте `.env` файл.** Убедитесь, что в нем **ОТСУТСТВУЮТ** переменные `DB_SSL_MODE` и `DB_SSL_ROOTCERT`. Это заставит приложение подключаться к базе данных без шифрования, как и требуется для внутренней сети.
 
     ```env
     # ... существующие переменные ...
 
-    # Новые переменные для подключения к БД с SSL
-    DB_SSL_MODE=verify-full
-    DB_SSL_ROOTCERT=/path/in/container/to/server.crt
+    # Убедитесь, что здесь НЕТ строк DB_SSL_MODE и DB_SSL_ROOTCERT
     ```
 
-4.  **Пересоберите и перезапустите Docker-контейнеры**, чтобы применить изменения в коде и конфигурации.
+7.  **Пересоберите и перезапустите Docker-контейнеры**, чтобы применить все изменения.
 
     ```bash
-    docker-compose up --build -d
+    docker-compose up -d --force-recreate --build
     ```
 
-5.  **Проверьте логи** приложения, чтобы убедиться, что оно успешно запустилось и подключилось к базе данных.
+8.  **Проверьте логи** приложения и базы данных, чтобы убедиться, что все запустилось успешно и SSL-соединение установлено.
 
     ```bash
     # Показать логи всех сервисов

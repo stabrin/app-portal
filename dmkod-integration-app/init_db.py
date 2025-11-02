@@ -10,13 +10,25 @@ def get_db_connection():
     load_dotenv(dotenv_path=dotenv_path)
     
     try:
-        conn = psycopg2.connect(
+        # --- ИЗМЕНЕНО: Добавляем параметры SSL из .env ---
+        conn_params = {
             dbname=os.getenv("DB_NAME"),
             user=os.getenv("DB_USER"),
             password=os.getenv("DB_PASSWORD"),
             host=os.getenv("DB_HOST_LOCAL", "localhost"), # Используем локальный хост для скриптов
             port=os.getenv("DB_PORT")
-        )
+        }
+        
+        # Проверяем, задан ли режим SSL в переменных окружения
+        ssl_mode = os.getenv("DB_SSL_MODE")
+        if ssl_mode:
+            conn_params['sslmode'] = ssl_mode
+            # Если указан путь к корневому сертификату, добавляем его
+            ssl_rootcert = os.getenv("DB_SSL_ROOTCERT")
+            if ssl_rootcert:
+                conn_params['sslrootcert'] = ssl_rootcert
+        
+        conn = psycopg2.connect(**conn_params)
         return conn
     except psycopg2.OperationalError as e:
         print(f"Ошибка подключения к базе данных: {e}")
