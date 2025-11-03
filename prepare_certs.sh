@@ -1,19 +1,18 @@
 #!/bin/bash
 
-# --- НАСТРОЙКИ ---
-# Домен или IP-адрес, по которому будет доступен сервер PostgreSQL.
-# Это значение будет вписано в поле "Common Name" сертификата.
-# Для проверки по доменному имени.
-SERVER_CN="st.it-workshop.ru"
-# Публичный IP-адрес вашего сервера. ОБЯЗАТЕЛЬНО ЗАМЕНИТЕ НА СВОЙ!
-SERVER_IP="109.172.115.204"
-
 # Директория для хранения сгенерированных секретов (сертификатов).
 # Она будет создана в корне проекта, отдельно от исходного кода.
 # Это более безопасный и стандартный подход.
 CERT_DIR="./secrets/postgres"
 
 # --- СКРИПТ ---
+if [ "$#" -eq 0 ]; then
+    echo "Ошибка: Не указаны домены или IP-адреса для сертификата."
+    echo "Использование: $0 <имя_хоста_1> <ip_адрес_1> [имя_хоста_2] [ip_адрес_2] ..."
+    echo "Пример: $0 beeb09fc2128.sn.mynetname.net 88.86.80.143 192.168.108.95"
+    exit 1
+fi
+
 set -e # Прерывать выполнение при ошибке
 
 echo "Проверяем наличие openssl..."
@@ -36,6 +35,22 @@ if [ -f "$PG_CERT" ] && [ -f "$PG_KEY" ]; then
     echo "Файлы сертификата и ключа уже существуют. Генерация пропущена."
     echo "Если вы хотите создать их заново, удалите старые файлы и запустите скрипт еще раз."
 else
+    # --- Динамическая генерация SAN ---
+    SERVER_CN=$1 # Первый аргумент используется как Common Name
+    SAN_LIST=""
+    DNS_COUNT=1
+    IP_COUNT=1
+
+    for arg in "$@"; do
+        # Простая проверка, является ли аргумент IP-адресом
+        if [[ $arg =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            SAN_LIST+="IP.$IP_COUNT = $arg\n"
+            IP_COUNT=$((IP_COUNT + 1))
+        else
+            SAN_LIST+="DNS.$DNS_COUNT = $arg\n"
+            DNS_COUNT=$((DNS_COUNT + 1))
+        fi
+    done
     echo "Генерируем самоподписанный сертификат и приватный ключ на 10 лет с SANs..."
 
     openssl req -new -x509 -days 3650 -nodes -text \
@@ -58,7 +73,10 @@ CN = $SERVER_CN
 [v3_req]
 keyUsage = critical, digitalSignature, keyEncipherment
 extendedKeyUsage = serverAuth
-subjectAltName = DNS:$SERVER_CN,IP:$SERVER_IP
+subjectAltName = @alt_names
+
+[alt_names]
+$SAN_LIST
 EOF
 )
     echo "Сертификат и ключ успешно сгенерированы."

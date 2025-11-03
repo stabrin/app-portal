@@ -43,3 +43,6 @@ api_tests/
 
 # Игнорировать все секретные файлы и конфигурации
 secrets/postgres/server.key
+
+# Игнорировать SQL дампы
+dump_*.sql
