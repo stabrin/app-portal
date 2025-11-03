@@ -1,7 +1,6 @@
 from flask import Blueprint, render_template, redirect, url_for, flash, request
 from flask_login import login_required, current_user, login_user, logout_user
 from psycopg2.extras import RealDictCursor
-from bcrypt import checkpw
 
 from .db import get_db_connection
 from .forms import LoginForm
@@ -56,13 +55,14 @@ def login():
                 cur.execute("SELECT * FROM users WHERE username = %s", (form.username.data,))
                 user_data = cur.fetchone()
 
-            if user_data and user_data.get('password_hash') and checkpw(form.password.data.encode('utf-8'), user_data['password_hash'].encode('utf-8')):
+            if user_data:
                 user = User(user_data)
-                login_user(user)
+                if user.check_password(form.password.data):
+                    login_user(user)
                 
-                next_page = request.args.get('next')
-                flash('Вы успешно вошли в систему.', 'success')
-                return redirect(next_page or url_for('main.index'))
+                    next_page = request.args.get('next')
+                    flash('Вы успешно вошли в систему.', 'success')
+                    return redirect(next_page or url_for('main.index'))
             else:
                 flash('Неверное имя пользователя или пароль.', 'danger')
         except Exception as e:

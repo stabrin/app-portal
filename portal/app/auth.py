@@ -1,5 +1,6 @@
 from flask_login import LoginManager, UserMixin
 from psycopg2.extras import RealDictCursor
+from bcrypt import checkpw
 from .db import get_db_connection
 
 # 1. Инициализация Flask-Login
@@ -17,7 +18,11 @@ class User(UserMixin):
     def __init__(self, user_data):
         self.id = user_data['id']
         self.username = user_data['username']
+        self.password_hash = user_data.get('password_hash')
         self.is_admin = user_data.get('is_admin', False)
+
+    def check_password(self, password):
+        return self.password_hash and checkpw(password.encode('utf-8'), self.password_hash.encode('utf-8'))
 
 # 3. Загрузчик пользователя
 @login_manager.user_loader
