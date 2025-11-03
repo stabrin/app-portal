@@ -33,8 +33,6 @@ __pycache__/
 
 # Кэш сборки Docker
 .dockerignore
-docker-compose.override.yml
-docker-compose.yml
 
 # Directory for API testing scripts
 api_tests/
