@@ -4,11 +4,8 @@
 .env
 
 # Папка с SSL-сертификатами и ключами.
-# Игнорируем все содержимое папки с секретами postgres,
-# но оставляем публичный сертификат server.crt.
-# ВАЖНО: Приватный ключ server.key будет проигнорирован.
-/secrets/postgres/*
-# !/secrets/postgres/server.crt
+# Игнорируем ВСЕ содержимое папки с секретами.
+secrets/
 
 # --- Данные базы данных ---
 # Папка с файлами базы данных PostgreSQL. Она может весить гигабайты.
@@ -41,10 +38,6 @@ docker-compose.yml
 
 # Directory for API testing scripts
 api_tests/
-
-# Игнорировать все секретные файлы и конфигурации
-secrets/postgres/server.key
-secrets/postgres/server.crt
 
 # Игнорировать SQL дампы
 dump_*.sql
