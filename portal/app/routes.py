@@ -58,11 +58,13 @@ def login():
             if user_data:
                 user = User(user_data)
                 if user.check_password(form.password.data):
+                    # Все действия при успешном входе должны быть здесь
                     login_user(user)
-                
                     next_page = request.args.get('next')
                     flash('Вы успешно вошли в систему.', 'success')
                     return redirect(next_page or url_for('main.index'))
+                else:
+                    flash('Неверное имя пользователя или пароль.', 'danger')
             else:
                 flash('Неверное имя пользователя или пароль.', 'danger')
         except Exception as e:
