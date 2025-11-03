@@ -8,7 +8,7 @@
 # но оставляем публичный сертификат server.crt.
 # ВАЖНО: Приватный ключ server.key будет проигнорирован.
 /secrets/postgres/*
-!/secrets/postgres/server.crt
+# !/secrets/postgres/server.crt
 
 # --- Данные базы данных ---
 # Папка с файлами базы данных PostgreSQL. Она может весить гигабайты.
@@ -20,6 +20,7 @@
 .venv/
 venv/
 */.venv/
+.vscode
 
 # Файлы кэша Python.
 __pycache__/
