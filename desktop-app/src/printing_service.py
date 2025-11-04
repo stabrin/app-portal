@@ -499,13 +499,13 @@ class PrintingService:
             raise
 
     @staticmethod
-    def print_label_direct(printer_name: str, template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], pregenerated_image: Optional[Image.Image] = None) -> None:
+    def print_label_direct(printer_name: str, paper_name: str, template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], pregenerated_image: Optional[Image.Image] = None) -> None:
         """Отправляет этикетку на принтер напрямую через GDI."""
         logging.info(f"Прямая печать на принтер '{printer_name}'.")
         if not all([win32print, win32ui]):
             logging.error("pywin32 не установлен. Прямая печать невозможна.")
             raise ImportError("Библиотека pywin32 не установлена.")
-
+    
         label_image = None
         h_printer = None
         try:
@@ -520,10 +520,23 @@ class PrintingService:
                 return
 
             # --- Открываем принтер и получаем его характеристики ---
+            # --- ИЗМЕНЕНИЕ: Устанавливаем нужный размер бумаги перед печатью ---
             h_printer = win32print.OpenPrinter(printer_name)
+            try:
+                # Получаем текущие настройки принтера
+                printer_defaults = win32print.GetPrinter(h_printer, 2)
+                devmode = printer_defaults['pDevMode']
+                
+                # Устанавливаем имя формы (размер бумаги)
+                devmode.FormName = paper_name
+                # Указываем, что мы изменили FormName
+                devmode.Fields = devmode.Fields | win32con.DM_FORMNAME
+
+            except Exception as e_devmode:
+                logging.warning(f"Не удалось установить размер бумаги '{paper_name}': {e_devmode}. Печать будет выполнена с настройками по умолчанию.")
+
             dc = win32ui.CreateDC()
             dc.CreatePrinterDC(printer_name)
-
             # Физические размеры бумаги в пикселях
             paper_width_px = dc.GetDeviceCaps(win32con.PHYSICALWIDTH)
             paper_height_px = dc.GetDeviceCaps(win32con.PHYSICALHEIGHT)
@@ -576,12 +589,12 @@ class PrintingService:
         if not images:
             logging.warning("Список изображений для печати пуст.")
             return
-
+    
         for i, image in enumerate(images, 1):
             logging.info(f"Печать изображения {i}/{len(images)}")
             try:
                 # Создаем "пустые" данные, так как изображение уже готово
-                PrintingService.print_label_direct(printer_name, {}, {}, user_info, pregenerated_image=image)
+                PrintingService.print_label_direct(printer_name, paper_name, {}, {}, user_info, pregenerated_image=image)
             except Exception as e:
                 logging.error(f"Ошибка печати изображения {i}: {e}")
                 raise RuntimeError(f"Ошибка печати изображения {i}/{len(images)}: {e}")

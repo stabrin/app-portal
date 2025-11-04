@@ -1044,12 +1044,75 @@ class AdminWindow(tk.Tk):
         self.user_info = user_info
         self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
         self.geometry("600x400")
-
+ 
         self._create_menu()
-
-        label = ttk.Label(self, text="Добро пожаловать, Администратор!", font=("Arial", 14))
-        label.pack(expand=True)
-
+ 
+        # --- НОВАЯ ЛОГИКА: Создаем контейнер с вкладками ---
+        notebook = ttk.Notebook(self)
+        notebook.pack(expand=True, fill="both", padx=10, pady=10)
+ 
+        # Создаем фреймы для каждой вкладки
+        supply_notice_frame = ttk.Frame(notebook, padding="10")
+        orders_frame = ttk.Frame(notebook, padding="10")
+        catalogs_frame = ttk.Frame(notebook, padding="10")
+        reports_frame = ttk.Frame(notebook, padding="10")
+        admin_frame = ttk.Frame(notebook, padding="10")
+ 
+        # Добавляем вкладки в контейнер
+        notebook.add(supply_notice_frame, text="Уведомление о поставке")
+        notebook.add(orders_frame, text="Заказы")
+        notebook.add(catalogs_frame, text="Справочники")
+        notebook.add(reports_frame, text="Отчеты")
+        notebook.add(admin_frame, text="Администрирование")
+ 
+        # --- Заполняем вкладки ---
+        self._create_orders_tab(orders_frame)
+ 
+        # Заглушки для остальных вкладок
+        ttk.Label(supply_notice_frame, text="Раздел 'Уведомление о поставке' в разработке.", font=("Arial", 14)).pack(expand=True)
+        ttk.Label(catalogs_frame, text="Раздел 'Справочники' в разработке.", font=("Arial", 14)).pack(expand=True)
+        ttk.Label(reports_frame, text="Раздел 'Отчеты' в разработке.", font=("Arial", 14)).pack(expand=True)
+        ttk.Label(admin_frame, text="Раздел 'Администрирование' в разработке.", font=("Arial", 14)).pack(expand=True)
+ 
+    def _create_orders_tab(self, parent_frame):
+        """Создает содержимое для вкладки 'Заказы'."""
+        controls_frame = ttk.Frame(parent_frame)
+        controls_frame.pack(fill=tk.X, pady=5)
+ 
+        def load_orders():
+            for i in orders_tree.get_children():
+                orders_tree.delete(i)
+            try:
+                with PrintingService._get_client_db_connection(self.user_info) as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("SELECT id, client_name, order_date, status FROM orders ORDER BY id DESC")
+                        for order in cur.fetchall():
+                            orders_tree.insert('', 'end', values=(order['id'], order['client_name'], order['order_date'], order['status']))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить заказы: {e}", parent=self)
+ 
+        ttk.Button(controls_frame, text="Обновить", command=load_orders).pack(side=tk.LEFT)
+ 
+        tree_frame = ttk.Frame(parent_frame)
+        tree_frame.pack(expand=True, fill="both")
+ 
+        orders_tree = ttk.Treeview(tree_frame, columns=('id', 'client', 'date', 'status'), show='headings')
+        orders_tree.heading('id', text='ID')
+        orders_tree.heading('client', text='Клиент')
+        orders_tree.heading('date', text='Дата')
+        orders_tree.heading('status', text='Статус')
+        orders_tree.column('id', width=50, anchor=tk.CENTER)
+        orders_tree.column('client', width=200)
+        orders_tree.column('date', width=100)
+        orders_tree.column('status', width=100)
+        orders_tree.pack(expand=True, fill="both", side="left")
+ 
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=orders_tree.yview)
+        orders_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+ 
+        load_orders()
+ 
     def _open_dm_test_print_dialog(self):
         """
         Открывает диалог печати для тестирования DataMatrix.
