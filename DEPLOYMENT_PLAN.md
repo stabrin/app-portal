@@ -31,7 +31,8 @@
 
     **Пример:**
     ```bash
-    docker exec -t app-portal-db-1 pg_dumpall -c -U postgres > dump_2025-11-01_15-30-00.sql
+    docker exec -t app-portal-db-1 pg_dumpall -c -U postgres > dump_2025-11-03.sql
+    cat dump_2025-11-03.sql | docker exec -i portal_postgres_db psql -U portal_user -d postgres
     ```
 
 4.  **Проверьте, что бэкап создан.** Убедитесь, что в текущей папке появился `.sql` файл ненулевого размера. Сохраните его в надежном месте.
