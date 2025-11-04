@@ -5,6 +5,7 @@ import logging
 
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
+import threading
 import json
 import pandas as pd
 import io
@@ -13,6 +14,7 @@ from datetime import datetime
 # --- ИСПРАВЛЕНИЕ: Добавляем глобальный импорт Pillow ---
 try:
     from PIL import Image, ImageTk
+
 except ImportError:
     Image = None # Помечаем как недоступный, если Pillow не установлен
 
@@ -27,6 +29,7 @@ logging.basicConfig(
 
 # Импорты для работы с БД и QR-кодами
 from .db_connector import get_main_db_connection
+from .api_service import ApiService
 import bcrypt
 import psycopg2
 import psycopg2.extras
@@ -1076,6 +1079,7 @@ class AdminWindow(tk.Tk):
         # Добавляем вкладки в контейнер
         notebook.add(supply_notice_frame, text="Уведомление о поставке")
         notebook.add(orders_frame, text="Заказы")
+        #self._create_catalogs_tab(catalogs_frame)
         notebook.add(catalogs_frame, text="Справочники")
         notebook.add(reports_frame, text="Отчеты")
         notebook.add(admin_frame, text="Администрирование")
@@ -1083,58 +1087,47 @@ class AdminWindow(tk.Tk):
         # --- Заполняем вкладки ---
         self._create_supply_notice_tab(supply_notice_frame)
         self._create_orders_tab(orders_frame)
-        self._create_catalogs_tab(catalogs_frame) # Заполняем новую вкладку "Справочники"
+        #self._create_catalogs_tab(catalogs_frame) # Заполняем новую вкладку "Справочники"
  
         # Заглушки для остальных вкладок
         ttk.Label(reports_frame, text="Раздел 'Отчеты' в разработке.", font=("Arial", 14)).pack(expand=True)
         ttk.Label(admin_frame, text="Раздел 'Администрирование' в разработке.", font=("Arial", 14)).pack(expand=True)
 
-    def _create_catalogs_tab(self, parent_frame):
-        logger = logging.getLogger(__name__)
-        """Создает содержимое для вкладки 'Справочники'."""
-        from .catalogs_service import CatalogsService
-        service = CatalogsService(self.user_info)
- 
-        # Основной контейнер
-        paned_window = ttk.PanedWindow(parent_frame, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
- 
-        # --- Левая панель: Список уведомлений ---
-        list_frame = ttk.Frame(paned_window, padding="5")
-        paned_window.add(list_frame, weight=1)
- 
-        list_controls = ttk.Frame(list_frame)
-        list_controls.pack(fill=tk.X, pady=5)
- 
-        catalogs_tree = ttk.Treeview(list_frame, columns=('id', 'name'), show='headings')
-        catalogs_tree.heading('id', text='ID')
-        catalogs_tree.heading('name', text='Наименование')
-        catalogs_tree.column('id', width=40, anchor=tk.CENTER)
-        catalogs_tree.column('name', width=200)
-        catalogs_tree.pack(expand=True, fill='both')
- 
-        # --- Правая панель: Детали уведомления ---
-        details_frame = ttk.Frame(paned_window, padding="5")
-        paned_window.add(details_frame, weight=2) 
+        # --- Индикатор статуса API ---
+        self.api_status_indicator = tk.Canvas(self, width=16, height=16, highlightthickness=0, relief='flat')
+        self.api_status_indicator.pack(side=tk.RIGHT, padx=10)
+        self.update_api_status()
 
-        #details_notebook = ttk.Notebook(details_frame)
-        details_notebook = ttk.Notebook(details_frame)
-        # details_notebook.pack(fill='both', expand=True)
- 
-        # --- Функции ---
-        def refresh_catalogs_list():
-            # Очищаем дерево перед обновлением
-            for i in catalogs_tree.get_children():
-                catalogs_tree.delete(i)
-            try:
-                participants_list = service.get_participants_catalog()
-                for n in participants_list:
-                    catalogs_tree.insert('', 'end', values=(n['id'], n['name']))
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось загрузить справочник: {e}", parent=self)
+    def check_api_token(self):
+        """Проверяет валидность API-токена."""
+        try:
+            api_service = ApiService(self.user_info)
+            api_service.get_participants()
+            return True
+        except Exception:
+            return False
 
-        ttk.Button(list_controls, text="Обновить", command=refresh_catalogs_list).pack(side=tk.LEFT, padx=2)
-        refresh_catalogs_list()
+    def update_api_status(self):
+        """Обновляет индикатор статуса API."""
+        # Запускаем проверку в отдельном потоке, чтобы не блокировать UI
+        threading.Thread(target=self._update_api_status_bg, daemon=True).start()
+
+    def _update_api_status_bg(self):
+        """Фоновая задача для обновления статуса API."""
+        is_valid = False
+        try:
+            is_valid = self.check_api_token()
+        except Exception as e:
+            logging.error(f"Ошибка при проверке API-токена: {e}")
+        
+        # --- ИСПРАВЛЕНИЕ: Обновляем UI из главного потока ---
+        self.after(0, self._set_api_status_color, is_valid)
+
+    def _set_api_status_color(self, is_valid):
+        """Устанавливает цвет индикатора API."""
+        color = "green" if is_valid else "red"
+        self.api_status_indicator.delete("all")
+        self.api_status_indicator.create_oval(2, 2, 14, 14, fill=color, outline="")
 
     def _create_supply_notice_tab(self, parent_frame):
         logger = logging.getLogger(__name__)
@@ -1168,197 +1161,54 @@ class AdminWindow(tk.Tk):
  
         # --- Правая панель: Детали уведомления ---
         details_frame = ttk.Frame(paned_window, padding="5")
+        paned_window.add(details_frame, weight=2)
+
+    def _create_catalogs_tab(self, parent_frame):
+        logger = logging.getLogger(__name__)
+        """Создает содержимое для вкладки 'Справочники'."""
+        from .catalogs_service import CatalogsService
+        service = CatalogsService(self.user_info)
+ 
+        # Основной контейнер
+        paned_window = ttk.PanedWindow(parent_frame, orient=tk.HORIZONTAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+
+        # --- Левая панель: Список уведомлений ---
+        list_frame = ttk.Frame(paned_window, padding="5")
+        paned_window.add(list_frame, weight=1)
+ 
+        list_controls = ttk.Frame(list_frame)
+        list_controls.pack(fill=tk.X, pady=5)
+ 
+        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name'), show='headings')
+        catalogs_tree.heading('id', text='ID')
+        catalogs_tree.heading('name', text='Наименование')
+        catalogs_tree.column('id', width=40, anchor=tk.CENTER)
+        catalogs_tree.column('name', width=200)
+        catalogs_tree.pack(expand=True, fill='both')
+ 
+        # --- Правая панель: Детали уведомления ---
+        details_frame = ttk.Frame(paned_window, padding="5")
         paned_window.add(details_frame, weight=2) 
 
+        #details_notebook = ttk.Notebook(details_frame)
         details_notebook = ttk.Notebook(details_frame)
-        details_notebook.pack(fill='both', expand=True)
+        # details_notebook.pack(fill='both', expand=True)
 
-        # Вкладки для деталей
-        supplier_files_frame = ttk.Frame(details_notebook, padding="10")
-        formalized_frame = ttk.Frame(details_notebook, padding="10")
-        details_notebook.add(supplier_files_frame, text="Файлы поставщика")
-        details_notebook.add(formalized_frame, text="Формализация")
- 
         # --- Функции ---
-        def refresh_notifications_list():
-            for i in notifications_tree.get_children():
-                notifications_tree.delete(i)
+        def refresh_catalogs_list():
+            # Очищаем дерево перед обновлением
+            for i in catalogs_tree.get_children():
+                catalogs_tree.delete(i)
             try:
-                notifications = service.get_all_notifications()
-                for n in notifications:
-                    item_id = notifications_tree.insert('', 'end', values=(n['id'], n['name'], n['planned_arrival_date'] or '', n['status'], '...'))
+                participants_list = service.get_participants_catalog()
+                for n in participants_list:
+                    catalogs_tree.insert('', 'end', values=(n['id'], n['name']))
             except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
- 
-        def create_new_notification():
-            dialog = NewNotificationDialog(self)
-            self.wait_window(dialog)
-            if dialog.result:
-                name, arrival_date = dialog.result
-                try:
-                    service.create_notification(name, arrival_date)
-                    refresh_notifications_list()
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось создать уведомление: {e}", parent=self)
- 
-        def on_notification_select(event):
-            selected_item = notifications_tree.focus()
-            if not selected_item: return
-            notification_id = notifications_tree.item(selected_item)['values'][0]
-            refresh_details_panel(notification_id)
- 
-        def show_actions_menu(event):
-            item_id = notifications_tree.identify_row(event.y)
-            column_id = notifications_tree.identify_column(event.x)
-            if notifications_tree.heading(column_id, 'text') == 'Действия':
-                notifications_tree.selection_set(item_id)
-                menu = tk.Menu(self, tearoff=0)
-                menu.add_command(label="Редактировать", command=lambda: edit_notification(item_id))
-                menu.add_command(label="Создать заказ", command=lambda: create_order_from_notification(item_id))
-                menu.add_separator()
-                menu.add_command(label="Удалить", command=lambda: delete_notification(item_id))
-                menu.post(event.x_root, event.y_root)
- 
-        def edit_notification(item_id):
-            notification_id, name, date_str, _, _ = notifications_tree.item(item_id)['values']
-            dialog = NewNotificationDialog(self, title="Редактировать уведомление", initial_name=name, initial_date_str=date_str)
-            self.wait_window(dialog)
-            if dialog.result:
-                new_name, new_date = dialog.result
-                try:
-                    service.update_notification_name(notification_id, new_name)
-                    service.update_arrival_date(notification_id, new_date)
-                    refresh_notifications_list()
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось обновить уведомление: {e}", parent=self)
- 
-        def create_order_from_notification(item_id):
-            notification_id = notifications_tree.item(item_id)['values'][0]
-            messagebox.showinfo("В разработке", f"Функция создания заказа для уведомления #{notification_id} находится в разработке.", parent=self)
- 
-        def delete_notification(item_id):
-            notification_id, name, _, _, _ = notifications_tree.item(item_id)['values']
-            if messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить уведомление '{name}' (#{notification_id})?", parent=self):
-                try:
-                    service.delete_notification(notification_id)
-                    refresh_notifications_list()
-                    # Очищаем правую панель
-                    for widget in supplier_files_frame.winfo_children(): widget.destroy()
-                    for widget in formalized_frame.winfo_children(): widget.destroy()
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось удалить уведомление: {e}", parent=self)
- 
-        def refresh_details_panel(notification_id):
-            for widget in supplier_files_frame.winfo_children(): widget.destroy()
-            files = service.get_notification_files(notification_id)
-            supplier_files = [f for f in files if f['file_type'] == 'supplier']
-            ttk.Label(supplier_files_frame, text=f"Файлы для уведомления #{notification_id}").pack(anchor='w')
-            for f in supplier_files:
-                ttk.Label(supplier_files_frame, text=f"• {f['filename']} ({f['uploaded_at']:%Y-%m-%d %H:%M})").pack(anchor='w')
- 
-            def upload_supplier_files():
-                filepaths = filedialog.askopenfilenames(title="Выберите файлы от поставщика", parent=self)
-                if not filepaths: return
-                try:
-                    for fp in filepaths:
-                        with open(fp, 'rb') as f_data:
-                            service.add_file(notification_id, os.path.basename(fp), f_data.read(), 'supplier')
-                    messagebox.showinfo("Успех", f"Загружено {len(filepaths)} файлов.", parent=self)
-                    refresh_details_panel(notification_id)
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось загрузить файлы: {e}", parent=self)
- 
-            ttk.Button(supplier_files_frame, text="Загрузить файлы поставщика...", command=upload_supplier_files).pack(pady=10)
- 
-            for widget in formalized_frame.winfo_children(): widget.destroy()
-            details_tree_cols = ('gtin', 'quantity', 'aggregation', 'prod_date', 'exp_date')
-            details_tree = ttk.Treeview(formalized_frame, columns=details_tree_cols, show='headings', height=5)
-            details_tree.heading('gtin', text='GTIN')
-            details_tree.heading('quantity', text='Кол-во')
-            details_tree.heading('aggregation', text='Агрегация')
-            details_tree.heading('prod_date', text='Дата произв.')
-            details_tree.heading('exp_date', text='Срок годн.')
-            details_tree.pack(fill='both', expand=True)
-            details_tree.bind("<Double-1>", lambda event: edit_tree_item(event, details_tree))
+                messagebox.showerror("Ошибка", f"Не удалось загрузить справочник: {e}", parent=self)
 
-            details = service.get_notification_details(notification_id)
-            for d in details:
-                prod_date_str = d['production_date'].strftime('%Y-%m-%d') if d.get('production_date') else ''
-                exp_date_str = d['expiry_date'].strftime('%Y-%m-%d') if d.get('expiry_date') else ''
-                details_tree.insert('', 'end', iid=d['id'], values=(d['gtin'], d['quantity'], d.get('aggregation', ''), prod_date_str, exp_date_str))
- 
-            formalization_controls = ttk.Frame(formalized_frame)
-            formalization_controls.pack(fill=tk.X, pady=5)
- 
-            def download_template():
-                selected_item = notifications_tree.focus()
-                if not selected_item: return
-                notification_name = notifications_tree.item(selected_item)['values'][1]
-                file_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], initialfile=f"{notification_name}.xlsx", parent=self)
-                if not file_path: return
-                try:
-                    df = service.get_formalization_template()
-                    df.to_excel(file_path, index=False)
-                    messagebox.showinfo("Успех", f"Шаблон сохранен в {file_path}", parent=self)
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось сохранить шаблон: {e}", parent=self)
- 
-            def upload_formalized():
-                filepath = filedialog.askopenfilename(title="Выберите заполненный шаблон", filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
-                if not filepath: return
-                try:
-                    with open(filepath, 'rb') as f_data:
-                        file_content = f_data.read()
-                        processed_rows = service.process_formalized_file(notification_id, file_content)
-                        service.add_file(notification_id, os.path.basename(filepath), file_content, 'formalized')
-                    messagebox.showinfo("Успех", f"Шаблон обработан. Загружено {processed_rows} строк.", parent=self)
-                    refresh_details_panel(notification_id)
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось обработать файл: {e}", parent=self)
- 
-            ttk.Button(formalization_controls, text="Скачать шаблон", command=download_template).pack(side=tk.LEFT, padx=2)
-            ttk.Button(formalization_controls, text="Загрузить шаблон", command=upload_formalized).pack(side=tk.LEFT, padx=2)
-            ttk.Button(formalization_controls, text="Перезагрузить файл", command=upload_formalized).pack(side=tk.LEFT, padx=2)
-            
-            def delete_all_details():
-                if messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить ВСЕ строки детализации для уведомления #{notification_id}?", parent=self):
-                    try:
-                        service.process_formalized_file(notification_id, None)
-                        messagebox.showinfo("Успех", "Все строки детализации удалены.", parent=self)
-                        refresh_details_panel(notification_id)
-                    except Exception as e:
-                        messagebox.showerror("Ошибка", f"Не удалось удалить строки: {e}", parent=self)
-
-            ttk.Button(formalization_controls, text="Удалить все", command=delete_all_details).pack(side=tk.LEFT, padx=2)
-
-        def edit_tree_item(event, tree):
-            if not tree.identify_region(event.x, event.y) == "cell": return
-            column_id = tree.identify_column(event.x)
-            item_iid = tree.identify_row(event.y)
-            x, y, width, height = tree.bbox(item_iid, column_id)
-            entry = ttk.Entry(tree)
-            entry.place(x=x, y=y, width=width, height=height)
-            current_value = tree.set(item_iid, column_id)
-            entry.insert(0, current_value)
-            entry.focus_set()
-
-            def on_focus_out(event):
-                new_value = entry.get()
-                tree.set(item_iid, column=column_id, value=new_value)
-                all_values = tree.item(item_iid)['values']
-                service.update_notification_detail(item_iid, *all_values)
-                entry.destroy()
-
-            entry.bind("<Return>", on_focus_out)
-            entry.bind("<FocusOut>", on_focus_out)
-
-        ttk.Button(list_controls, text="Создать", command=create_new_notification).pack(side=tk.LEFT, padx=2)
-        ttk.Button(list_controls, text="Обновить", command=refresh_notifications_list).pack(side=tk.LEFT, padx=2)
-        notifications_tree.bind('<<TreeviewSelect>>', on_notification_select)
-        notifications_tree.bind('<Button-1>', show_actions_menu)
- 
-        refresh_notifications_list()
-
+        ttk.Button(list_controls, text="Обновить", command=refresh_catalogs_list).pack(side=tk.LEFT, padx=2)
+        refresh_catalogs_list()
     def _create_orders_tab(self, parent_frame):
         """Создает содержимое для вкладки 'Заказы'."""
         controls_frame = ttk.Frame(parent_frame)
