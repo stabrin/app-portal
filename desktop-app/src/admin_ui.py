@@ -1081,84 +1081,128 @@ class AdminWindow(tk.Tk):
         """Создает содержимое для вкладки 'Уведомление о поставке'."""
         from .supply_notification_service import SupplyNotificationService
         service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
-
+ 
         # Основной контейнер
         paned_window = ttk.PanedWindow(parent_frame, orient=tk.HORIZONTAL)
         paned_window.pack(fill=tk.BOTH, expand=True)
-
+ 
         # --- Левая панель: Список уведомлений ---
         list_frame = ttk.Frame(paned_window, padding="5")
         paned_window.add(list_frame, weight=1)
-
+ 
         list_controls = ttk.Frame(list_frame)
         list_controls.pack(fill=tk.X, pady=5)
-
-        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name', 'date', 'status'), show='headings')
+ 
+        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name', 'date', 'status', 'actions'), show='headings')
         notifications_tree.heading('id', text='ID')
         notifications_tree.heading('name', text='Наименование')
         notifications_tree.heading('date', text='План. дата')
         notifications_tree.heading('status', text='Статус')
+        notifications_tree.heading('actions', text='Действия')
         notifications_tree.column('id', width=40, anchor=tk.CENTER)
         notifications_tree.column('name', width=200)
-        notifications_tree.column('date', width=100)
-        notifications_tree.column('status', width=100)
+        notifications_tree.column('date', width=100, anchor=tk.CENTER)
+        notifications_tree.column('status', width=100, anchor=tk.CENTER)
+        notifications_tree.column('actions', width=80, anchor=tk.CENTER)
         notifications_tree.pack(expand=True, fill='both')
-
+ 
         # --- Правая панель: Детали уведомления ---
         details_frame = ttk.Frame(paned_window, padding="5")
         paned_window.add(details_frame, weight=2)
         details_notebook = ttk.Notebook(details_frame)
         details_notebook.pack(fill='both', expand=True)
-
+ 
         # Вкладки для деталей
         supplier_files_frame = ttk.Frame(details_notebook, padding="10")
         formalized_frame = ttk.Frame(details_notebook, padding="10")
         details_notebook.add(supplier_files_frame, text="Файлы поставщика")
         details_notebook.add(formalized_frame, text="Формализация")
-
+ 
         # --- Функции ---
         def refresh_notifications_list():
+            # Очищаем дерево перед обновлением
             for i in notifications_tree.get_children():
                 notifications_tree.delete(i)
             try:
-                for n in service.get_all_notifications():
-                    notifications_tree.insert('', 'end', values=(n['id'], n['name'], n['planned_arrival_date'], n['status']))
+                notifications = service.get_all_notifications()
+                for n in notifications:
+                    # Вставляем данные и "..." для действий
+                    item_id = notifications_tree.insert('', 'end', values=(n['id'], n['name'], n['planned_arrival_date'] or '', n['status'], '...'))
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
-
+ 
         def create_new_notification():
-            name = simpledialog.askstring("Новое уведомление", "Введите наименование уведомления (напр., номер машины):", parent=self)
-            if not name: return
-            
-            # TODO: Добавить календарь для выбора даты
-            date_str = simpledialog.askstring("Дата прибытия", "Введите планируемую дату прибытия (ГГГГ-ММ-ДД):", parent=self)
-            try:
-                arrival_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else None
-                service.create_notification(name, arrival_date)
-                refresh_notifications_list()
-            except ValueError:
-                messagebox.showerror("Ошибка", "Неверный формат даты.", parent=self)
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось создать уведомление: {e}", parent=self)
-
+            dialog = NewNotificationDialog(self)
+            self.wait_window(dialog) # Ждем закрытия диалога
+            if dialog.result:
+                name, arrival_date = dialog.result
+                try:
+                    service.create_notification(name, arrival_date)
+                    refresh_notifications_list()
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось создать уведомление: {e}", parent=self)
+ 
         def on_notification_select(event):
             selected_item = notifications_tree.focus()
             if not selected_item: return
             
             notification_id = notifications_tree.item(selected_item)['values'][0]
             refresh_details_panel(notification_id)
-
+ 
+        def show_actions_menu(event):
+            """Показывает контекстное меню для строки."""
+            item_id = notifications_tree.identify_row(event.y)
+            column_id = notifications_tree.identify_column(event.x)
+            
+            # Показываем меню только если клик был в колонке "Действия"
+            if notifications_tree.heading(column_id, 'text') == 'Действия':
+                notifications_tree.selection_set(item_id) # Выделяем строку
+                
+                menu = tk.Menu(self, tearoff=0)
+                menu.add_command(label="Редактировать", command=lambda: edit_notification(item_id))
+                menu.add_command(label="Создать заказ", command=lambda: create_order_from_notification(item_id))
+                menu.add_separator()
+                menu.add_command(label="Удалить", command=lambda: delete_notification(item_id))
+                
+                menu.post(event.x_root, event.y_root)
+ 
+        def edit_notification(item_id):
+            notification_id, name, date_str, _, _ = notifications_tree.item(item_id)['values']
+            dialog = NewNotificationDialog(self, title="Редактировать уведомление", initial_name=name, initial_date_str=date_str)
+            self.wait_window(dialog)
+            if dialog.result:
+                new_name, new_date = dialog.result
+                try:
+                    service.update_arrival_date(notification_id, new_date) # Пока обновляем только дату
+                    # TODO: Добавить обновление имени в сервисе
+                    refresh_notifications_list()
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось обновить уведомление: {e}", parent=self)
+ 
+        def create_order_from_notification(item_id):
+            notification_id = notifications_tree.item(item_id)['values'][0]
+            messagebox.showinfo("В разработке", f"Функция создания заказа для уведомления #{notification_id} находится в разработке.", parent=self)
+ 
+        def delete_notification(item_id):
+            notification_id, name, _, _, _ = notifications_tree.item(item_id)['values']
+            if messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить уведомление '{name}' (#{notification_id})?", parent=self):
+                try:
+                    service.delete_notification(notification_id)
+                    refresh_notifications_list()
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось удалить уведомление: {e}", parent=self)
+ 
         def refresh_details_panel(notification_id):
             # Очищаем и обновляем вкладку "Файлы поставщика"
             for widget in supplier_files_frame.winfo_children(): widget.destroy()
             
             files = service.get_notification_files(notification_id)
             supplier_files = [f for f in files if f['file_type'] == 'supplier']
-
+ 
             ttk.Label(supplier_files_frame, text=f"Файлы для уведомления #{notification_id}").pack(anchor='w')
             for f in supplier_files:
                 ttk.Label(supplier_files_frame, text=f"• {f['filename']} ({f['uploaded_at']:%Y-%m-%d %H:%M})").pack(anchor='w')
-
+ 
             def upload_supplier_files():
                 filepaths = filedialog.askopenfilenames(title="Выберите файлы от поставщика", parent=self)
                 if not filepaths: return
@@ -1170,28 +1214,37 @@ class AdminWindow(tk.Tk):
                     refresh_details_panel(notification_id)
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось загрузить файлы: {e}", parent=self)
-
+ 
             ttk.Button(supplier_files_frame, text="Загрузить файлы поставщика...", command=upload_supplier_files).pack(pady=10)
-
+ 
             # Очищаем и обновляем вкладку "Формализация"
             for widget in formalized_frame.winfo_children(): widget.destroy()
-
+ 
             formalized_files = [f for f in files if f['file_type'] == 'formalized']
             details_tree = ttk.Treeview(formalized_frame, columns=('gtin', 'name', 'qty'), show='headings', height=5)
             details_tree.heading('gtin', text='GTIN')
             details_tree.heading('name', text='Наименование')
             details_tree.heading('qty', text='Кол-во')
             details_tree.pack(fill='both', expand=True)
-
+ 
             details = service.get_notification_details(notification_id)
             for d in details:
                 details_tree.insert('', 'end', values=(d['gtin'], d['product_name'], d['quantity']))
-
+ 
             formalization_controls = ttk.Frame(formalized_frame)
             formalization_controls.pack(fill=tk.X, pady=5)
-
+ 
             def download_template():
-                filepath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], parent=self)
+                selected_item = notifications_tree.focus()
+                if not selected_item: return
+                notification_name = notifications_tree.item(selected_item)['values'][1]
+ 
+                filepath = filedialog.asksaveasfilename(
+                    defaultextension=".xlsx", 
+                    filetypes=[("Excel", "*.xlsx")],
+                    initialfile=f"{notification_name}.xlsx",
+                    parent=self
+                )
                 if not filepath: return
                 try:
                     df = service.get_formalization_template()
@@ -1199,7 +1252,7 @@ class AdminWindow(tk.Tk):
                     messagebox.showinfo("Успех", f"Шаблон сохранен в {filepath}", parent=self)
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось сохранить шаблон: {e}", parent=self)
-
+ 
             def upload_formalized():
                 filepath = filedialog.askopenfilename(title="Выберите заполненный шаблон", filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
                 if not filepath: return
@@ -1214,17 +1267,17 @@ class AdminWindow(tk.Tk):
                     refresh_details_panel(notification_id)
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось обработать файл: {e}", parent=self)
-
+ 
             ttk.Button(formalization_controls, text="Скачать шаблон", command=download_template).pack(side=tk.LEFT, padx=2)
             ttk.Button(formalization_controls, text="Загрузить шаблон", command=upload_formalized).pack(side=tk.LEFT, padx=2)
-
+ 
         # --- Привязки и начальная загрузка ---
         ttk.Button(list_controls, text="Создать", command=create_new_notification).pack(side=tk.LEFT, padx=2)
         ttk.Button(list_controls, text="Обновить", command=refresh_notifications_list).pack(side=tk.LEFT, padx=2)
         notifications_tree.bind('<<TreeviewSelect>>', on_notification_select)
-
+        notifications_tree.bind('<Button-1>', show_actions_menu) # Используем левый клик для простоты
+ 
         refresh_notifications_list()
-
  
     def _create_orders_tab(self, parent_frame):
         """Создает содержимое для вкладки 'Заказы'."""
@@ -1313,6 +1366,147 @@ class AdminWindow(tk.Tk):
         setup_menu.add_command(label="Редактор макетов", command=lambda: open_label_editor_window(self, self.user_info))
         menubar.add_cascade(label="Настройка", menu=setup_menu)
 
+class CalendarDialog(tk.Toplevel):
+    """Диалоговое окно с простым календарем."""
+    def __init__(self, parent, initial_date=None):
+        super().__init__(parent)
+        self.title("Выберите дату")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        if initial_date:
+            self._current_date = initial_date
+        else:
+            self._current_date = datetime.now()
+
+        self._create_widgets()
+        self._update_calendar()
+
+    def _create_widgets(self):
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(pady=5)
+        ttk.Button(nav_frame, text="<", command=self._prev_month).pack(side=tk.LEFT)
+        self.month_year_label = ttk.Label(nav_frame, font=("Arial", 12, "bold"), width=20, anchor="center")
+        self.month_year_label.pack(side=tk.LEFT, padx=10)
+        ttk.Button(nav_frame, text=">", command=self._next_month).pack(side=tk.LEFT)
+
+        self.calendar_frame = ttk.Frame(self)
+        self.calendar_frame.pack(padx=10, pady=10)
+
+    def _update_calendar(self):
+        for widget in self.calendar_frame.winfo_children():
+            widget.destroy()
+
+        self.month_year_label.config(text=self._current_date.strftime("%B %Y"))
+
+        days_of_week = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        for i, day in enumerate(days_of_week):
+            ttk.Label(self.calendar_frame, text=day).grid(row=0, column=i, padx=2, pady=2)
+
+        first_day_of_month = self._current_date.replace(day=1)
+        start_weekday = first_day_of_month.weekday() # 0=Пн, 6=Вс
+
+        import calendar
+        month_days = calendar.monthrange(self._current_date.year, self._current_date.month)[1]
+
+        current_day = 1
+        for row in range(1, 7):
+            for col in range(7):
+                if (row == 1 and col < start_weekday) or current_day > month_days:
+                    continue
+                
+                btn = ttk.Button(self.calendar_frame, text=str(current_day), width=4,
+                                 command=lambda d=current_day: self._select_date(d))
+                btn.grid(row=row, column=col, padx=1, pady=1)
+                current_day += 1
+
+    def _select_date(self, day):
+        self.result = self._current_date.replace(day=day).date()
+        self.destroy()
+
+    def _prev_month(self):
+        self._current_date = self._current_date - pd.DateOffset(months=1)
+        self._update_calendar()
+
+    def _next_month(self):
+        self._current_date = self._current_date + pd.DateOffset(months=1)
+        self._update_calendar()
+
+class NewNotificationDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
+    def __init__(self, parent, title="Новое уведомление", initial_name="", initial_date_str=""):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        frame = ttk.Frame(self, padding="15")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Наименование
+        ttk.Label(frame, text="Наименование:").grid(row=0, column=0, sticky="w", pady=2)
+        name_frame = ttk.Frame(frame)
+        name_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.name_entry = ttk.Entry(name_frame, width=40)
+        self.name_entry.insert(0, initial_name)
+        self.name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(name_frame, text="Вставить", command=self._paste_name).pack(side=tk.LEFT, padx=(5,0))
+
+        # Дата
+        ttk.Label(frame, text="Планируемая дата прибытия:").grid(row=2, column=0, sticky="w", pady=(10, 2))
+        date_frame = ttk.Frame(frame)
+        date_frame.grid(row=3, column=0, columnspan=2, sticky="ew")
+        self.date_var = tk.StringVar(value=initial_date_str)
+        self.date_entry = ttk.Entry(date_frame, textvariable=self.date_var, width=40)
+        self.date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(date_frame, text="...", width=3, command=self._open_calendar).pack(side=tk.LEFT, padx=(5,0))
+
+        # Кнопки OK/Отмена
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=(20, 0), sticky="e")
+        ttk.Button(button_frame, text="OK", command=self._on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.LEFT)
+
+        self.name_entry.focus_set()
+
+    def _paste_name(self):
+        try:
+            clipboard_text = self.clipboard_get()
+            self.name_entry.delete(0, tk.END)
+            self.name_entry.insert(0, clipboard_text)
+        except tk.TclError:
+            messagebox.showwarning("Буфер обмена", "Буфер обмена пуст или содержит нетекстовые данные.", parent=self)
+
+    def _open_calendar(self):
+        try:
+            initial_date = datetime.strptime(self.date_var.get(), "%Y-%m-%d")
+        except ValueError:
+            initial_date = datetime.now()
+        
+        cal_dialog = CalendarDialog(self, initial_date=initial_date)
+        self.wait_window(cal_dialog)
+        if cal_dialog.result:
+            self.date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
+
+    def _on_ok(self):
+        name = self.name_entry.get().strip()
+        if not name:
+            messagebox.showwarning("Внимание", "Наименование не может быть пустым.", parent=self)
+            return
+
+        date_str = self.date_var.get().strip()
+        arrival_date = None
+        if date_str:
+            try:
+                arrival_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                messagebox.showerror("Ошибка", "Неверный формат даты. Используйте ГГГГ-ММ-ДД или выберите из календаря.", parent=self)
+                return
+
+        self.result = (name, arrival_date)
+        self.destroy()
 class CalendarDialog(tk.Toplevel):
     """Диалоговое окно с простым календарем."""
     def __init__(self, parent, initial_date=None):
