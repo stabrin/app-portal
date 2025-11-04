@@ -127,6 +127,15 @@ class SupplyNotificationService:
                 )
                 conn.commit()
 
+    def update_notification_name(self, notification_id, new_name):
+        """Обновляет имя уведомления."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE ap_supply_notifications SET name = %s WHERE id = %s",
+                    (new_name, notification_id)
+                )
+                conn.commit()
     def update_arrival_date(self, notification_id, new_date):
         """Обновляет планируемую дату прибытия."""
         with self.get_db_connection() as conn:

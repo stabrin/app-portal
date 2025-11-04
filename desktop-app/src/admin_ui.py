@@ -1173,8 +1173,8 @@ class AdminWindow(tk.Tk):
             if dialog.result:
                 new_name, new_date = dialog.result
                 try:
+                    service.update_notification_name(notification_id, new_name)
                     service.update_arrival_date(notification_id, new_date)
-                    # TODO: Добавить обновление имени в сервисе
                     refresh_notifications_list()
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось обновить уведомление: {e}", parent=self)
@@ -1239,17 +1239,17 @@ class AdminWindow(tk.Tk):
                 if not selected_item: return
                 notification_name = notifications_tree.item(selected_item)['values'][1]
  
-                filepath = filedialog.asksaveasfilename(
+                file_path = filedialog.asksaveasfilename(
                     defaultextension=".xlsx", 
                     filetypes=[("Excel", "*.xlsx")],
                     initialfile=f"{notification_name}.xlsx",
                     parent=self
                 )
-                if not filepath: return
+                if not file_path: return
                 try:
                     df = service.get_formalization_template()
-                    df.to_excel(filepath, index=False)
-                    messagebox.showinfo("Успех", f"Шаблон сохранен в {filepath}", parent=self)
+                    df.to_excel(file_path, index=False)
+                    messagebox.showinfo("Успех", f"Шаблон сохранен в {file_path}", parent=self)
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось сохранить шаблон: {e}", parent=self)
  
