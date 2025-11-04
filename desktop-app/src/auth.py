@@ -1,5 +1,6 @@
 # src/auth_test.py
 
+import pandas
 import tkinter as tk
 from tkinter import messagebox
 import os
