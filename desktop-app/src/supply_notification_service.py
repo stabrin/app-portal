@@ -81,7 +81,7 @@ class SupplyNotificationService:
         """
         try:
             # Указываем, что колонка GTIN всегда должна читаться как текст
-            df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str})
+            df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str}, engine='openpyxl')
             # Приводим названия колонок к нижнему регистру для удобства
             df.columns = [col.strip().lower() for col in df.columns]
 

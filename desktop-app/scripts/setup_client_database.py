@@ -324,6 +324,9 @@ def update_client_db_schema(conn):
                 expiry_date DATE
             );
         """),
+        # --- ИСПРАВЛЕНИЕ: Явно добавляем колонку, если она отсутствует, для обратной совместимости ---
+        sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS aggregation TEXT;"),
+
         sql.SQL("COMMENT ON TABLE ap_supply_notification_details IS 'Детализированное содержимое формализованного уведомления о поставке';"),
     ]
 
