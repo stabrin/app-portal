@@ -357,153 +357,104 @@ def run_import_from_dmkod(order_id: int) -> list:
     Агрегация всегда только 1-го уровня и управляется полем aggregation_level из БД."""
     logs = [f"Запуск импорта кодов из БД для Заказа №{order_id}..."]
     conn = None
-    all_dm_data = []
 
     try:
         conn = get_db_connection()
         with conn.cursor() as cur:
             # 1. Получаем все строки детализации с кодами для этого заказа
-            # --- ИЗМЕНЕНИЕ: Также получаем aggregation_level ---
             cur.execute("""
                 SELECT gtin, api_codes_json, aggregation_level, api_id
                 FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL
             """, (order_id,))
-            details_with_codes = cur.fetchall()
-            # Преобразуем кортежи в словари вручную для удобства
             columns = [desc[0] for desc in cur.description]
-            details_with_codes = [dict(zip(columns, row)) for row in details_with_codes]
+            all_details_with_codes = [dict(zip(columns, row)) for row in cur.fetchall()]
 
-            if not details_with_codes:
+            if not all_details_with_codes:
                 raise ValueError("Не найдено кодов для импорта в базе данных.")
 
-            # 2. Собираем все коды в один список all_dm_data
-            for i, detail in enumerate(details_with_codes):
-                codes, gtin = detail.get('api_codes_json', {}).get('codes', []), detail.get('gtin')
+            # --- НОВАЯ ЛОГИКА: Обрабатываем каждый тираж отдельно ---
+            for detail in all_details_with_codes:
+                api_id = detail['api_id']
+                gtin = detail['gtin']
                 aggregation_level = detail['aggregation_level']
-                api_id = detail['api_id'] # Получаем реальный ID тиража
-                logs.append(f"  -> Извлечено {len(codes)} кодов для GTIN {gtin} (ID тиража: {api_id}).")
-                for dm_string in codes:
+                codes_from_json = detail.get('api_codes_json', {}).get('codes', [])
+
+                logs.append(f"\n--- Обработка тиража ID: {api_id} (GTIN: {gtin}) ---")
+
+                if not codes_from_json:
+                    logs.append("  -> В записи нет кодов для обработки. Пропускаю.")
+                    continue
+
+                # Проверяем, существуют ли коды из ЭТОГО тиража в таблице items
+                items_table = os.getenv('TABLE_ITEMS', 'items')
+                cur.execute(f"SELECT 1 FROM {items_table} WHERE datamatrix = ANY(%s) LIMIT 1", (codes_from_json,))
+                if cur.fetchone():
+                    logs.append("  -> ИНФО: Коды из этого тиража уже были загружены ранее. Пропускаю.")
+                    continue
+
+                # Собираем данные для DataFrame только для текущего тиража
+                current_tirage_dm_data = []
+                for dm_string in codes_from_json:
                     parsed_data = parse_datamatrix(dm_string)
                     if not parsed_data.get('gtin'):
                         logs.append(f"  -> Пропущен код: не удалось распознать GTIN в '{dm_string[:30]}...'.")
                         continue
                     parsed_data['order_id'] = order_id
-                    parsed_data['tirage_number'] = str(api_id) # Используем api_id как номер тиража
-                    # --- НОВОЕ: Сохраняем уровень агрегации для каждого кода ---
-                    parsed_data['aggregation_level'] = aggregation_level
-                    all_dm_data.append(parsed_data)
-        
-        if not all_dm_data:
-            raise ValueError("Не найдено корректных кодов DataMatrix для обработки.")
+                    parsed_data['tirage_number'] = str(api_id)
+                    current_tirage_dm_data.append(parsed_data)
 
-        items_df = pd.DataFrame(all_dm_data)
-        logs.append(f"\nВсего найдено и разобрано {len(items_df)} кодов DataMatrix.")
-        logs.append("Проверяю, не были ли эти коды обработаны ранее...")
-
-        with conn.cursor() as cur:
-            dm_to_check = tuple(items_df['datamatrix'].unique())
-            items_table = os.getenv('TABLE_ITEMS', 'items')
-            cur.execute(f"SELECT datamatrix, order_id FROM {items_table} WHERE datamatrix IN %s", (dm_to_check,))
-            existing_codes = cur.fetchall()
-            if existing_codes:
-                error_msg = "\nОШИБКА: Обнаружены коды, которые уже были обработаны. Процесс прерван."
-                logs.append(error_msg)
-                return logs
-            
-            logs.append("Проверка на дубликаты пройдена успешно.")
-            
-            # Проверка и создание GTIN в справочнике
-            unique_gtins_in_upload = items_df['gtin'].unique()
-            products_table = os.getenv('TABLE_PRODUCTS', 'products')
-            cur.execute(f"SELECT gtin FROM {products_table} WHERE gtin IN %s", (tuple(unique_gtins_in_upload),))
-            existing_gtins_from_db = {row[0] for row in cur.fetchall()}
-            new_gtins = [gtin for gtin in unique_gtins_in_upload if gtin not in existing_gtins_from_db]
-            if new_gtins:
-                logs.append(f"Найдено {len(new_gtins)} новых GTIN. Создаю для них заглушки...")
-                new_products_df = pd.DataFrame([{'gtin': gtin, 'name': f'Товар (GTIN: {gtin})'} for gtin in new_gtins])
-                upsert_data_to_db(cur, 'TABLE_PRODUCTS', new_products_df, 'gtin')
-
-            # Агрегация
-            packages_df = pd.DataFrame()
-            logs.append(f"\nНачинаю автоматическую агрегацию 1-го уровня...")
-            all_packages = []
-            items_df['package_id'] = None
-            
-            # Группируем по номеру тиража, чтобы обработать каждый тираж отдельно
-            for tirage_num, group in items_df.groupby('tirage_number'):
-                item_indices = group.index.tolist()
-                agg_level = group['aggregation_level'].iloc[0]
-                gtin = group['gtin'].iloc[0]
-                agg_level_int = int(agg_level) if pd.notna(agg_level) else 0
-
-                if agg_level_int <= 0:
-                    logs.append(f"ИНФО: Агрегация для тиража №{tirage_num} (GTIN: {gtin}) пропущена, т.к. кол-во в коробе не задано (aggregation_level={agg_level}).")
+                if not current_tirage_dm_data:
+                    logs.append("  -> В тираже не найдено корректных кодов DataMatrix для обработки.")
                     continue
-                
-                # --- НОВАЯ ЛОГИКА ---
-                # Если agg_level_int == 1, каждый код в отдельный короб.
-                # Если agg_level_int > 1, группируем как раньше.
-                # Шаг для цикла всегда будет agg_level_int, т.к. range(0, N, 1) работает корректно.
-                step = agg_level_int
-                
-                if step == 1:
-                    logs.append(f"  -> Агрегирую тираж №{tirage_num} (GTIN: {gtin}) в индивидуальные короба (1 к 1).")
+
+                items_df = pd.DataFrame(current_tirage_dm_data)
+                logs.append(f"  -> Подготовлено к загрузке {len(items_df)} кодов.")
+
+                # Проверка и создание GTIN в справочнике
+                products_table = os.getenv('TABLE_PRODUCTS', 'products')
+                cur.execute(f"SELECT gtin FROM {products_table} WHERE gtin = %s", (gtin,))
+                if not cur.fetchone():
+                    logs.append(f"  -> GTIN {gtin} не найден в справочнике. Создаю заглушку...")
+                    new_products_df = pd.DataFrame([{'gtin': gtin, 'name': f'Товар (GTIN: {gtin})'}])
+                    upsert_data_to_db(cur, 'TABLE_PRODUCTS', new_products_df, 'gtin')
+
+                # Агрегация
+                all_packages = []
+                items_df['package_id'] = None
+                agg_level_int = int(aggregation_level) if pd.notna(aggregation_level) else 0
+
+                if agg_level_int > 0:
+                    logs.append(f"  -> Начинаю агрегацию с шагом {agg_level_int} шт. в коробе.")
+                    item_indices = items_df.index.tolist()
+                    step = agg_level_int
+                    for i in range(0, len(item_indices), step):
+                        chunk_indices = item_indices[i:i + step]
+                        box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
+                        if warning and warning not in logs: logs.append(warning)
+                        items_df.loc[chunk_indices, 'package_id'] = box_id
+                        _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
+                        all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 1, 'parent_id': None})
                 else:
-                    logs.append(f"  -> Агрегирую тираж №{tirage_num} (GTIN: {gtin}) с шагом {step} шт. в коробе.")
+                    logs.append("  -> Агрегация для тиража пропущена, т.к. кол-во в коробе не задано.")
 
-                for i in range(0, len(item_indices), step):
-                    chunk_indices = item_indices[i:i + step]
-                    box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
-                    if warning and warning not in logs: logs.append(warning)
-                    items_df.loc[chunk_indices, 'package_id'] = box_id
-                    _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
-                    all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 1, 'parent_id': None})
-            
-            if all_packages:
-                packages_df = pd.DataFrame(all_packages)
+                # Сохранение результатов для текущего тиража
+                if all_packages:
+                    packages_df = pd.DataFrame(all_packages)
+                    logs.append(f"  -> Загружаю {len(packages_df)} упаковок...")
+                    upsert_data_to_db(cur, 'TABLE_PACKAGES', packages_df, 'id')
 
-            # Сохранение результатов
-            if not packages_df.empty:
-                logs.append(f"\nЗагружаю {len(packages_df)} упаковок...")
-                upsert_data_to_db(cur, 'TABLE_PACKAGES', packages_df, 'id')
-            
-            # --- НОВОЕ: Удаляем временный столбец перед сохранением ---
-            # Столбец 'aggregation_level' нужен был только для логики агрегации
-            # и не должен сохраняться в таблицу 'items'.
-            if 'aggregation_level' in items_df.columns:
-                items_df_to_save = items_df.drop(columns=['aggregation_level'])
-            else:
-                items_df_to_save = items_df
+                logs.append(f"  -> Загружаю {len(items_df)} товаров...")
+                upsert_data_to_db(cur, 'TABLE_ITEMS', items_df, 'datamatrix')
 
-            # --- НОВЫЙ БЛОК: Связывание кодов с упаковками для delta-заказов ---
-            # Этот блок был перемещен сюда, чтобы использовать тот же курсор
-            orders_table_for_status = os.getenv('TABLE_ORDERS', 'orders')
-            cur.execute(f"SELECT status FROM {orders_table_for_status} WHERE id = %s", (order_id,)) # Используем стандартный курсор
-            order_status_row = cur.fetchone() # Вернет кортеж, например ('delta',)
-            if order_status_row and order_status_row[0] == 'delta':
-                logs.append("\nСтатус заказа 'delta'. Запускаю связывание кодов с упаковками...")
-                packages_table = os.getenv('TABLE_PACKAGES', 'packages')
-                cur.execute(f"SELECT id, sscc FROM {packages_table} WHERE owner = 'delta' AND order_id = %s", (order_id,))
-                sscc_columns = [desc[0] for desc in cur.description]
-                sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
-
-                # Для этого нам нужен доступ к BoxSSCC, который есть в исходном items_df
-                if 'BoxSSCC' in items_df.columns:
-                    items_df_to_save['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
-                    updated_count = items_df_to_save['package_id'].notna().sum()
-                    logs.append(f"Успешно связано {updated_count} кодов с коробами.")
-                else:
-                    logs.append("ПРЕДУПРЕЖДЕНИЕ: В данных отсутствует колонка 'BoxSSCC', связывание с коробами для 'delta' заказа невозможно.")
-
-            upsert_data_to_db(cur, 'TABLE_ITEMS', items_df_to_save, 'datamatrix')
-            
+            # Коммит после каждого тиража, чтобы зафиксировать результат
             conn.commit()
-            logs.append("\nПроцесс импорта и агрегации успешно завершен!")    
+
+        logs.append("\nПроцесс импорта и агрегации успешно завершен!")
     except Exception as e:
         if conn: conn.rollback()
         logs.append(f"\nКРИТИЧЕСКАЯ ОШИБКА: {e}")
         logs.append("Все изменения в базе данных отменены.")
     finally:
         if conn: conn.close()
-            
+
     return logs
