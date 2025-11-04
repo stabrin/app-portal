@@ -79,40 +79,45 @@ class SupplyNotificationService:
         Обрабатывает загруженный формализованный файл, очищает старые детали
         и загружает новые.
         """
+        # --- ИСПРАВЛЕНИЕ: Обрабатываем случай, когда file_data is None (для удаления) ---
+        if file_data is None:
+            df = pd.DataFrame()
+        else:
+            try:
+                # Указываем, что колонка GTIN всегда должна читаться как текст
+                df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str}, engine='openpyxl')
+            except Exception as e:
+                logging.error(f"Ошибка чтения Excel файла: {e}")
+                raise ValueError(f"Не удалось прочитать Excel файл. Ошибка: {e}")
+
         try:
-            # Указываем, что колонка GTIN всегда должна читаться как текст
-            df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str}, engine='openpyxl')
-            # Приводим названия колонок к нижнему регистру для удобства
-            df.columns = [col.strip().lower() for col in df.columns]
-
-            # Проверяем наличие обязательных колонок
-            required_cols = {'gtin', 'кол-во'}
-            if not required_cols.issubset(df.columns):
-                raise ValueError(f"Отсутствуют обязательные колонки. Требуются: 'GTIN', 'Кол-во'")
-
             details_to_insert = []
-            for _, row in df.iterrows():
-                # Преобразуем даты, игнорируя ошибки
-                prod_date = pd.to_datetime(row.get('дата производства'), errors='coerce')
-                exp_date = pd.to_datetime(row.get('окончание срока годности'), errors='coerce')
-                # Срок годности в месяцах
-                shelf_life_months = pd.to_numeric(row.get('срок годности'), errors='coerce')
+            if not df.empty:
+                # Приводим названия колонок к нижнему регистру для удобства
+                df.columns = [col.strip().lower() for col in df.columns]
 
-                # Логика расчета дат
-                if pd.notna(prod_date) and pd.notna(shelf_life_months) and pd.isna(exp_date):
-                    exp_date = prod_date + relativedelta(months=int(shelf_life_months))
-                
-                # Собираем данные для вставки
-                details_to_insert.append({
-                    'notification_id': notification_id,
-                    'gtin': str(row.get('gtin', '')),
-                    'quantity': int(row.get('кол-во', 0)),
-                    'aggregation': str(row.get('агрегация', '')),
-                    'production_date': None if pd.isna(prod_date) else prod_date.date(),
-                    'expiry_date': None if pd.isna(exp_date) else exp_date.date(),
-                    # product_name пока не используется в шаблоне, но оставим поле в таблице
-                    'product_name': str(row.get('наименование', '')) 
-                })
+                # Проверяем наличие обязательных колонок
+                required_cols = {'gtin', 'кол-во'}
+                if not required_cols.issubset(df.columns):
+                    raise ValueError(f"Отсутствуют обязательные колонки. Требуются: 'GTIN', 'Кол-во'")
+
+                for _, row in df.iterrows():
+                    prod_date = pd.to_datetime(row.get('дата производства'), errors='coerce')
+                    exp_date = pd.to_datetime(row.get('окончание срока годности'), errors='coerce')
+                    shelf_life_months = pd.to_numeric(row.get('срок годности'), errors='coerce')
+
+                    if pd.notna(prod_date) and pd.notna(shelf_life_months) and pd.isna(exp_date):
+                        exp_date = prod_date + relativedelta(months=int(shelf_life_months))
+                    
+                    details_to_insert.append({
+                        'notification_id': notification_id,
+                        'gtin': str(row.get('gtin', '')),
+                        'quantity': int(row.get('кол-во', 0)),
+                        'aggregation': str(row.get('агрегация', '')),
+                        'production_date': None if pd.isna(prod_date) else prod_date.date(),
+                        'expiry_date': None if pd.isna(exp_date) else exp_date.date(),
+                        'product_name': str(row.get('наименование', '')) 
+                    })
 
             with self.get_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -128,9 +133,7 @@ class SupplyNotificationService:
                     """
                     data_tuples = [(d['notification_id'], d['gtin'], d['quantity'], d['aggregation'], d['production_date'], d['expiry_date'], d['product_name']) for d in details_to_insert]
                     if data_tuples:
-                        cur.execute(
-                            execute_values(cur, insert_query, data_tuples)
-                        )
+                        execute_values(cur, insert_query, data_tuples)
                     logging.info(f"Загружено {len(df)} новых строк деталей для уведомления {notification_id}.")
                 conn.commit() 
             return len(df)
