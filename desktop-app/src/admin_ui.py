@@ -1173,7 +1173,7 @@ class AdminWindow(tk.Tk):
             if dialog.result:
                 new_name, new_date = dialog.result
                 try:
-                    service.update_arrival_date(notification_id, new_date) # Пока обновляем только дату
+                    service.update_arrival_date(notification_id, new_date)
                     # TODO: Добавить обновление имени в сервисе
                     refresh_notifications_list()
                 except Exception as e:
