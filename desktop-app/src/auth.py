@@ -11,6 +11,14 @@ import traceback
 # --- Настройка путей для импорта ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
+# --- ИСПРАВЛЕНИЕ: Загружаем переменные окружения в самом начале ---
+from dotenv import load_dotenv
+dotenv_path = os.path.join(project_root, '.env')
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path=dotenv_path)
+else:
+    logging.warning(f"Файл .env не найден по пути: {dotenv_path}. Переменные окружения могут быть не установлены.")
+
 # --- НАДЁЖНОЕ РЕШЕНИЕ ПРОБЛЕМЫ С ВИРТУАЛЬНЫМ ОКРУЖЕНИЕМ ---
 # Принудительно добавляем путь к библиотекам виртуального окружения.
 # Это гарантирует, что все зависимости (pylibdmtx, qrcode и т.д.) будут найдены,
