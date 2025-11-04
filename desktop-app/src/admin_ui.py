@@ -23,7 +23,7 @@ logging.basicConfig(
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler('app.log', encoding='utf-8')  # Или другой путь к лог-файлу
-    ]
+    ])
 
 # Импорты для работы с БД и QR-кодами
 from .db_connector import get_main_db_connection
