@@ -1221,10 +1221,10 @@ class AdminWindow(tk.Tk):
             for widget in formalized_frame.winfo_children(): widget.destroy()
  
             formalized_files = [f for f in files if f['file_type'] == 'formalized']
-            details_tree = ttk.Treeview(formalized_frame, columns=('gtin', 'name', 'qty'), show='headings', height=5)
+            details_tree = ttk.Treeview(formalized_frame, columns=('gtin', 'product_name', 'quantity'), show='headings', height=5)
             details_tree.heading('gtin', text='GTIN')
-            details_tree.heading('name', text='Наименование')
-            details_tree.heading('qty', text='Кол-во')
+            details_tree.heading('product_name', text='Наименование')
+            details_tree.heading('quantity', text='Кол-во')
             details_tree.pack(fill='both', expand=True)
  
             details = service.get_notification_details(notification_id)

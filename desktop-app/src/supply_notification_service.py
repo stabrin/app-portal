@@ -80,17 +80,20 @@ class SupplyNotificationService:
         """
         try:
             df = pd.read_excel(io.BytesIO(file_data))
+            # Приводим названия колонок к нижнему регистру для удобства
+            df.columns = [col.lower() for col in df.columns]
+
             # Проверяем наличие обязательных колонок
-            required_cols = {'gtin', 'product_name', 'quantity'}
+            required_cols = {'gtin', 'кол-во'}
             if not required_cols.issubset(df.columns):
-                raise ValueError(f"Отсутствуют обязательные колонки. Требуются: {', '.join(required_cols)}")
+                raise ValueError(f"Отсутствуют обязательные колонки. Требуются: 'GTIN', 'Кол-во'")
 
             with self.get_db_connection() as conn:
                 with conn.cursor() as cur:
                     # 1. Удаляем старые детали для этого уведомления
                     cur.execute("DELETE FROM ap_supply_notification_details WHERE notification_id = %s", (notification_id,))
                     logging.info(f"Старые детали для уведомления {notification_id} удалены.")
-
+ 
                     # 2. Загружаем новые детали
                     for _, row in df.iterrows():
                         cur.execute(
@@ -98,7 +101,7 @@ class SupplyNotificationService:
                             INSERT INTO ap_supply_notification_details (notification_id, gtin, product_name, quantity)
                             VALUES (%s, %s, %s, %s)
                             """,
-                            (notification_id, str(row['gtin']), str(row['product_name']), int(row['quantity']))
+                            (notification_id, str(row.get('gtin')), str(row.get('product_name', '')), int(row.get('кол-во', 0)))
                         )
                     logging.info(f"Загружено {len(df)} новых строк деталей для уведомления {notification_id}.")
                 conn.commit()
