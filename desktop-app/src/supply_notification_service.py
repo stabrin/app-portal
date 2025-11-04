@@ -71,7 +71,7 @@ class SupplyNotificationService:
 
     def get_formalization_template(self):
         """Возвращает шаблон для формализации в виде DataFrame."""
-        return pd.DataFrame(columns=['gtin', 'product_name', 'quantity'])
+        return pd.DataFrame(columns=['GTIN', 'Кол-во', 'Агрегация', 'Дата производства', 'Срок годности', 'Окончание срока годности'])
 
     def process_formalized_file(self, notification_id, file_data):
         """

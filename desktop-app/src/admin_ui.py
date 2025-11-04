@@ -1313,6 +1313,144 @@ class AdminWindow(tk.Tk):
         setup_menu.add_command(label="Редактор макетов", command=lambda: open_label_editor_window(self, self.user_info))
         menubar.add_cascade(label="Настройка", menu=setup_menu)
 
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(label="О программе")
-        menubar.add_cascade(label="Справка", menu=help_menu)
+class CalendarDialog(tk.Toplevel):
+    """Диалоговое окно с простым календарем."""
+    def __init__(self, parent, initial_date=None):
+        super().__init__(parent)
+        self.title("Выберите дату")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        if initial_date:
+            self._current_date = initial_date
+        else:
+            self._current_date = datetime.now()
+
+        self._create_widgets()
+        self._update_calendar()
+
+    def _create_widgets(self):
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(pady=5)
+        ttk.Button(nav_frame, text="<", command=self._prev_month).pack(side=tk.LEFT)
+        self.month_year_label = ttk.Label(nav_frame, font=("Arial", 12, "bold"), width=20, anchor="center")
+        self.month_year_label.pack(side=tk.LEFT, padx=10)
+        ttk.Button(nav_frame, text=">", command=self._next_month).pack(side=tk.LEFT)
+
+        self.calendar_frame = ttk.Frame(self)
+        self.calendar_frame.pack(padx=10, pady=10)
+
+    def _update_calendar(self):
+        for widget in self.calendar_frame.winfo_children():
+            widget.destroy()
+
+        self.month_year_label.config(text=self._current_date.strftime("%B %Y"))
+
+        days_of_week = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        for i, day in enumerate(days_of_week):
+            ttk.Label(self.calendar_frame, text=day).grid(row=0, column=i, padx=2, pady=2)
+
+        first_day_of_month = self._current_date.replace(day=1)
+        start_weekday = first_day_of_month.weekday() # 0=Пн, 6=Вс
+
+        import calendar
+        month_days = calendar.monthrange(self._current_date.year, self._current_date.month)[1]
+
+        current_day = 1
+        for row in range(1, 7):
+            for col in range(7):
+                if (row == 1 and col < start_weekday) or current_day > month_days:
+                    continue
+                
+                btn = ttk.Button(self.calendar_frame, text=str(current_day), width=4,
+                                 command=lambda d=current_day: self._select_date(d))
+                btn.grid(row=row, column=col, padx=1, pady=1)
+                current_day += 1
+
+    def _select_date(self, day):
+        self.result = self._current_date.replace(day=day).date()
+        self.destroy()
+
+    def _prev_month(self):
+        self._current_date = self._current_date - pd.DateOffset(months=1)
+        self._update_calendar()
+
+    def _next_month(self):
+        self._current_date = self._current_date + pd.DateOffset(months=1)
+        self._update_calendar()
+
+class NewNotificationDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
+    def __init__(self, parent, title="Новое уведомление", initial_name="", initial_date_str=""):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        frame = ttk.Frame(self, padding="15")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Наименование
+        ttk.Label(frame, text="Наименование:").grid(row=0, column=0, sticky="w", pady=2)
+        name_frame = ttk.Frame(frame)
+        name_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.name_entry = ttk.Entry(name_frame, width=40)
+        self.name_entry.insert(0, initial_name)
+        self.name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(name_frame, text="Вставить", command=self._paste_name).pack(side=tk.LEFT, padx=(5,0))
+
+        # Дата
+        ttk.Label(frame, text="Планируемая дата прибытия:").grid(row=2, column=0, sticky="w", pady=(10, 2))
+        date_frame = ttk.Frame(frame)
+        date_frame.grid(row=3, column=0, columnspan=2, sticky="ew")
+        self.date_var = tk.StringVar(value=initial_date_str)
+        self.date_entry = ttk.Entry(date_frame, textvariable=self.date_var, width=40)
+        self.date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(date_frame, text="...", width=3, command=self._open_calendar).pack(side=tk.LEFT, padx=(5,0))
+
+        # Кнопки OK/Отмена
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=(20, 0), sticky="e")
+        ttk.Button(button_frame, text="OK", command=self._on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.LEFT)
+
+        self.name_entry.focus_set()
+
+    def _paste_name(self):
+        try:
+            clipboard_text = self.clipboard_get()
+            self.name_entry.delete(0, tk.END)
+            self.name_entry.insert(0, clipboard_text)
+        except tk.TclError:
+            messagebox.showwarning("Буфер обмена", "Буфер обмена пуст или содержит нетекстовые данные.", parent=self)
+
+    def _open_calendar(self):
+        try:
+            initial_date = datetime.strptime(self.date_var.get(), "%Y-%m-%d")
+        except ValueError:
+            initial_date = datetime.now()
+        
+        cal_dialog = CalendarDialog(self, initial_date=initial_date)
+        self.wait_window(cal_dialog)
+        if cal_dialog.result:
+            self.date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
+
+    def _on_ok(self):
+        name = self.name_entry.get().strip()
+        if not name:
+            messagebox.showwarning("Внимание", "Наименование не может быть пустым.", parent=self)
+            return
+
+        date_str = self.date_var.get().strip()
+        arrival_date = None
+        if date_str:
+            try:
+                arrival_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                messagebox.showerror("Ошибка", "Неверный формат даты. Используйте ГГГГ-ММ-ДД или выберите из календаря.", parent=self)
+                return
+
+        self.result = (name, arrival_date)
+        self.destroy()
