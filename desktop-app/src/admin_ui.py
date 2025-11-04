@@ -1,6 +1,8 @@
 # src/admin_ui.py
 
 import tkinter as tk
+import logging
+
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
 import json
@@ -14,6 +16,15 @@ try:
 except ImportError:
     Image = None # Помечаем как недоступный, если Pillow не установлен
 
+# Настройка логирования
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - [admin_ui.py] - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('app.log', encoding='utf-8')  # Или другой путь к лог-файлу
+    ]
+
 # Импорты для работы с БД и QR-кодами
 from .db_connector import get_main_db_connection
 import bcrypt
@@ -23,6 +34,7 @@ import psycopg2.extras
 # Импортируем новый сервис печати
 from .printing_service import PrintingService, LabelEditorWindow, ImageSelectionDialog
 
+import requests
 import traceback
 
 def open_label_editor_window(parent_widget, user_info):
@@ -1077,10 +1089,11 @@ class AdminWindow(tk.Tk):
         ttk.Label(reports_frame, text="Раздел 'Отчеты' в разработке.", font=("Arial", 14)).pack(expand=True)
         ttk.Label(admin_frame, text="Раздел 'Администрирование' в разработке.", font=("Arial", 14)).pack(expand=True)
 
-    def _create_supply_notice_tab(self, parent_frame):
+    def _create_catalogs_tab(self, parent_frame):
+        logger = logging.getLogger(__name__)
         """Создает содержимое для вкладки 'Уведомление о поставке'."""
         from .supply_notification_service import SupplyNotificationService
-        service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
+        #service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
  
         # Основной контейнер
         paned_window = ttk.PanedWindow(parent_frame, orient=tk.HORIZONTAL)
@@ -1093,12 +1106,11 @@ class AdminWindow(tk.Tk):
         list_controls = ttk.Frame(list_frame)
         list_controls.pack(fill=tk.X, pady=5)
  
-        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name', 'date', 'status', 'actions'), show='headings')
+        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name'), show='headings')
         notifications_tree.heading('id', text='ID')
         notifications_tree.heading('name', text='Наименование')
-        notifications_tree.heading('date', text='План. дата')
-        notifications_tree.heading('status', text='Статус')
-        notifications_tree.heading('actions', text='Действия')
+        #notifications_tree.heading('date', text='План. дата')
+        #notifications_tree.heading('status', text='Статус')
         notifications_tree.column('id', width=40, anchor=tk.CENTER)
         notifications_tree.column('name', width=200)
         notifications_tree.column('date', width=100, anchor=tk.CENTER)
@@ -1108,10 +1120,34 @@ class AdminWindow(tk.Tk):
  
         # --- Правая панель: Детали уведомления ---
         details_frame = ttk.Frame(paned_window, padding="5")
-        paned_window.add(details_frame, weight=2)
-        details_notebook = ttk.Notebook(details_frame)
-        details_notebook.pack(fill='both', expand=True)
- 
+        paned_window.add(details_frame, weight=2) 
+
+        #details_notebook = ttk.Notebook(details_frame)
+        #details_notebook.pack(fill='both', expand=True)
+
+        # --- Функции ---
+        def refresh_notifications_list():
+            # Очищаем дерево перед обновлением
+            for i in notifications_tree.get_children():
+                notifications_tree.delete(i)
+            try:
+                logger.info("Загрузка списка клиентов из API...")
+                access_token = self.user_info.get('api_access_token')
+                api_base_url = os.getenv('API_BASE_URL')
+                logger.debug(f"API base URL: {api_base_url}")
+                participants_url = f"{api_base_url.rstrip('/')}/psp/participants"
+                headers = {'Authorization': f'Bearer {access_token}'}
+                logger.debug(f"Headers: {headers}")
+                response = requests.get(participants_url, headers=headers)
+                response.raise_for_status()
+                participants_list = response.json().get('participants', [])
+                logger.debug(f"Получено {len(participants_list)} клиентов из API.")
+                for n in participants_list:
+                    # Вставляем данные и "..." для действий
+                    item_id = notifications_tree.insert('', 'end', values=(n['id'], n['name']))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
+
         # Вкладки для деталей
         supplier_files_frame = ttk.Frame(details_notebook, padding="10")
         formalized_frame = ttk.Frame(details_notebook, padding="10")
@@ -1336,7 +1372,7 @@ class AdminWindow(tk.Tk):
         notifications_tree.bind('<Button-1>', show_actions_menu) # Используем левый клик для простоты
  
         refresh_notifications_list()
- 
+
     def _create_orders_tab(self, parent_frame):
         """Создает содержимое для вкладки 'Заказы'."""
         controls_frame = ttk.Frame(parent_frame)

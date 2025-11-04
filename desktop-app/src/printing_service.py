@@ -7,6 +7,7 @@ import textwrap
 from typing import Dict, Any, Optional
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor # Явно импортируем RealDictCursor
+
 import psycopg2
 
 # Библиотеки для генерации штрихкодов и работы с Windows API
@@ -19,6 +20,7 @@ except ImportError:
     Image = None
     ImageDraw = None
     ImageFont = None
+
     ImageTk = None
     ImageWin = None
 
@@ -27,6 +29,7 @@ try:
 except ImportError:
     logging.warning("Библиотека pylibdmtx не установлена. Установите: pip install pylibdmtx")
     dmtx_encode = None
+
 
 try:
     import win32print
@@ -37,6 +40,7 @@ try:
 except ImportError:
     logging.warning("pywin32 not installed. Install with: pip install pywin32")
     win32print = None
+
     win32ui = None
     win32con = None
     win32gui = None
@@ -46,6 +50,7 @@ try:
     import tkinter as tk
     from tkinter import ttk, simpledialog, messagebox
 except ImportError:
+
     logging.warning("tkinter not installed. GUI features will be limited.")
     tk = None
 
@@ -61,6 +66,7 @@ logging.basicConfig(
 
 class PrintingService:
     """Сервис для генерации и печати документов."""
+
 
     @staticmethod
     def _get_client_db_connection(user_info: Dict[str, Any]) -> Optional[psycopg2.extensions.connection]:
@@ -107,6 +113,7 @@ class PrintingService:
                 except OSError as e:
                     logging.warning(f"Не удалось удалить временный файл сертификата {temp_cert_file}: {e}")
 
+
     @staticmethod
     def _fetch_data_from_db(user_info: Dict[str, Any], data_source: str) -> Optional[str]:
         """Получает данные из БД клиента по указанному источнику (table.field)."""
@@ -143,6 +150,7 @@ class PrintingService:
         finally:
             if conn:
                 conn.close()
+
                 logging.debug("Соединение с БД закрыто.")
 
     @staticmethod
@@ -150,6 +158,7 @@ class PrintingService:
         """
         Подбирает шрифт и переносит текст по словам, чтобы он поместился в заданные рамки.
         """
+
         font_size = min(max_height, 72) # Начинаем с разумного максимального размера шрифта
         font = None
         wrapped_text = text
@@ -195,6 +204,7 @@ class PrintingService:
         # Если цикл завершился, значит, даже самый маленький шрифт не поместился.
         # Возвращаем самый маленький шрифт и максимально обернутый текст.
         return font, wrapped_text
+
     @staticmethod
     def _get_fitting_font(text: str, font_name: str, max_width: int, max_height: int) -> ImageFont.FreeTypeFont:
         """
@@ -226,6 +236,7 @@ class PrintingService:
                 return font  # Шрифт подходит по ширине и высоте (т.к. начали с max_height)
             font_size -= 1
         
+
         return font # Возвращаем самый маленький из попробованных, если ничего не подошло
     @staticmethod
     def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], text_cache: Optional[Dict] = None, static_layers_cache: Optional[Dict] = None) -> Optional[Image.Image]:
@@ -234,6 +245,7 @@ class PrintingService:
         if not all([Image, ImageDraw, ImageFont]):
             logging.error("Pillow не установлен. Генерация изображения невозможна.")
             raise ImportError("Библиотека Pillow не установлена.")
+
 
         # --- НОВЫЙ БЛОК: Инициализация кэшей ---
         if text_cache is None: text_cache = {}
@@ -246,6 +258,7 @@ class PrintingService:
                 logging.error("Отсутствуют размеры этикетки (width_mm или height_mm) в template_json.")
                 raise ValueError("Некорректный шаблон: отсутствуют размеры этикетки.")
 
+
             DPI = 300
             dots_per_mm = DPI / 25.4
             width_px = int(template_json["width_mm"] * dots_per_mm)
@@ -256,6 +269,7 @@ class PrintingService:
             draw = ImageDraw.Draw(label_image)
             static_layer_drawn = False
 
+
             for obj in template_json.get("objects", []):
                 logging.info(f"Обработка объекта: тип='{obj.get('type')}', источник='{obj.get('data_source')}'")
                 
@@ -265,6 +279,7 @@ class PrintingService:
                 if missing_fields:
                     logging.warning(f"Пропуск объекта: отсутствуют поля {missing_fields}.")
                     continue
+
 
                 # --- НОВАЯ ЛОГИКА: Определяем, является ли объект статичным ---
                 is_static = False
@@ -277,6 +292,7 @@ class PrintingService:
                     # (т.е. это просто имя файла, выбранное в редакторе)
                     is_static = '.' not in obj.get('data_source', '')
 
+
                 if is_static:
                     # Если объект статичный, пытаемся взять его из кэша слоев
                     obj_json_str = json.dumps(obj, sort_keys=True)
@@ -284,6 +300,7 @@ class PrintingService:
                         cached_layer = static_layers_cache[obj_json_str]
                         label_image.paste(cached_layer, (0, 0), cached_layer)
                         continue # Переходим к следующему объекту
+
 
                 if obj.get("is_custom_text") or (obj.get("type") == "text_with_image"):
                     obj_data = obj.get("data_source") # Для произвольного текста данные хранятся прямо в шаблоне
@@ -296,6 +313,7 @@ class PrintingService:
                 if obj_data is None:
                     logging.warning(f"Данные для '{obj['data_source']}' не найдены. Пропуск объекта.")
                     continue
+
 
                 logging.debug(f"Данные для объекта: '{str(obj_data)[:50]}...'")
 
@@ -310,12 +328,14 @@ class PrintingService:
                     logging.error(f"Ошибка преобразования координат для объекта: {e}")
                     continue
 
+
                 # --- НОВАЯ ЛОГИКА: Рисуем на временном слое, если объект статичный ---
                 target_draw = draw
                 temp_layer = None
                 if is_static:
                     temp_layer = Image.new('RGBA', (width_px, height_px), (0,0,0,0))
                     target_draw = ImageDraw.Draw(temp_layer)
+
 
                 if obj["type"] == "text":
                     logging.debug("Обработка как 'text'")
@@ -344,6 +364,7 @@ class PrintingService:
                             font, wrapped_text = text_cache[cache_key]
                         draw.text((x, y), wrapped_text, fill="black", font=font, anchor="la")
 
+
                 # --- НОВЫЙ БЛОК: Обработка композитного объекта "Текст с изображением" ---
                 elif obj["type"] == "text_with_image":
                     logging.debug("Обработка как 'text_with_image'")
@@ -351,6 +372,7 @@ class PrintingService:
                     # 1. Получаем данные для текста и изображения
                     text_data_source = obj.get("data_source")
                     image_data_source = obj.get("image_source")
+
                     
                     # Текст всегда произвольный для этого объекта
                     text_content = text_data_source
@@ -358,6 +380,7 @@ class PrintingService:
 
                     # 2. Определяем геометрию
                     # Предположим, что 30% ширины объекта отводится под изображение
+
                     image_area_width = int(width * 0.3)
                     text_area_width = width - image_area_width
                     
@@ -374,6 +397,7 @@ class PrintingService:
                     # 3. Рендерим изображение (логика взята из объекта "image")
                     try:
                         with PrintingService._get_client_db_connection(user_info) as conn:
+
                             with conn.cursor() as cur:
                                 cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
                                 result = cur.fetchone()
@@ -389,6 +413,7 @@ class PrintingService:
                     except Exception as e:
                         logging.error(f"Ошибка при отрисовке встроенного изображения '{image_name}': {e}")
 
+
                     # 4. Рендерим текст (логика взята из объекта "text")
                     # Используем _get_multiline_fitting_font для области текста
                     font, wrapped_text = PrintingService._get_multiline_fitting_font(
@@ -396,6 +421,7 @@ class PrintingService:
                     )
                     # Рисуем текст в его области
                     target_draw.text((text_x, text_y), wrapped_text, fill="black", font=font, anchor="la")
+
 
                 elif obj["type"] == "image":
                     logging.debug("Обработка как 'image'")
@@ -418,6 +444,7 @@ class PrintingService:
                     except Exception as e:
                         logging.error(f"Ошибка при отрисовке изображения '{image_name}': {e}")
 
+
                 
                 elif obj["type"] == "barcode":
                     barcode_type = obj.get("barcode_type", "QR").upper()
@@ -425,6 +452,7 @@ class PrintingService:
                     
                     if barcode_type == "QR":
                         if not qrcode:
+
                             logging.warning("Библиотека qrcode не установлена. Пропуск QR-кода.")
                             continue
                         try:
@@ -437,6 +465,7 @@ class PrintingService:
                         except Exception as e:
                             logging.error(f"Ошибка генерации QR-кода: {e}")
                             continue
+
                     
                     elif barcode_type == "DATAMATRIX":
                         if not dmtx_encode:
@@ -464,6 +493,7 @@ class PrintingService:
                         draw.rectangle([x, y, x + width, y + height], outline="red", fill="white")
                         draw.text((x + 5, y + 5), f"Unsupported:\n{barcode_type}", fill="red")
 
+
                 # --- НОВАЯ ЛОГИКА: Сохраняем статичный слой в кэш и накладываем его ---
                 if is_static and temp_layer:
                     obj_json_str = json.dumps(obj, sort_keys=True)
@@ -471,6 +501,7 @@ class PrintingService:
                     label_image.paste(temp_layer, (0, 0), temp_layer)
             
             logging.info("Изображение этикетки успешно сгенерировано.")
+
             return label_image.convert('1') # Принудительно возвращаем Ч/Б изображение
         
         except Exception as e:
@@ -480,6 +511,7 @@ class PrintingService:
     @staticmethod
     def preview_image(image: Image.Image) -> None:
         """Открывает окно предпросмотра изображения."""
+
         logging.info("Открытие окна предпросмотра этикетки.")
         if not all([tk, ImageTk]):
             logging.error("Tkinter или Pillow.ImageTk не доступны.")
