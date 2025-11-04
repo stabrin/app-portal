@@ -148,13 +148,22 @@ class SupplyNotificationService:
                 )
                 return cur.fetchall()
 
-    def update_notification_detail(self, detail_id, gtin, product_name, quantity):
-        """Обновляет одну строку в деталях уведомления."""
+    def update_notification_detail(self, detail_id, gtin, quantity, aggregation, production_date, expiry_date):
+        """
+        Обновляет одну строку в деталях уведомления.
+        Даты должны приходить в формате 'YYYY-MM-DD' или быть None/пустой строкой.
+        """
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
+                # Преобразуем пустые строки в None для корректной вставки в БД
+                prod_date_or_null = production_date if production_date else None
+                exp_date_or_null = expiry_date if expiry_date else None
+
                 cur.execute(
-                    "UPDATE ap_supply_notification_details SET gtin = %s, product_name = %s, quantity = %s WHERE id = %s",
-                    (gtin, product_name, quantity, detail_id)
+                    """UPDATE ap_supply_notification_details 
+                       SET gtin = %s, quantity = %s, aggregation = %s, production_date = %s, expiry_date = %s 
+                       WHERE id = %s""",
+                    (gtin, quantity, aggregation, prod_date_or_null, exp_date_or_null, detail_id)
                 )
                 conn.commit()
 

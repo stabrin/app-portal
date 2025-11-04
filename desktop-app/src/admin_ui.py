@@ -1284,6 +1284,51 @@ class AdminWindow(tk.Tk):
             ttk.Button(formalization_controls, text="Скачать шаблон", command=download_template).pack(side=tk.LEFT, padx=2)
             ttk.Button(formalization_controls, text="Загрузить шаблон", command=upload_formalized).pack(side=tk.LEFT, padx=2)
  
+            # --- НОВЫЙ БЛОК: Кнопки для перезагрузки и удаления ---
+            ttk.Button(formalization_controls, text="Перезагрузить файл", command=upload_formalized).pack(side=tk.LEFT, padx=2)
+            
+            def delete_all_details():
+                if messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите удалить ВСЕ строки детализации для уведомления #{notification_id}?", parent=self):
+                    try:
+                        # Используем существующий метод, который удаляет все детали перед вставкой, но передаем ему пустые данные
+                        service.process_formalized_file(notification_id, None)
+                        messagebox.showinfo("Успех", "Все строки детализации удалены.", parent=self)
+                        refresh_details_panel(notification_id)
+                    except Exception as e:
+                        messagebox.showerror("Ошибка", f"Не удалось удалить строки: {e}", parent=self)
+
+            ttk.Button(formalization_controls, text="Удалить все", command=delete_all_details).pack(side=tk.LEFT, padx=2)
+            # --- КОНЕЦ НОВОГО БЛОКА ---
+
+        def edit_tree_item(event, tree):
+            """Обработчик двойного клика для редактирования ячейки."""
+            if not tree.identify_region(event.x, event.y) == "cell":
+                return
+
+            column_id = tree.identify_column(event.x)
+            column_name = tree.heading(column_id, "text")
+            item_iid = tree.identify_row(event.y)
+            
+            x, y, width, height = tree.bbox(item_iid, column_id)
+
+            entry = ttk.Entry(tree)
+            entry.place(x=x, y=y, width=width, height=height)
+            
+            current_value = tree.set(item_iid, column_id)
+            entry.insert(0, current_value)
+            entry.focus_set()
+
+            def on_focus_out(event):
+                new_value = entry.get()
+                tree.set(item_iid, column=column_id, value=new_value)
+                # Обновляем данные в БД
+                all_values = tree.item(item_iid)['values']
+                service.update_notification_detail(item_iid, *all_values)
+                entry.destroy()
+
+            entry.bind("<Return>", on_focus_out)
+            entry.bind("<FocusOut>", on_focus_out)
+
         # --- Привязки и начальная загрузка ---
         ttk.Button(list_controls, text="Создать", command=create_new_notification).pack(side=tk.LEFT, padx=2)
         ttk.Button(list_controls, text="Обновить", command=refresh_notifications_list).pack(side=tk.LEFT, padx=2)
