@@ -26,3 +26,5 @@ redis
 # Для отправки HTTP-запросов (используется в api_tests)
 requests
 pylibdmtx
+pandas 
+openpyxl
