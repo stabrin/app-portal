@@ -1179,11 +1179,14 @@ class AdminWindow(tk.Tk):
         list_controls = ttk.Frame(list_frame)
         list_controls.pack(fill=tk.X, pady=5)
  
-        catalogs_tree = ttk.Treeview(list_frame, columns=('id', 'name'), show='headings')
-        catalogs_tree.heading('id', text='ID')
+        # --- ИЗМЕНЕНИЕ: Обновляем колонки в таблице ---
+        catalogs_tree = ttk.Treeview(list_frame, columns=('name', 'inn', 'poa_end'), show='headings')
         catalogs_tree.heading('name', text='Наименование')
-        catalogs_tree.column('id', width=40, anchor=tk.CENTER)
-        catalogs_tree.column('name', width=200)
+        catalogs_tree.heading('inn', text='Источник (ИНН)')
+        catalogs_tree.heading('poa_end', text='Окончание доверенности')
+        catalogs_tree.column('name', width=300)
+        catalogs_tree.column('inn', width=150, anchor=tk.CENTER)
+        catalogs_tree.column('poa_end', width=150, anchor=tk.CENTER)
         catalogs_tree.pack(expand=True, fill='both')
  
         # --- Правая панель: Детали уведомления ---
@@ -1201,8 +1204,13 @@ class AdminWindow(tk.Tk):
                 catalogs_tree.delete(i)
             try:
                 participants_list = service.get_participants_catalog()
+                # --- ИЗМЕНЕНИЕ: Заполняем новые колонки ---
                 for n in participants_list:
-                    catalogs_tree.insert('', 'end', values=(n['id'], n['name']))
+                    # Извлекаем дату и обрезаем время
+                    poa_end_date = n.get('poa_validity_end', '')
+                    if poa_end_date and 'T' in poa_end_date:
+                        poa_end_date = poa_end_date.split('T')[0]
+                    catalogs_tree.insert('', 'end', values=(n.get('name', ''), n.get('inn', ''), poa_end_date))
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить справочник: {e}", parent=self)
 
