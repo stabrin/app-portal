@@ -1,10 +1,13 @@
 # src/admin_ui.py
 
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
 import json
-
+import pandas as pd
+import io
+import os
+from datetime import datetime
 # --- ИСПРАВЛЕНИЕ: Добавляем глобальный импорт Pillow ---
 try:
     from PIL import Image, ImageTk
@@ -18,7 +21,7 @@ import psycopg2
 import psycopg2.extras
 
 # Импортируем новый сервис печати
-from .printing_service import PrintingService, LabelEditorWindow
+from .printing_service import PrintingService, LabelEditorWindow, ImageSelectionDialog
 
 import traceback
 
@@ -1065,14 +1068,163 @@ class AdminWindow(tk.Tk):
         notebook.add(reports_frame, text="Отчеты")
         notebook.add(admin_frame, text="Администрирование")
  
-        # --- Заполняем вкладки ---
+        # --- Заполняем вкладки ---_
+        self._create_supply_notice_tab(supply_notice_frame)
         self._create_orders_tab(orders_frame)
  
         # Заглушки для остальных вкладок
-        ttk.Label(supply_notice_frame, text="Раздел 'Уведомление о поставке' в разработке.", font=("Arial", 14)).pack(expand=True)
         ttk.Label(catalogs_frame, text="Раздел 'Справочники' в разработке.", font=("Arial", 14)).pack(expand=True)
         ttk.Label(reports_frame, text="Раздел 'Отчеты' в разработке.", font=("Arial", 14)).pack(expand=True)
         ttk.Label(admin_frame, text="Раздел 'Администрирование' в разработке.", font=("Arial", 14)).pack(expand=True)
+
+    def _create_supply_notice_tab(self, parent_frame):
+        """Создает содержимое для вкладки 'Уведомление о поставке'."""
+        from .supply_notification_service import SupplyNotificationService
+        service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
+
+        # Основной контейнер
+        paned_window = ttk.PanedWindow(parent_frame, orient=tk.HORIZONTAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+
+        # --- Левая панель: Список уведомлений ---
+        list_frame = ttk.Frame(paned_window, padding="5")
+        paned_window.add(list_frame, weight=1)
+
+        list_controls = ttk.Frame(list_frame)
+        list_controls.pack(fill=tk.X, pady=5)
+
+        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name', 'date', 'status'), show='headings')
+        notifications_tree.heading('id', text='ID')
+        notifications_tree.heading('name', text='Наименование')
+        notifications_tree.heading('date', text='План. дата')
+        notifications_tree.heading('status', text='Статус')
+        notifications_tree.column('id', width=40, anchor=tk.CENTER)
+        notifications_tree.column('name', width=200)
+        notifications_tree.column('date', width=100)
+        notifications_tree.column('status', width=100)
+        notifications_tree.pack(expand=True, fill='both')
+
+        # --- Правая панель: Детали уведомления ---
+        details_frame = ttk.Frame(paned_window, padding="5")
+        paned_window.add(details_frame, weight=2)
+        details_notebook = ttk.Notebook(details_frame)
+        details_notebook.pack(fill='both', expand=True)
+
+        # Вкладки для деталей
+        supplier_files_frame = ttk.Frame(details_notebook, padding="10")
+        formalized_frame = ttk.Frame(details_notebook, padding="10")
+        details_notebook.add(supplier_files_frame, text="Файлы поставщика")
+        details_notebook.add(formalized_frame, text="Формализация")
+
+        # --- Функции ---
+        def refresh_notifications_list():
+            for i in notifications_tree.get_children():
+                notifications_tree.delete(i)
+            try:
+                for n in service.get_all_notifications():
+                    notifications_tree.insert('', 'end', values=(n['id'], n['name'], n['planned_arrival_date'], n['status']))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
+
+        def create_new_notification():
+            name = simpledialog.askstring("Новое уведомление", "Введите наименование уведомления (напр., номер машины):", parent=self)
+            if not name: return
+            
+            # TODO: Добавить календарь для выбора даты
+            date_str = simpledialog.askstring("Дата прибытия", "Введите планируемую дату прибытия (ГГГГ-ММ-ДД):", parent=self)
+            try:
+                arrival_date = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else None
+                service.create_notification(name, arrival_date)
+                refresh_notifications_list()
+            except ValueError:
+                messagebox.showerror("Ошибка", "Неверный формат даты.", parent=self)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось создать уведомление: {e}", parent=self)
+
+        def on_notification_select(event):
+            selected_item = notifications_tree.focus()
+            if not selected_item: return
+            
+            notification_id = notifications_tree.item(selected_item)['values'][0]
+            refresh_details_panel(notification_id)
+
+        def refresh_details_panel(notification_id):
+            # Очищаем и обновляем вкладку "Файлы поставщика"
+            for widget in supplier_files_frame.winfo_children(): widget.destroy()
+            
+            files = service.get_notification_files(notification_id)
+            supplier_files = [f for f in files if f['file_type'] == 'supplier']
+
+            ttk.Label(supplier_files_frame, text=f"Файлы для уведомления #{notification_id}").pack(anchor='w')
+            for f in supplier_files:
+                ttk.Label(supplier_files_frame, text=f"• {f['filename']} ({f['uploaded_at']:%Y-%m-%d %H:%M})").pack(anchor='w')
+
+            def upload_supplier_files():
+                filepaths = filedialog.askopenfilenames(title="Выберите файлы от поставщика", parent=self)
+                if not filepaths: return
+                try:
+                    for fp in filepaths:
+                        with open(fp, 'rb') as f_data:
+                            service.add_file(notification_id, os.path.basename(fp), f_data.read(), 'supplier')
+                    messagebox.showinfo("Успех", f"Загружено {len(filepaths)} файлов.", parent=self)
+                    refresh_details_panel(notification_id)
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось загрузить файлы: {e}", parent=self)
+
+            ttk.Button(supplier_files_frame, text="Загрузить файлы поставщика...", command=upload_supplier_files).pack(pady=10)
+
+            # Очищаем и обновляем вкладку "Формализация"
+            for widget in formalized_frame.winfo_children(): widget.destroy()
+
+            formalized_files = [f for f in files if f['file_type'] == 'formalized']
+            details_tree = ttk.Treeview(formalized_frame, columns=('gtin', 'name', 'qty'), show='headings', height=5)
+            details_tree.heading('gtin', text='GTIN')
+            details_tree.heading('name', text='Наименование')
+            details_tree.heading('qty', text='Кол-во')
+            details_tree.pack(fill='both', expand=True)
+
+            details = service.get_notification_details(notification_id)
+            for d in details:
+                details_tree.insert('', 'end', values=(d['gtin'], d['product_name'], d['quantity']))
+
+            formalization_controls = ttk.Frame(formalized_frame)
+            formalization_controls.pack(fill=tk.X, pady=5)
+
+            def download_template():
+                filepath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], parent=self)
+                if not filepath: return
+                try:
+                    df = service.get_formalization_template()
+                    df.to_excel(filepath, index=False)
+                    messagebox.showinfo("Успех", f"Шаблон сохранен в {filepath}", parent=self)
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось сохранить шаблон: {e}", parent=self)
+
+            def upload_formalized():
+                filepath = filedialog.askopenfilename(title="Выберите заполненный шаблон", filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+                if not filepath: return
+                try:
+                    with open(filepath, 'rb') as f_data:
+                        file_content = f_data.read()
+                        # Сначала обрабатываем данные
+                        processed_rows = service.process_formalized_file(notification_id, file_content)
+                        # Затем сохраняем сам файл
+                        service.add_file(notification_id, os.path.basename(filepath), file_content, 'formalized')
+                    messagebox.showinfo("Успех", f"Шаблон обработан. Загружено {processed_rows} строк.", parent=self)
+                    refresh_details_panel(notification_id)
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось обработать файл: {e}", parent=self)
+
+            ttk.Button(formalization_controls, text="Скачать шаблон", command=download_template).pack(side=tk.LEFT, padx=2)
+            ttk.Button(formalization_controls, text="Загрузить шаблон", command=upload_formalized).pack(side=tk.LEFT, padx=2)
+
+        # --- Привязки и начальная загрузка ---
+        ttk.Button(list_controls, text="Создать", command=create_new_notification).pack(side=tk.LEFT, padx=2)
+        ttk.Button(list_controls, text="Обновить", command=refresh_notifications_list).pack(side=tk.LEFT, padx=2)
+        notifications_tree.bind('<<TreeviewSelect>>', on_notification_select)
+
+        refresh_notifications_list()
+
  
     def _create_orders_tab(self, parent_frame):
         """Создает содержимое для вкладки 'Заказы'."""

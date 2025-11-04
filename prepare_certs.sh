@@ -56,7 +56,7 @@ else
     done
     echo "Генерируем самоподписанный сертификат и приватный ключ на 10 лет с SANs..."
 
-    openssl req -new -x509 -days 3650 -nodes -text \
+    openssl req -new -x509 -days 3650 -nodes \
         -out "$PG_CERT" \
         -keyout "$PG_KEY" \
         -config <(cat <<EOF

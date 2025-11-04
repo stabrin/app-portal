@@ -287,6 +287,41 @@ def update_client_db_schema(conn):
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_images IS 'Хранилище изображений (логотипов) для макетов этикеток';"),
+
+        # --- НОВЫЙ БЛОК: Таблицы для уведомлений о поставке ---
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_supply_notifications (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) NOT NULL,
+                planned_arrival_date DATE,
+                status VARCHAR(50) NOT NULL DEFAULT 'new',
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE ap_supply_notifications IS 'Уведомления о поставке';"),
+
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_supply_notification_files (
+                id SERIAL PRIMARY KEY,
+                notification_id INTEGER NOT NULL REFERENCES ap_supply_notifications(id) ON DELETE CASCADE,
+                file_type VARCHAR(50) NOT NULL, -- 'supplier' или 'formalized'
+                filename VARCHAR(255) NOT NULL,
+                file_data BYTEA NOT NULL,
+                uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE ap_supply_notification_files IS 'Файлы, приложенные к уведомлениям о поставке';"),
+
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_supply_notification_details (
+                id SERIAL PRIMARY KEY,
+                notification_id INTEGER NOT NULL REFERENCES ap_supply_notifications(id) ON DELETE CASCADE,
+                gtin VARCHAR(100),
+                product_name TEXT,
+                quantity INTEGER
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE ap_supply_notification_details IS 'Детализированное содержимое формализованного уведомления о поставке';"),
     ]
 
     # === Блок для таблицы видимости приложений (из init_visibility.py) ===
