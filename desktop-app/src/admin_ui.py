@@ -1232,11 +1232,16 @@ class AdminWindow(tk.Tk):
             details_tree.heading('exp_date', text='Срок годн.')
             details_tree.pack(fill='both', expand=True)
  
+            # Привязываем функцию редактирования к таблице
+            details_tree.bind("<Double-1>", lambda event: edit_tree_item(event, details_tree))
+
             details = service.get_notification_details(notification_id)
             for d in details:
                 # Форматируем даты для красивого отображения
                 prod_date_str = d['production_date'].strftime('%Y-%m-%d') if d.get('production_date') else ''
                 exp_date_str = d['expiry_date'].strftime('%Y-%m-%d') if d.get('expiry_date') else ''
+                # Вставляем данные с ID строки в качестве ключа
+                details_tree.insert('', 'end', iid=d['id'], values=(d['gtin'], d['quantity'], d.get('aggregation', ''), prod_date_str, exp_date_str))
                 details_tree.insert('', 'end', values=(d['gtin'], d['quantity'], d.get('aggregation', ''), prod_date_str, exp_date_str))
  
             formalization_controls = ttk.Frame(formalized_frame)
