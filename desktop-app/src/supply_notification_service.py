@@ -129,10 +129,10 @@ class SupplyNotificationService:
                     data_tuples = [(d['notification_id'], d['gtin'], d['quantity'], d['aggregation'], d['production_date'], d['expiry_date'], d['product_name']) for d in details_to_insert]
                     if data_tuples:
                         cur.execute(
-                            insert_query, (data_tuples,)
+                            execute_values(cur, insert_query, data_tuples)
                         )
                     logging.info(f"Загружено {len(df)} новых строк деталей для уведомления {notification_id}.")
-                conn.commit()
+                conn.commit() 
             return len(df)
         except Exception as e:
             logging.error(f"Ошибка обработки формализованного файла: {e}")
