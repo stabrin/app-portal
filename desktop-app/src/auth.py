@@ -132,7 +132,11 @@ class StandaloneLoginWindow(tk.Tk):
                     try:
                         logging.info("Attempting to get API token...")
                         api_base_url = os.getenv('API_BASE_URL')
-                        token_url = f"{api_base_url.rstrip('/')}/user/token"
+                        if api_base_url is None:
+                            logging.error("API_BASE_URL is not set in the environment variables.")
+                            messagebox.showwarning("API Warning", "API_BASE_URL не установлена в переменных окружения.", parent=self)
+                            raise ValueError("API_BASE_URL is not set.")
+                        token_url = f"{api_base_url.rstrip('/')}/user/token" 
                         api_credentials = {
                             "email": os.getenv('API_EMAIL'),
                             "password": os.getenv('API_PASSWORD')
