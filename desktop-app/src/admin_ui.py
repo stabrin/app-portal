@@ -1079,7 +1079,6 @@ class AdminWindow(tk.Tk):
         # Добавляем вкладки в контейнер
         notebook.add(supply_notice_frame, text="Уведомление о поставке")
         notebook.add(orders_frame, text="Заказы")
-        #self._create_catalogs_tab(catalogs_frame)
         notebook.add(catalogs_frame, text="Справочники")
         notebook.add(reports_frame, text="Отчеты")
         notebook.add(admin_frame, text="Администрирование")
@@ -1087,7 +1086,7 @@ class AdminWindow(tk.Tk):
         # --- Заполняем вкладки ---
         self._create_supply_notice_tab(supply_notice_frame)
         self._create_orders_tab(orders_frame)
-        #self._create_catalogs_tab(catalogs_frame) # Заполняем новую вкладку "Справочники"
+        self._create_catalogs_tab(catalogs_frame) # Заполняем новую вкладку "Справочники"
  
         # Заглушки для остальных вкладок
         ttk.Label(reports_frame, text="Раздел 'Отчеты' в разработке.", font=("Arial", 14)).pack(expand=True)
@@ -1180,7 +1179,7 @@ class AdminWindow(tk.Tk):
         list_controls = ttk.Frame(list_frame)
         list_controls.pack(fill=tk.X, pady=5)
  
-        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name'), show='headings')
+        catalogs_tree = ttk.Treeview(list_frame, columns=('id', 'name'), show='headings')
         catalogs_tree.heading('id', text='ID')
         catalogs_tree.heading('name', text='Наименование')
         catalogs_tree.column('id', width=40, anchor=tk.CENTER)
