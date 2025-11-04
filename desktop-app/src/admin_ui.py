@@ -1221,15 +1221,23 @@ class AdminWindow(tk.Tk):
             for widget in formalized_frame.winfo_children(): widget.destroy()
  
             formalized_files = [f for f in files if f['file_type'] == 'formalized']
-            details_tree = ttk.Treeview(formalized_frame, columns=('gtin', 'product_name', 'quantity'), show='headings', height=5)
+            
+            # Обновляем колонки в таблице
+            details_tree_cols = ('gtin', 'quantity', 'aggregation', 'prod_date', 'exp_date')
+            details_tree = ttk.Treeview(formalized_frame, columns=details_tree_cols, show='headings', height=5)
             details_tree.heading('gtin', text='GTIN')
-            details_tree.heading('product_name', text='Наименование')
             details_tree.heading('quantity', text='Кол-во')
+            details_tree.heading('aggregation', text='Агрегация')
+            details_tree.heading('prod_date', text='Дата произв.')
+            details_tree.heading('exp_date', text='Срок годн.')
             details_tree.pack(fill='both', expand=True)
  
             details = service.get_notification_details(notification_id)
             for d in details:
-                details_tree.insert('', 'end', values=(d['gtin'], d['product_name'], d['quantity']))
+                # Форматируем даты для красивого отображения
+                prod_date_str = d['production_date'].strftime('%Y-%m-%d') if d.get('production_date') else ''
+                exp_date_str = d['expiry_date'].strftime('%Y-%m-%d') if d.get('expiry_date') else ''
+                details_tree.insert('', 'end', values=(d['gtin'], d['quantity'], d.get('aggregation', ''), prod_date_str, exp_date_str))
  
             formalization_controls = ttk.Frame(formalized_frame)
             formalization_controls.pack(fill=tk.X, pady=5)

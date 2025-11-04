@@ -318,7 +318,10 @@ def update_client_db_schema(conn):
                 notification_id INTEGER NOT NULL REFERENCES ap_supply_notifications(id) ON DELETE CASCADE,
                 gtin VARCHAR(100),
                 product_name TEXT,
-                quantity INTEGER
+                quantity INTEGER,
+                aggregation TEXT,
+                production_date DATE,
+                expiry_date DATE
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_supply_notification_details IS 'Детализированное содержимое формализованного уведомления о поставке';"),

@@ -1,6 +1,7 @@
 # src/supply_notification_service.py
 
 import logging
+from dateutil.relativedelta import relativedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import pandas as pd
@@ -79,14 +80,39 @@ class SupplyNotificationService:
         и загружает новые.
         """
         try:
-            df = pd.read_excel(io.BytesIO(file_data))
+            # Указываем, что колонка GTIN всегда должна читаться как текст
+            df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str})
             # Приводим названия колонок к нижнему регистру для удобства
-            df.columns = [col.lower() for col in df.columns]
+            df.columns = [col.strip().lower() for col in df.columns]
 
             # Проверяем наличие обязательных колонок
             required_cols = {'gtin', 'кол-во'}
             if not required_cols.issubset(df.columns):
                 raise ValueError(f"Отсутствуют обязательные колонки. Требуются: 'GTIN', 'Кол-во'")
+
+            details_to_insert = []
+            for _, row in df.iterrows():
+                # Преобразуем даты, игнорируя ошибки
+                prod_date = pd.to_datetime(row.get('дата производства'), errors='coerce')
+                exp_date = pd.to_datetime(row.get('окончание срока годности'), errors='coerce')
+                # Срок годности в месяцах
+                shelf_life_months = pd.to_numeric(row.get('срок годности'), errors='coerce')
+
+                # Логика расчета дат
+                if pd.notna(prod_date) and pd.notna(shelf_life_months) and pd.isna(exp_date):
+                    exp_date = prod_date + relativedelta(months=int(shelf_life_months))
+                
+                # Собираем данные для вставки
+                details_to_insert.append({
+                    'notification_id': notification_id,
+                    'gtin': str(row.get('gtin', '')),
+                    'quantity': int(row.get('кол-во', 0)),
+                    'aggregation': str(row.get('агрегация', '')),
+                    'production_date': None if pd.isna(prod_date) else prod_date.date(),
+                    'expiry_date': None if pd.isna(exp_date) else exp_date.date(),
+                    # product_name пока не используется в шаблоне, но оставим поле в таблице
+                    'product_name': str(row.get('наименование', '')) 
+                })
 
             with self.get_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -94,14 +120,16 @@ class SupplyNotificationService:
                     cur.execute("DELETE FROM ap_supply_notification_details WHERE notification_id = %s", (notification_id,))
                     logging.info(f"Старые детали для уведомления {notification_id} удалены.")
  
-                    # 2. Загружаем новые детали
-                    for _, row in df.iterrows():
+                    # 2. Загружаем новые детали (массовая вставка)
+                    from psycopg2.extras import execute_values
+                    insert_query = """
+                        INSERT INTO ap_supply_notification_details (notification_id, gtin, quantity, aggregation, production_date, expiry_date, product_name)
+                        VALUES %s
+                    """
+                    data_tuples = [(d['notification_id'], d['gtin'], d['quantity'], d['aggregation'], d['production_date'], d['expiry_date'], d['product_name']) for d in details_to_insert]
+                    if data_tuples:
                         cur.execute(
-                            """
-                            INSERT INTO ap_supply_notification_details (notification_id, gtin, product_name, quantity)
-                            VALUES (%s, %s, %s, %s)
-                            """,
-                            (notification_id, str(row.get('gtin')), str(row.get('product_name', '')), int(row.get('кол-во', 0)))
+                            insert_query, (data_tuples,)
                         )
                     logging.info(f"Загружено {len(df)} новых строк деталей для уведомления {notification_id}.")
                 conn.commit()
@@ -115,7 +143,7 @@ class SupplyNotificationService:
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT id, gtin, product_name, quantity FROM ap_supply_notification_details WHERE notification_id = %s ORDER BY id",
+                    "SELECT * FROM ap_supply_notification_details WHERE notification_id = %s ORDER BY id",
                     (notification_id,)
                 )
                 return cur.fetchall()
