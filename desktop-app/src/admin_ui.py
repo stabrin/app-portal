@@ -1357,7 +1357,9 @@ class AdminWindow(tk.Tk):
             pk_value = tree.item(selected_item_id)['values'][list(columns.keys()).index(pk_field)]
             # 2. Находим оригинальные данные в кэше по этому PK
             original_data = data_cache.get(pk_value)
-            open_editor(list(original_data.values()) if original_data else None)
+            # --- ИСПРАВЛЕНИЕ: Передаем в редактор словарь, а не список значений ---
+            # Это гарантирует, что данные будут правильно сопоставлены с полями.
+            open_editor(original_data)
         ttk.Button(controls, text="Редактировать", command=edit_selected).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Удалить", command=delete_item).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Выгрузить в Excel", command=export_to_excel).pack(side=tk.LEFT, padx=2)
