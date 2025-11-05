@@ -1202,7 +1202,7 @@ class AdminWindow(tk.Tk):
             tree.selection_set(item_id) # Выделяем строку, по которой кликнули
             
             menu = tk.Menu(self, tearoff=0)
-            menu.add_command(label="Редактировать", command=lambda: open_notification_editor(item_id))
+            menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_notification_editor(item_id))
             menu.add_command(label="Создать заказ", command=lambda: messagebox.showinfo("В разработке", f"Создание заказа для уведомления {item_id}"))
             menu.add_separator()
             menu.add_command(label="Удалить в архив", command=archive_notification)
