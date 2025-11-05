@@ -59,6 +59,7 @@ class SupplyNotificationService:
 
     def create_notification(self, data):
         """Создает новое уведомление о поставке."""
+        logging.info(f"Создание нового уведомления с данными: {data}")
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -78,11 +79,13 @@ class SupplyNotificationService:
                 )
                 new_id = cur.fetchone()[0]
                 conn.commit()
+                logging.info(f"Уведомление успешно создано с ID: {new_id}")
                 return new_id
 
     def update_notification(self, notification_id, data):
         """Обновляет существующее уведомление."""
         with self.get_db_connection() as conn:
+            logging.info(f"Обновление уведомления ID: {notification_id} с данными: {data}")
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -99,6 +102,7 @@ class SupplyNotificationService:
                     )
                 )
             conn.commit()
+            logging.info(f"Уведомление ID: {notification_id} успешно обновлено.")
 
     def get_notification_by_id(self, notification_id):
         """Получает одно уведомление по ID."""

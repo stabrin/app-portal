@@ -2450,6 +2450,7 @@ class CalendarDialog(tk.Toplevel):
 
     def _save(self):
         """Сохраняет данные."""
+        logging.debug("Начало сохранения данных из диалога уведомления.")
         # 1. Сбор данных
         selected_scenario_name = self.scenario_var.get()
         selected_scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
@@ -2479,11 +2480,14 @@ class CalendarDialog(tk.Toplevel):
             'comments': self.comments_text.get("1.0", tk.END)
         }
 
+        logging.debug(f"Собранные данные для сохранения: {data}")
+
         # 3. Сохранение данных
         try:
             if self.notification_id:
                 self.service.update_notification(self.notification_id, data)
             else:
+                logging.info("Вызов service.create_notification для создания нового уведомления.")
                 self.service.create_notification(data)
             self.result = True
             self.destroy()
