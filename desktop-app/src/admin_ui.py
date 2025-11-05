@@ -38,6 +38,7 @@ import psycopg2.extras
 from .printing_service import PrintingService, LabelEditorWindow, ImageSelectionDialog
 
 import requests
+from datetime import datetime
 import traceback
 
 def open_label_editor_window(parent_widget, user_info):
@@ -2331,6 +2332,165 @@ class NewNotificationDialog(tk.Toplevel):
 
         self.result = (name, arrival_date)
         self.destroy()
+class CalendarDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
+    def __init__(self, parent, user_info, notification_id=None):
+        super().__init__(parent)
+        self.title("Редактор уведомления о поставке")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+        self.user_info = user_info
+        self.notification_id = notification_id
+        from .supply_notification_service import SupplyNotificationService
+        self.service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
+        from .catalogs_service import CatalogsService
+        self.catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
+
+        self.initial_data = {}
+        if notification_id:
+            self.initial_data = self.service.get_notification_by_id(notification_id)
+
+        self._create_widgets()
+
+    def _create_widgets(self):
+        # Основной фрейм
+        main_frame = ttk.Frame(self, padding=10)
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Сценарий маркировки
+        ttk.Label(main_frame, text="Сценарий маркировки:").pack(anchor="w")
+        self.scenario_var = tk.StringVar()
+        self.scenario_combo = ttk.Combobox(main_frame, textvariable=self.scenario_var, state="readonly")
+        self.scenario_combo.pack(fill=tk.X, pady=5)
+        self._load_scenarios()
+
+        # 2. Клиент
+        ttk.Label(main_frame, text="Клиент:").pack(anchor="w")
+        self.client_var = tk.StringVar()
+        self.client_combo = ttk.Combobox(main_frame, textvariable=self.client_var, state="readonly")
+        self.client_combo.pack(fill=tk.X, pady=5)
+        self._load_clients()
+
+        # 3. Товарные группы
+        ttk.Label(main_frame, text="Товарные группы:").pack(anchor="w")
+        self.product_groups_listbox = tk.Listbox(main_frame, selectmode=tk.MULTIPLE, height=4)
+        self.product_groups_listbox.pack(fill=tk.X, pady=5)
+        self._load_product_groups()
+
+        # 4. Предположительная дата прибытия
+        ttk.Label(main_frame, text="Предположительная дата прибытия:").pack(anchor="w")
+        self.arrival_date_var = tk.StringVar()
+        self.arrival_date_entry = ttk.Entry(main_frame, textvariable=self.arrival_date_var)
+        self.arrival_date_entry.pack(fill=tk.X, pady=5)
+
+        # 5. Номер контейнера/автомобиля
+        ttk.Label(main_frame, text="Номер контейнера/автомобиля:").pack(anchor="w")
+        self.vehicle_number_entry = ttk.Entry(main_frame)
+        self.vehicle_number_entry.pack(fill=tk.X, pady=5)
+
+        # 6. Комментарии
+        ttk.Label(main_frame, text="Комментарии:").pack(anchor="w")
+        self.comments_text = tk.Text(main_frame, height=4)
+        self.comments_text.pack(fill=tk.X, pady=5)
+
+        # Кнопки управления
+        buttons_frame = ttk.Frame(main_frame)
+        buttons_frame.pack(fill=tk.X, pady=10)
+        ttk.Button(buttons_frame, text="Сохранить", command=self._save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(buttons_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
+
+        # Загрузка начальных данных, если редактирование
+        if self.initial_data:
+            self._load_initial_values()
+
+    def _load_scenarios(self):
+        """Загружает сценарии маркировки в Combobox."""
+        scenarios = self.catalog_service.get_marking_scenarios()
+        self.scenario_combo['values'] = [s['name'] for s in scenarios]
+        if scenarios:
+            # --- ИСПРАВЛЕНИЕ: Заполняем scenario_var не только при создании, но и при редактировании ---
+            if self.initial_data:
+                # Если редактируем, пытаемся найти соответствующий сценарий
+                initial_scenario = next((s for s in scenarios if s['id'] == self.initial_data.get('scenario_id')), None)
+                if initial_scenario:
+                    self.scenario_var.set(initial_scenario['name'])
+            else:
+                # Если создаем, выбираем первый доступный
+                self.scenario_var.set(scenarios[0]['name'])
+        self.scenarios = scenarios  # Сохраняем для дальнейшего использования
+
+    def _load_clients(self):
+        """Загружает клиентов в Combobox."""
+        clients = self.catalog_service.get_local_clients()
+        self.client_combo['values'] = [c['name'] for c in clients]
+        if clients:
+            self.client_var.set(clients[0]['name'])
+        self.clients = clients  # Сохраняем для дальнейшего использования
+
+    def _load_product_groups(self):
+        """Загружает товарные группы в Listbox."""
+        product_groups = self.catalog_service.get_product_groups()
+        for pg in product_groups:
+            self.product_groups_listbox.insert(tk.END, pg['display_name'])
+        self.product_groups = product_groups  # Сохраняем для дальнейшего использования
+
+    def _load_initial_values(self):
+        """Загружает начальные значения из existing_data."""
+        # --- ИСПРАВЛЕНИЕ: Заполняем все поля, а не только дату ---
+        self.arrival_date_var.set(self.initial_data.get('planned_arrival_date', ''))
+        self.vehicle_number_entry.insert(0, self.initial_data.get('vehicle_number', ''))
+        self.comments_text.insert(tk.END, self.initial_data.get('comments', ''))
+
+        # Выбор товарных групп
+        initial_groups = self.initial_data.get('product_groups', [])
+        for i, group in enumerate(self.product_groups):
+            if any(g['group_name'] == group['group_name'] for g in initial_groups):
+                self.product_groups_listbox.select_set(i)
+
+    def _save(self):
+        """Сохраняет данные."""
+        # 1. Сбор данных
+        selected_scenario_name = self.scenario_var.get()
+        selected_scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
+        if not selected_scenario:
+            messagebox.showerror("Ошибка", "Не выбран сценарий маркировки.", parent=self)
+            return
+
+        selected_client_name = self.client_var.get()
+        selected_client = next((c for c in self.clients if c['name'] == selected_client_name), None)
+        if not selected_client:
+            messagebox.showerror("Ошибка", "Не выбран клиент.", parent=self)
+            return
+
+        selected_product_groups_indices = self.product_groups_listbox.curselection()
+        selected_product_groups = [self.product_groups[i] for i in selected_product_groups_indices]
+
+        # 2. Формирование словаря данных
+        data = {
+            'scenario_id': selected_scenario['id'],
+            'scenario_name': selected_scenario['name'],
+            'client_api_id': None,  # TODO: Поддержка API-клиентов
+            'client_local_id': selected_client['id'],
+            'client_name': selected_client['name'],
+            'product_groups': [{'id': g['id'], 'name': g['display_name']} for g in selected_product_groups],
+            'planned_arrival_date': self.arrival_date_var.get(),
+            'vehicle_number': self.vehicle_number_entry.get(),
+            'comments': self.comments_text.get("1.0", tk.END)
+        }
+
+        # 3. Сохранение данных
+        try:
+            if self.notification_id:
+                self.service.update_notification(self.notification_id, data)
+            else:
+                self.service.create_notification(data)
+            self.result = True
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить уведомление: {e}", parent=self)
+
+
 class CalendarDialog(tk.Toplevel):
     """Диалоговое окно с простым календарем."""
     def __init__(self, parent, initial_date=None):
