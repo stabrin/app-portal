@@ -151,3 +151,62 @@ class CatalogsService:
                 """
                 execute_values(cur, upsert_query, data_tuples)
             conn.commit()
+
+    # --- Методы для сценариев маркировки ---
+
+    def get_marking_scenarios(self):
+        """Возвращает список сценариев маркировки из БД клиента."""
+        logger.info("Запрос справочника сценариев маркировки из БД клиента.")
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT id, name, scenario_data FROM ap_marking_scenarios ORDER BY name")
+                return cur.fetchall()
+
+    def upsert_marking_scenario(self, scenario_data: dict):
+        """Добавляет или обновляет сценарий маркировки."""
+        scenario_id = scenario_data.get('id')
+        # Убедимся, что scenario_data - это JSON-строка
+        data_json = json.dumps(scenario_data.get('scenario_data', {}))
+
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if scenario_id: # Обновление
+                    cur.execute("""
+                        UPDATE ap_marking_scenarios SET name=%s, scenario_data=%s
+                        WHERE id=%s
+                    """, (scenario_data['name'], data_json, scenario_id))
+                else: # Вставка
+                    cur.execute("""
+                        INSERT INTO ap_marking_scenarios (name, scenario_data)
+                        VALUES (%s, %s)
+                    """, (scenario_data['name'], data_json))
+            conn.commit()
+
+    def delete_marking_scenario(self, scenario_id: int):
+        """Удаляет сценарий маркировки по ID."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM ap_marking_scenarios WHERE id = %s", (scenario_id,))
+            conn.commit()
+
+    def get_marking_scenarios_template(self):
+        """Возвращает шаблон для импорта сценариев."""
+        return pd.DataFrame(columns=['id', 'name', 'scenario_data'])
+
+    def process_marking_scenarios_import(self, df: pd.DataFrame):
+        """Обрабатывает импорт сценариев из DataFrame."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Используем ON CONFLICT для UPSERT
+                upsert_query = """
+                    INSERT INTO ap_marking_scenarios (id, name, scenario_data)
+                    VALUES %s
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        scenario_data = EXCLUDED.scenario_data;
+                """
+                # Убедимся, что scenario_data это валидный JSON
+                df['scenario_data'] = df['scenario_data'].apply(lambda x: json.dumps(x) if isinstance(x, dict) else x)
+                data_tuples = [tuple(x) for x in df[['id', 'name', 'scenario_data']].to_numpy()]
+                execute_values(cur, upsert_query, data_tuples)
+            conn.commit()
