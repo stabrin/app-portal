@@ -1267,7 +1267,9 @@ class AdminWindow(tk.Tk):
             try:
                 items = service_methods['get']()
                 for item in items:
-                    values = [item.get(key) for key in columns.keys()]
+                    # --- ИСПРАВЛЕНИЕ: Принудительно конвертируем все значения в строки ---
+                    # Это предотвращает автоматическое преобразование GTIN в число и потерю ведущих нулей.
+                    values = [str(item.get(key, '')) for key in columns.keys()]
                     tree.insert('', 'end', values=values)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить '{title}': {e}", parent=self)
