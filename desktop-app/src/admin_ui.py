@@ -1267,7 +1267,7 @@ class AdminWindow(tk.Tk):
             editor_class=ScenarioEditorDialog # Используем кастомный редактор
         )
 
-    def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field):
+    def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field, editor_class=None):
         """Создает универсальную вкладку для справочника с полным CRUD."""
         logger = logging.getLogger(__name__)
         frame = ttk.Frame(parent, padding="10")
@@ -1373,8 +1373,7 @@ class AdminWindow(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Ошибка импорта: {e}", parent=self)
 
-        editor_class_for_tab = service_methods.get('editor_class')
-        ttk.Button(controls, text="Добавить", command=lambda: open_editor(editor_class=editor_class_for_tab)).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Добавить", command=lambda: open_editor(editor_class=editor_class)).pack(side=tk.LEFT, padx=2)
         # --- ИЗМЕНЕНИЕ: Логика кнопки "Редактировать" ---
         def edit_selected():
             selected_item_id = tree.focus()
@@ -1386,7 +1385,7 @@ class AdminWindow(tk.Tk):
             original_data = data_cache.get(pk_value)
             # --- ИСПРАВЛЕНИЕ: Передаем в редактор словарь, а не список значений ---
             # Это гарантирует, что данные будут правильно сопоставлены с полями.
-            open_editor(original_data, editor_class=editor_class_for_tab)
+            open_editor(original_data, editor_class=editor_class)
         ttk.Button(controls, text="Редактировать", command=edit_selected).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Удалить", command=delete_item).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Выгрузить в Excel", command=export_to_excel).pack(side=tk.LEFT, padx=2)
