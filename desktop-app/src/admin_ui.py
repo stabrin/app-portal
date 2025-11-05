@@ -2372,13 +2372,16 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         self.scenario_combo = ttk.Combobox(main_frame, textvariable=self.scenario_var, state="readonly")
         self.scenario_combo.pack(fill=tk.X, pady=5)
         self._load_scenarios()
+        # --- ИЗМЕНЕНИЕ: Привязываем событие смены сценария к обновлению списка клиентов ---
+        self.scenario_combo.bind("<<ComboboxSelected>>", self._on_scenario_change)
 
         # 2. Клиент
         ttk.Label(main_frame, text="Клиент:").pack(anchor="w")
         self.client_var = tk.StringVar()
         self.client_combo = ttk.Combobox(main_frame, textvariable=self.client_var, state="readonly")
         self.client_combo.pack(fill=tk.X, pady=5)
-        self._load_clients()
+        # --- ИЗМЕНЕНИЕ: Первоначальная загрузка клиентов теперь происходит после выбора сценария ---
+        # self._load_clients() # Этот вызов будет сделан в _on_scenario_change
 
         # 3. Товарные группы
         ttk.Label(main_frame, text="Товарные группы:").pack(anchor="w")
@@ -2411,37 +2414,81 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         # Загрузка начальных данных, если редактирование
         if self.initial_data:
             self._load_initial_values()
+        
+        # --- ИЗМЕНЕНИЕ: Вызываем смену сценария вручную после загрузки всех данных ---
+        # Это гарантирует, что список клиентов будет корректно загружен при открытии окна.
+        self._on_scenario_change()
+
+    def _on_scenario_change(self, event=None):
+        """
+        Обработчик смены сценария. Определяет, откуда загружать клиентов (локально или из API).
+        """
+        selected_scenario_name = self.scenario_var.get()
+        if not selected_scenario_name:
+            return
+
+        selected_scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
+        if not selected_scenario:
+            return
+
+        # Проверяем условие из сценария
+        scenario_data = selected_scenario.get('scenario_data', {})
+        if scenario_data.get('dm_source') == 'Заказ в ДМ.Код':
+            self._load_clients(source='api')
+        else:
+            self._load_clients(source='local')
 
     def _load_scenarios(self):
         """Загружает сценарии маркировки в Combobox."""
         scenarios = self.catalog_service.get_marking_scenarios()
+        self.scenarios = scenarios # Сохраняем для дальнейшего использования
         self.scenario_combo['values'] = [s['name'] for s in scenarios]
         if scenarios:
             # --- ИСПРАВЛЕНИЕ: Заполняем scenario_var не только при создании, но и при редактировании ---
             if self.initial_data:
                 # Если редактируем, пытаемся найти соответствующий сценарий
-                initial_scenario = next((s for s in scenarios if s['id'] == self.initial_data.get('scenario_id')), None)
+                # --- ИСПРАВЛЕНИЕ: Используем self.scenarios, который уже содержит полные данные ---
+                initial_scenario = next((s for s in self.scenarios if s['id'] == self.initial_data.get('scenario_id')), None)
                 if initial_scenario:
                     self.scenario_var.set(initial_scenario['name'])
             else:
                 # Если создаем, выбираем первый доступный
                 self.scenario_var.set(scenarios[0]['name'])
-        self.scenarios = scenarios  # Сохраняем для дальнейшего использования
 
-    def _load_clients(self):
-        """Загружает клиентов в Combobox."""
-        clients = self.catalog_service.get_local_clients()
-        self.client_combo['values'] = [c['name'] for c in clients]
+    def _load_clients(self, source='local'):
+        """Загружает клиентов в Combobox из указанного источника ('local' или 'api')."""
+        self.client_source = source # Сохраняем источник для использования в _save
+        clients = []
+        try:
+            if source == 'api':
+                clients = self.catalog_service.get_participants_catalog()
+            else: # 'local'
+                clients = self.catalog_service.get_local_clients()
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки клиентов", f"Не удалось загрузить список клиентов: {e}", parent=self)
+
+        self.clients = clients # Сохраняем полный список для получения ID при сохранении
+        self.client_combo['values'] = [c.get('name', '') for c in clients]
+
         if clients:
-            self.client_var.set(clients[0]['name'])
-        self.clients = clients  # Сохраняем для дальнейшего использования
+            # Если это редактирование, пытаемся выставить сохраненного клиента
+            if self.initial_data:
+                initial_client_name = self.initial_data.get('client_name')
+                if initial_client_name in self.client_combo['values']:
+                    self.client_var.set(initial_client_name)
+                else:
+                    self.client_var.set(clients[0]['name']) # Если не нашли, ставим первого
+            else:
+                self.client_var.set(clients[0]['name']) # Для нового уведомления ставим первого
+        else:
+            self.client_var.set('') # Очищаем, если список пуст
 
     def _load_product_groups(self):
         """Загружает товарные группы в Listbox."""
         product_groups = self.catalog_service.get_product_groups()
+        self.product_groups = product_groups  # Сохраняем для дальнейшего использования
         for pg in product_groups:
             self.product_groups_listbox.insert(tk.END, pg['display_name'])
-        self.product_groups = product_groups  # Сохраняем для дальнейшего использования
 
     def _load_initial_values(self):
         """Загружает начальные значения из existing_data."""
@@ -2449,6 +2496,11 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         self.arrival_date_var.set(self.initial_data.get('planned_arrival_date', ''))
         self.vehicle_number_entry.insert(0, self.initial_data.get('vehicle_number', ''))
         self.comments_text.insert(tk.END, self.initial_data.get('comments', ''))
+        
+        # --- ИСПРАВЛЕНИЕ: Устанавливаем клиента при редактировании ---
+        initial_client_name = self.initial_data.get('client_name')
+        if initial_client_name:
+            self.client_var.set(initial_client_name)
 
         # Выбор товарных групп
         initial_groups = self.initial_data.get('product_groups', [])
@@ -2466,11 +2518,20 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
             messagebox.showerror("Ошибка", "Не выбран сценарий маркировки.", parent=self)
             return
 
+        # --- ИЗМЕНЕНИЕ: Логика получения ID клиента в зависимости от источника ---
         selected_client_name = self.client_var.get()
-        selected_client = next((c for c in self.clients if c['name'] == selected_client_name), None)
-        if not selected_client:
+        selected_client_obj = next((c for c in self.clients if c.get('name') == selected_client_name), None)
+        if not selected_client_obj:
             messagebox.showerror("Ошибка", "Не выбран клиент.", parent=self)
             return
+
+        client_api_id = None
+        client_local_id = None
+        if self.client_source == 'api':
+            client_api_id = selected_client_obj.get('id')
+        else: # 'local'
+            client_local_id = selected_client_obj.get('id')
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
         selected_product_groups_indices = self.product_groups_listbox.curselection()
         selected_product_groups = [self.product_groups[i] for i in selected_product_groups_indices]
@@ -2479,9 +2540,9 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         data = {
             'scenario_id': selected_scenario['id'],
             'scenario_name': selected_scenario['name'],
-            'client_api_id': None,  # TODO: Поддержка API-клиентов
-            'client_local_id': selected_client['id'],
-            'client_name': selected_client['name'],
+            'client_api_id': client_api_id,
+            'client_local_id': client_local_id,
+            'client_name': selected_client_name,
             'product_groups': [{'id': g['id'], 'name': g['display_name']} for g in selected_product_groups],
             'planned_arrival_date': self.arrival_date_var.get(),
             'vehicle_number': self.vehicle_number_entry.get(),
