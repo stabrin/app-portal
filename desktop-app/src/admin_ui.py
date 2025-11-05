@@ -11,6 +11,7 @@ import pandas as pd
 import io
 import os
 from datetime import datetime
+
 # --- Добавляем глобальный импорт Pillow ---
 try:
     from PIL import Image, ImageTk
@@ -40,6 +41,7 @@ from .printing_service import PrintingService, LabelEditorWindow, ImageSelection
 import requests
 from datetime import datetime
 import traceback
+
 import zlib, base64 # Для сжатия данных QR-кода
 
 def open_label_editor_window(parent_widget, user_info):
@@ -2008,6 +2010,7 @@ class NewNotificationDialog(tk.Toplevel):
 
         self.result = (name, arrival_date)
         self.destroy()
+
         notebook = ttk.Notebook(parent_frame)
         notebook.pack(expand=True, fill="both")
 
@@ -2384,6 +2387,7 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         self.arrival_date_var = tk.StringVar()
         date_frame = ttk.Frame(main_frame)
         date_frame.pack(fill=tk.X, pady=5)
+
         self.arrival_date_entry = ttk.Entry(date_frame, textvariable=self.arrival_date_var)
         self.arrival_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(date_frame, text="...", width=3, command=self._open_calendar_dialog).pack(side=tk.LEFT, padx=(5,0))
