@@ -1249,6 +1249,7 @@ class AdminWindow(tk.Tk):
 
     def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field):
         """Создает универсальную вкладку для справочника с полным CRUD."""
+        logger = logging.getLogger(__name__)
         frame = ttk.Frame(parent, padding="10")
         parent.add(frame, text=title)
 
