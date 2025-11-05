@@ -1165,43 +1165,35 @@ class AdminWindow(tk.Tk):
     def _create_catalogs_tab(self, parent_frame):
         logger = logging.getLogger(__name__)
         """Создает содержимое для вкладки 'Справочники'."""
+        # --- ИЗМЕНЕНИЕ: Передаем в сервис функцию для подключения к БД клиента ---
         from .catalogs_service import CatalogsService
-        service = CatalogsService(self.user_info)
- 
-        # Основной контейнер
-        paned_window = ttk.PanedWindow(parent_frame, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
+        service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
 
-        # --- Левая панель: Список уведомлений ---
-        list_frame = ttk.Frame(paned_window, padding="5")
-        paned_window.add(list_frame, weight=1)
- 
-        list_controls = ttk.Frame(list_frame)
-        list_controls.pack(fill=tk.X, pady=5)
- 
+        # --- ИЗМЕНЕНИЕ: Создаем вложенный Notebook для разных справочников ---
+        notebook = ttk.Notebook(parent_frame)
+        notebook.pack(expand=True, fill="both")
+
+        # --- Вкладка 1: Участники (существующая логика) ---
+        participants_frame = ttk.Frame(notebook, padding="10")
+        notebook.add(participants_frame, text="Участники")
+
+        participants_controls = ttk.Frame(participants_frame)
+        participants_controls.pack(fill=tk.X, pady=5)
+
         # --- ИЗМЕНЕНИЕ: Обновляем колонки в таблице ---
-        catalogs_tree = ttk.Treeview(list_frame, columns=('name', 'inn', 'poa_end'), show='headings')
-        catalogs_tree.heading('name', text='Наименование')
-        catalogs_tree.heading('inn', text='Источник (ИНН)')
-        catalogs_tree.heading('poa_end', text='Окончание доверенности')
-        catalogs_tree.column('name', width=300)
-        catalogs_tree.column('inn', width=150, anchor=tk.CENTER)
-        catalogs_tree.column('poa_end', width=150, anchor=tk.CENTER)
-        catalogs_tree.pack(expand=True, fill='both')
- 
-        # --- Правая панель: Детали уведомления ---
-        details_frame = ttk.Frame(paned_window, padding="5")
-        paned_window.add(details_frame, weight=2) 
+        participants_tree = ttk.Treeview(participants_frame, columns=('name', 'inn', 'poa_end'), show='headings')
+        participants_tree.heading('name', text='Наименование')
+        participants_tree.heading('inn', text='Источник (ИНН)')
+        participants_tree.heading('poa_end', text='Окончание доверенности')
+        participants_tree.column('name', width=300)
+        participants_tree.column('inn', width=150, anchor=tk.CENTER)
+        participants_tree.column('poa_end', width=150, anchor=tk.CENTER)
+        participants_tree.pack(expand=True, fill='both')
 
-        #details_notebook = ttk.Notebook(details_frame)
-        details_notebook = ttk.Notebook(details_frame)
-        # details_notebook.pack(fill='both', expand=True)
-
-        # --- Функции ---
-        def refresh_catalogs_list():
+        def refresh_participants_list():
             # Очищаем дерево перед обновлением
-            for i in catalogs_tree.get_children():
-                catalogs_tree.delete(i)
+            for i in participants_tree.get_children():
+                participants_tree.delete(i)
             try:
                 participants_list = service.get_participants_catalog()
                 # --- ИЗМЕНЕНИЕ: Заполняем новые колонки ---
@@ -1210,12 +1202,67 @@ class AdminWindow(tk.Tk):
                     poa_end_date = n.get('poa_validity_end', '')
                     if poa_end_date and 'T' in poa_end_date:
                         poa_end_date = poa_end_date.split('T')[0]
-                    catalogs_tree.insert('', 'end', values=(n.get('name', ''), n.get('inn', ''), poa_end_date))
+                    participants_tree.insert('', 'end', values=(n.get('name', ''), n.get('inn', ''), poa_end_date))
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить справочник: {e}", parent=self)
 
-        ttk.Button(list_controls, text="Обновить", command=refresh_catalogs_list).pack(side=tk.LEFT, padx=2)
-        refresh_catalogs_list()
+        ttk.Button(participants_controls, text="Обновить", command=refresh_participants_list).pack(side=tk.LEFT, padx=2)
+        refresh_participants_list()
+
+        # --- Вкладка 2: Товарные группы ---
+        product_groups_frame = ttk.Frame(notebook, padding="10")
+        notebook.add(product_groups_frame, text="Товарные группы")
+
+        pg_controls = ttk.Frame(product_groups_frame)
+        pg_controls.pack(fill=tk.X, pady=5)
+
+        pg_tree = ttk.Treeview(product_groups_frame, columns=('id', 'name', 'display_name'), show='headings')
+        pg_tree.heading('id', text='ID')
+        pg_tree.heading('name', text='Системное имя')
+        pg_tree.heading('display_name', text='Отображаемое имя')
+        pg_tree.column('id', width=50, anchor=tk.CENTER)
+        pg_tree.column('name', width=200)
+        pg_tree.column('display_name', width=300)
+        pg_tree.pack(expand=True, fill='both')
+
+        def refresh_product_groups():
+            for i in pg_tree.get_children(): pg_tree.delete(i)
+            try:
+                groups = service.get_product_groups()
+                for group in groups:
+                    pg_tree.insert('', 'end', values=(group['id'], group['group_name'], group['display_name']))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить товарные группы: {e}", parent=self)
+
+        ttk.Button(pg_controls, text="Обновить", command=refresh_product_groups).pack(side=tk.LEFT, padx=2)
+        refresh_product_groups()
+
+        # --- Вкладка 3: Товары ---
+        products_frame = ttk.Frame(notebook, padding="10")
+        notebook.add(products_frame, text="Товары")
+
+        products_controls = ttk.Frame(products_frame)
+        products_controls.pack(fill=tk.X, pady=5)
+
+        products_tree = ttk.Treeview(products_frame, columns=('gtin', 'name'), show='headings')
+        products_tree.heading('gtin', text='GTIN')
+        products_tree.heading('name', text='Наименование')
+        products_tree.column('gtin', width=150, anchor=tk.CENTER)
+        products_tree.column('name', width=400)
+        products_tree.pack(expand=True, fill='both')
+
+        def refresh_products():
+            for i in products_tree.get_children(): products_tree.delete(i)
+            try:
+                products = service.get_products()
+                for product in products:
+                    products_tree.insert('', 'end', values=(product['gtin'], product['name']))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить товары: {e}", parent=self)
+
+        ttk.Button(products_controls, text="Обновить", command=refresh_products).pack(side=tk.LEFT, padx=2)
+        refresh_products()
+
     def _create_orders_tab(self, parent_frame):
         """Создает содержимое для вкладки 'Заказы'."""
         controls_frame = ttk.Frame(parent_frame)
