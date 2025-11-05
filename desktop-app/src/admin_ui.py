@@ -1180,6 +1180,573 @@ class AdminWindow(tk.Tk):
         participants_controls = ttk.Frame(participants_frame)
         participants_controls.pack(fill=tk.X, pady=5)
 
+        participants_tree = ttk.Treeview(participants_frame, columns=('name', 'inn', 'poa_end'), show='headings')
+        participants_tree.heading('name', text='Наименование')
+        participants_tree.heading('inn', text='Источник (ИНН)')
+        participants_tree.heading('poa_end', text='Окончание доверенности')
+        participants_tree.column('name', width=300)
+        participants_tree.column('inn', width=150, anchor=tk.CENTER)
+        participants_tree.column('poa_end', width=150, anchor=tk.CENTER)
+        participants_tree.pack(expand=True, fill='both')
+
+        def refresh_participants_list():
+            for i in participants_tree.get_children(): participants_tree.delete(i)
+            try:
+                participants_list = service.get_participants_catalog()
+                for n in participants_list:
+                    poa_end_date = n.get('poa_validity_end', '')
+                    if poa_end_date and 'T' in poa_end_date:
+                        poa_end_date = poa_end_date.split('T')[0]
+                    participants_tree.insert('', 'end', values=(n.get('name', ''), n.get('inn', ''), poa_end_date))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить справочник: {e}", parent=self)
+
+        ttk.Button(participants_controls, text="Обновить", command=refresh_participants_list).pack(side=tk.LEFT, padx=2)
+        refresh_participants_list()
+
+        # --- Вкладка 2: Товарные группы ---
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Товарные группы",
+            service_methods={
+                'get': service.get_product_groups,
+                'upsert': service.upsert_product_group,
+                'delete': service.delete_product_group,
+                'template': service.get_product_groups_template,
+                'import': service.process_product_groups_import
+            },
+            columns={
+                'id': ('ID', 50, 'center'),
+                'group_name': ('Системное имя', 200, 'w'),
+                'display_name': ('Отображаемое имя', 300, 'w'),
+                'fias_required': ('Нужен ФИАС', 100, 'center'),
+                'code_template': ('Шаблон кода', 200, 'w'),
+                'dm_template': ('Шаблон ДМ', 200, 'w')
+            },
+            pk_field='id'
+        )
+
+        # --- Вкладка 3: Товары ---
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Товары",
+            service_methods={
+                'get': service.get_products,
+                'upsert': service.upsert_product,
+                'delete': service.delete_product,
+                'template': service.get_products_template,
+                'import': service.process_products_import
+            },
+            columns={
+                'gtin': ('GTIN', 150, 'center'),
+                'name': ('Наименование', 300, 'w'),
+                'description_1': ('Описание 1', 200, 'w'),
+                'description_2': ('Описание 2', 200, 'w'),
+                'description_3': ('Описание 3', 200, 'w')
+            },
+            pk_field='gtin'
+        )
+
+    def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field):
+        """Создает универсальную вкладку для справочника с полным CRUD."""
+        frame = ttk.Frame(parent, padding="10")
+        parent.add(frame, text=title)
+
+        controls = ttk.Frame(frame)
+        controls.pack(fill=tk.X, pady=5)
+
+        tree = ttk.Treeview(frame, columns=list(columns.keys()), show='headings')
+        for col_key, (col_title, col_width, col_anchor) in columns.items():
+            tree.heading(col_key, text=col_title)
+            tree.column(col_key, width=col_width, anchor=col_anchor)
+        tree.pack(expand=True, fill='both')
+
+        def refresh_data():
+            for i in tree.get_children(): tree.delete(i)
+            try:
+                items = service_methods['get']()
+                for item in items:
+                    values = [item.get(key) for key in columns.keys()]
+                    tree.insert('', 'end', values=values)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить '{title}': {e}", parent=self)
+
+        def open_editor(item_data=None):
+            """Открывает диалог для добавления/редактирования."""
+            dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
+            self.wait_window(dialog)
+            if dialog.result:
+                try:
+                    service_methods['upsert'](dialog.result)
+                    refresh_data()
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось сохранить запись: {e}", parent=self)
+
+        def delete_item():
+            selected_item = tree.focus()
+            if not selected_item: return
+            item_values = tree.item(selected_item)['values']
+            pk_value = item_values[list(columns.keys()).index(pk_field)]
+            if messagebox.askyesno("Подтверждение", f"Удалить запись с ключом '{pk_value}'?", parent=self):
+                try:
+                    service_methods['delete'](pk_value)
+                    refresh_data()
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось удалить запись: {e}", parent=self)
+
+        def export_to_excel():
+            try:
+                items = service_methods['get']()
+                df = pd.DataFrame(items, columns=list(columns.keys())) if items else service_methods['template']()
+                filepath = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], parent=self)
+                if filepath:
+                    df.to_excel(filepath, index=False)
+                    messagebox.showinfo("Успех", f"Справочник '{title}' выгружен.", parent=self)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось выгрузить файл: {e}", parent=self)
+
+        def import_from_excel():
+            filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+            if not filepath: return
+            try:
+                df = pd.read_excel(filepath, dtype={k: str for k in columns.keys()})
+                df = df.where(pd.notna(df), None) # Заменяем NaN на None
+                service_methods['import'](df)
+                refresh_data()
+                messagebox.showinfo("Успех", "Данные успешно импортированы.", parent=self)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Ошибка импорта: {e}", parent=self)
+
+        ttk.Button(controls, text="Добавить", command=lambda: open_editor()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Редактировать", command=lambda: open_editor(tree.item(tree.focus())['values']) if tree.focus() else None).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Удалить", command=delete_item).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Выгрузить в Excel", command=export_to_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Загрузить из Excel", command=import_from_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Обновить", command=refresh_data).pack(side=tk.LEFT, padx=2)
+
+        refresh_data()
+
+    def _create_orders_tab(self, parent_frame):
+        """Создает содержимое для вкладки 'Заказы'."""
+        controls_frame = ttk.Frame(parent_frame)
+        controls_frame.pack(fill=tk.X, pady=5)
+ 
+        def load_orders():
+            for i in orders_tree.get_children():
+                orders_tree.delete(i)
+            try:
+                with PrintingService._get_client_db_connection(self.user_info) as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("SELECT id, client_name, order_date, status FROM orders ORDER BY id DESC")
+                        for order in cur.fetchall():
+                            orders_tree.insert('', 'end', values=(order['id'], order['client_name'], order['order_date'], order['status']))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить заказы: {e}", parent=self)
+ 
+        ttk.Button(controls_frame, text="Обновить", command=load_orders).pack(side=tk.LEFT)
+ 
+        tree_frame = ttk.Frame(parent_frame)
+        tree_frame.pack(expand=True, fill="both")
+ 
+        orders_tree = ttk.Treeview(tree_frame, columns=('id', 'client', 'date', 'status'), show='headings')
+        orders_tree.heading('id', text='ID')
+        orders_tree.heading('client', text='Клиент')
+        orders_tree.heading('date', text='Дата')
+        orders_tree.heading('status', text='Статус')
+        orders_tree.column('id', width=50, anchor=tk.CENTER)
+        orders_tree.column('client', width=200)
+        orders_tree.column('date', width=100)
+        orders_tree.column('status', width=100)
+        orders_tree.pack(expand=True, fill="both", side="left")
+ 
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=orders_tree.yview)
+        orders_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+ 
+        load_orders()
+ 
+    def _open_dm_test_print_dialog(self):
+        """
+        Открывает диалог печати для тестирования DataMatrix.
+        Данные для кода будут получены автоматически сервисом печати
+        согласно источнику данных, указанному в макете.
+        """
+        # Готовим "пустой" набор данных. Сервис печати сам подставит реальные
+        # данные из БД, так как в макете указан источник "items.datamatrix".
+        item_data_for_printing = {
+            "items.datamatrix": None, # Значение будет получено из БД автоматически
+            # Добавляем заглушки для других возможных полей в макете, чтобы избежать ошибок.
+            "QR: Конфигурация сервера": json.dumps({"error": "not applicable"}),
+            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
+            "ap_workplaces.warehouse_name": "Тест DataMatrix (из БД)",
+            "ap_workplaces.workplace_number": "0" # ИСПРАВЛЕНИЕ: Преобразуем в строку, чтобы избежать ошибки 'int' object has no attribute 'isdigit'
+        }
+
+        # Вызываем нашу стандартную процедуру печати с предпросмотром.
+        PrintWorkplaceLabelsDialog(self, self.user_info, "Тестирование DataMatrix", [item_data_for_printing])
+
+
+    def _create_menu(self):
+        menubar = tk.Menu(self)
+        self.config(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label="Выход", command=self.quit)
+        menubar.add_cascade(label="Файл", menu=file_menu)
+
+        # Меню для управления устройствами
+        devices_menu = tk.Menu(menubar, tearoff=0)
+        devices_menu.add_command(label="Управление печатью", command=lambda: open_print_management_window(self))
+        devices_menu.add_separator()
+        devices_menu.add_command(label="Тестирование ДМ", command=self._open_dm_test_print_dialog)
+        menubar.add_cascade(label="Устройства", menu=devices_menu)
+
+        # Меню для управления пользователями
+        users_menu = tk.Menu(menubar, tearoff=0)
+        users_menu.add_command(label="Пользователи клиента", command=lambda: open_user_management_window(self, self.user_info))
+        menubar.add_cascade(label="Пользователи", menu=users_menu)
+
+        # Меню для настройки рабочих мест
+        setup_menu = tk.Menu(menubar, tearoff=0)
+        setup_menu.add_command(label="Настройка рабочих мест", command=lambda: open_workplace_setup_window(self, self.user_info))
+        setup_menu.add_separator()
+        setup_menu.add_command(label="Редактор макетов", command=lambda: open_label_editor_window(self, self.user_info))
+        menubar.add_cascade(label="Настройка", menu=setup_menu)
+
+class GenericEditorDialog(tk.Toplevel):
+    """Универсальный диалог для редактирования записи справочника."""
+    def __init__(self, parent, title, columns, item_data=None, pk_field=None):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+        self.entries = {}
+
+        frame = ttk.Frame(self, padding="15")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        item_values = {}
+        if item_data:
+            item_values = dict(zip(columns.keys(), item_data))
+
+        for i, (key, (label, _, _)) in enumerate(columns.items()):
+            ttk.Label(frame, text=f"{label}:").grid(row=i, column=0, sticky="w", padx=5, pady=2)
+            if key == 'fias_required':
+                var = tk.BooleanVar(value=bool(item_values.get(key)))
+                entry = ttk.Checkbutton(frame, variable=var)
+                self.entries[key] = var
+            else:
+                entry = ttk.Entry(frame, width=50)
+                entry.insert(0, str(item_values.get(key, '')))
+                if key == pk_field and item_data:
+                    entry.config(state='readonly')
+                self.entries[key] = entry
+            entry.grid(row=i, column=1, sticky="ew", padx=5, pady=2)
+
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=len(columns), column=0, columnspan=2, pady=(10,0), sticky="e")
+        ttk.Button(button_frame, text="OK", command=self._on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.LEFT)
+
+    def _on_ok(self):
+        self.result = {}
+        for key, widget in self.entries.items():
+            self.result[key] = widget.get()
+        self.destroy()
+
+class CalendarDialog(tk.Toplevel):
+    """Диалоговое окно с простым календарем."""
+    def __init__(self, parent, initial_date=None):
+        super().__init__(parent)
+        self.title("Выберите дату")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        if initial_date:
+            self._current_date = initial_date
+        else:
+            self._current_date = datetime.now()
+
+        self._create_widgets()
+        self._update_calendar()
+
+    def _create_widgets(self):
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(pady=5)
+        ttk.Button(nav_frame, text="<", command=self._prev_month).pack(side=tk.LEFT)
+        self.month_year_label = ttk.Label(nav_frame, font=("Arial", 12, "bold"), width=20, anchor="center")
+        self.month_year_label.pack(side=tk.LEFT, padx=10)
+        ttk.Button(nav_frame, text=">", command=self._next_month).pack(side=tk.LEFT)
+
+        self.calendar_frame = ttk.Frame(self)
+        self.calendar_frame.pack(padx=10, pady=10)
+
+    def _update_calendar(self):
+        for widget in self.calendar_frame.winfo_children():
+            widget.destroy()
+
+        self.month_year_label.config(text=self._current_date.strftime("%B %Y"))
+
+        days_of_week = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        for i, day in enumerate(days_of_week):
+            ttk.Label(self.calendar_frame, text=day).grid(row=0, column=i, padx=2, pady=2)
+
+        first_day_of_month = self._current_date.replace(day=1)
+        start_weekday = first_day_of_month.weekday() # 0=Пн, 6=Вс
+
+        import calendar
+        month_days = calendar.monthrange(self._current_date.year, self._current_date.month)[1]
+
+        current_day = 1
+        for row in range(1, 7):
+            for col in range(7):
+                if (row == 1 and col < start_weekday) or current_day > month_days:
+                    continue
+                
+                btn = ttk.Button(self.calendar_frame, text=str(current_day), width=4,
+                                 command=lambda d=current_day: self._select_date(d))
+                btn.grid(row=row, column=col, padx=1, pady=1)
+                current_day += 1
+
+    def _select_date(self, day):
+        self.result = self._current_date.replace(day=day).date()
+        self.destroy()
+
+    def _prev_month(self):
+        self._current_date = self._current_date - pd.DateOffset(months=1)
+        self._update_calendar()
+
+    def _next_month(self):
+        self._current_date = self._current_date + pd.DateOffset(months=1)
+        self._update_calendar()
+
+class NewNotificationDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
+    def __init__(self, parent, title="Новое уведомление", initial_name="", initial_date_str=""):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        frame = ttk.Frame(self, padding="15")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Наименование
+        ttk.Label(frame, text="Наименование:").grid(row=0, column=0, sticky="w", pady=2)
+        name_frame = ttk.Frame(frame)
+        name_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.name_entry = ttk.Entry(name_frame, width=40)
+        self.name_entry.insert(0, initial_name)
+        self.name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(name_frame, text="Вставить", command=self._paste_name).pack(side=tk.LEFT, padx=(5,0))
+
+        # Дата
+        ttk.Label(frame, text="Планируемая дата прибытия:").grid(row=2, column=0, sticky="w", pady=(10, 2))
+        date_frame = ttk.Frame(frame)
+        date_frame.grid(row=3, column=0, columnspan=2, sticky="ew")
+        self.date_var = tk.StringVar(value=initial_date_str)
+        self.date_entry = ttk.Entry(date_frame, textvariable=self.date_var, width=40)
+        self.date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(date_frame, text="...", width=3, command=self._open_calendar).pack(side=tk.LEFT, padx=(5,0))
+
+        # Кнопки OK/Отмена
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=(20, 0), sticky="e")
+        ttk.Button(button_frame, text="OK", command=self._on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.LEFT)
+
+        self.name_entry.focus_set()
+
+    def _paste_name(self):
+        try:
+            clipboard_text = self.clipboard_get()
+            self.name_entry.delete(0, tk.END)
+            self.name_entry.insert(0, clipboard_text)
+        except tk.TclError:
+            messagebox.showwarning("Буфер обмена", "Буфер обмена пуст или содержит нетекстовые данные.", parent=self)
+
+    def _open_calendar(self):
+        try:
+            initial_date = datetime.strptime(self.date_var.get(), "%Y-%m-%d")
+        except ValueError:
+            initial_date = datetime.now()
+        
+        cal_dialog = CalendarDialog(self, initial_date=initial_date)
+        self.wait_window(cal_dialog)
+        if cal_dialog.result:
+            self.date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
+
+    def _on_ok(self):
+        name = self.name_entry.get().strip()
+        if not name:
+            messagebox.showwarning("Внимание", "Наименование не может быть пустым.", parent=self)
+            return
+
+        date_str = self.date_var.get().strip()
+        arrival_date = None
+        if date_str:
+            try:
+                arrival_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                messagebox.showerror("Ошибка", "Неверный формат даты. Используйте ГГГГ-ММ-ДД или выберите из календаря.", parent=self)
+                return
+
+        self.result = (name, arrival_date)
+        self.destroy()
+class CalendarDialog(tk.Toplevel):
+    """Диалоговое окно с простым календарем."""
+    def __init__(self, parent, initial_date=None):
+        super().__init__(parent)
+        self.title("Выберите дату")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        if initial_date:
+            self._current_date = initial_date
+        else:
+            self._current_date = datetime.now()
+
+        self._create_widgets()
+        self._update_calendar()
+
+    def _create_widgets(self):
+        nav_frame = ttk.Frame(self)
+        nav_frame.pack(pady=5)
+        ttk.Button(nav_frame, text="<", command=self._prev_month).pack(side=tk.LEFT)
+        self.month_year_label = ttk.Label(nav_frame, font=("Arial", 12, "bold"), width=20, anchor="center")
+        self.month_year_label.pack(side=tk.LEFT, padx=10)
+        ttk.Button(nav_frame, text=">", command=self._next_month).pack(side=tk.LEFT)
+
+        self.calendar_frame = ttk.Frame(self)
+        self.calendar_frame.pack(padx=10, pady=10)
+
+    def _update_calendar(self):
+        for widget in self.calendar_frame.winfo_children():
+            widget.destroy()
+
+        self.month_year_label.config(text=self._current_date.strftime("%B %Y"))
+
+        days_of_week = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+        for i, day in enumerate(days_of_week):
+            ttk.Label(self.calendar_frame, text=day).grid(row=0, column=i, padx=2, pady=2)
+
+        first_day_of_month = self._current_date.replace(day=1)
+        start_weekday = first_day_of_month.weekday() # 0=Пн, 6=Вс
+
+        import calendar
+        month_days = calendar.monthrange(self._current_date.year, self._current_date.month)[1]
+
+        current_day = 1
+        for row in range(1, 7):
+            for col in range(7):
+                if (row == 1 and col < start_weekday) or current_day > month_days:
+                    continue
+                
+                btn = ttk.Button(self.calendar_frame, text=str(current_day), width=4,
+                                 command=lambda d=current_day: self._select_date(d))
+                btn.grid(row=row, column=col, padx=1, pady=1)
+                current_day += 1
+
+    def _select_date(self, day):
+        self.result = self._current_date.replace(day=day).date()
+        self.destroy()
+
+    def _prev_month(self):
+        self._current_date = self._current_date - pd.DateOffset(months=1)
+        self._update_calendar()
+
+    def _next_month(self):
+        self._current_date = self._current_date + pd.DateOffset(months=1)
+        self._update_calendar()
+
+class NewNotificationDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
+    def __init__(self, parent, title="Новое уведомление", initial_name="", initial_date_str=""):
+        super().__init__(parent)
+        self.title(title)
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+
+        frame = ttk.Frame(self, padding="15")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Наименование
+        ttk.Label(frame, text="Наименование:").grid(row=0, column=0, sticky="w", pady=2)
+        name_frame = ttk.Frame(frame)
+        name_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.name_entry = ttk.Entry(name_frame, width=40)
+        self.name_entry.insert(0, initial_name)
+        self.name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(name_frame, text="Вставить", command=self._paste_name).pack(side=tk.LEFT, padx=(5,0))
+
+        # Дата
+        ttk.Label(frame, text="Планируемая дата прибытия:").grid(row=2, column=0, sticky="w", pady=(10, 2))
+        date_frame = ttk.Frame(frame)
+        date_frame.grid(row=3, column=0, columnspan=2, sticky="ew")
+        self.date_var = tk.StringVar(value=initial_date_str)
+        self.date_entry = ttk.Entry(date_frame, textvariable=self.date_var, width=40)
+        self.date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(date_frame, text="...", width=3, command=self._open_calendar).pack(side=tk.LEFT, padx=(5,0))
+
+        # Кнопки OK/Отмена
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=4, column=0, columnspan=2, pady=(20, 0), sticky="e")
+        ttk.Button(button_frame, text="OK", command=self._on_ok).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.LEFT)
+
+        self.name_entry.focus_set()
+
+    def _paste_name(self):
+        try:
+            clipboard_text = self.clipboard_get()
+            self.name_entry.delete(0, tk.END)
+            self.name_entry.insert(0, clipboard_text)
+        except tk.TclError:
+            messagebox.showwarning("Буфер обмена", "Буфер обмена пуст или содержит нетекстовые данные.", parent=self)
+
+    def _open_calendar(self):
+        try:
+            initial_date = datetime.strptime(self.date_var.get(), "%Y-%m-%d")
+        except ValueError:
+            initial_date = datetime.now()
+        
+        cal_dialog = CalendarDialog(self, initial_date=initial_date)
+        self.wait_window(cal_dialog)
+        if cal_dialog.result:
+            self.date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
+
+    def _on_ok(self):
+        name = self.name_entry.get().strip()
+        if not name:
+            messagebox.showwarning("Внимание", "Наименование не может быть пустым.", parent=self)
+            return
+
+        date_str = self.date_var.get().strip()
+        arrival_date = None
+        if date_str:
+            try:
+                arrival_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                messagebox.showerror("Ошибка", "Неверный формат даты. Используйте ГГГГ-ММ-ДД или выберите из календаря.", parent=self)
+                return
+
+        self.result = (name, arrival_date)
+        self.destroy()
+        notebook = ttk.Notebook(parent_frame)
+        notebook.pack(expand=True, fill="both")
+
+        # --- Вкладка 1: Участники (существующая логика) ---
+        participants_frame = ttk.Frame(notebook, padding="10")
+        notebook.add(participants_frame, text="Участники")
+
+        participants_controls = ttk.Frame(participants_frame)
+        participants_controls.pack(fill=tk.X, pady=5)
+
         # --- ИЗМЕНЕНИЕ: Обновляем колонки в таблице ---
         participants_tree = ttk.Treeview(participants_frame, columns=('name', 'inn', 'poa_end'), show='headings')
         participants_tree.heading('name', text='Наименование')
