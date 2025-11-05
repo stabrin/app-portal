@@ -1257,6 +1257,9 @@ class AdminWindow(tk.Tk):
         controls.pack(fill=tk.X, pady=5)
 
         tree = ttk.Treeview(frame, columns=list(columns.keys()), show='headings')
+        # --- НОВЫЙ БЛОК: Кэш для хранения оригинальных данных ---
+        data_cache = {}
+
         for col_key, (col_title, col_width, col_anchor) in columns.items():
             tree.heading(col_key, text=col_title)
             tree.column(col_key, width=col_width, anchor=col_anchor)
@@ -1264,12 +1267,16 @@ class AdminWindow(tk.Tk):
 
         def refresh_data():
             for i in tree.get_children(): tree.delete(i)
+            data_cache.clear() # Очищаем кэш перед обновлением
             try:
                 items = service_methods['get']()
                 for item in items:
                     # --- ИСПРАВЛЕНИЕ: Принудительно конвертируем все значения в строки ---
                     # Это предотвращает автоматическое преобразование GTIN в число и потерю ведущих нулей.
                     values = [str(item.get(key, '')) for key in columns.keys()]
+                    pk_value = str(item.get(pk_field))
+                    # Сохраняем оригинальный объект в кэш
+                    data_cache[pk_value] = item
                     tree.insert('', 'end', values=values)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить '{title}': {e}", parent=self)
@@ -1277,7 +1284,13 @@ class AdminWindow(tk.Tk):
         def open_editor(item_data=None):
             """Открывает диалог для добавления/редактирования."""
             logger.debug(f"Открытие редактора для '{title}'. Данные для редактирования: {item_data}")
-            dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
+            # --- ИЗМЕНЕНИЕ: Передаем в диалог словарь, а не список ---
+            # Это делает код более читаемым и менее зависимым от порядка колонок.
+            initial_data_dict = None
+            if item_data:
+                initial_data_dict = dict(zip(columns.keys(), item_data))
+
+            dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, initial_data_dict, pk_field)
             self.wait_window(dialog)
             if dialog.result:
                 try:
@@ -1313,7 +1326,15 @@ class AdminWindow(tk.Tk):
                 messagebox.showerror("Ошибка", f"Не удалось выгрузить файл: {e}", parent=self)
 
         def import_from_excel():
-            filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+            # --- ИЗМЕНЕНИЕ: Уточняем типы файлов для диалога ---
+            filepath = filedialog.askopenfilename(
+                title=f"Импорт: {title}",
+                filetypes=[
+                    ("Excel files", "*.xlsx"),
+                    ("All files", "*.*")
+                ],
+                parent=self
+            )
             if not filepath: return
             try:
                 # --- ИСПРАВЛЕНИЕ: Явно указываем, что ключевые поля (gtin, id) должны быть текстом ---
@@ -1328,7 +1349,16 @@ class AdminWindow(tk.Tk):
                 messagebox.showerror("Ошибка", f"Ошибка импорта: {e}", parent=self)
 
         ttk.Button(controls, text="Добавить", command=lambda: open_editor()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(controls, text="Редактировать", command=lambda: open_editor(tree.item(tree.focus())['values']) if tree.focus() else None).pack(side=tk.LEFT, padx=2)
+        # --- ИЗМЕНЕНИЕ: Логика кнопки "Редактировать" ---
+        def edit_selected():
+            selected_item_id = tree.focus()
+            if not selected_item_id: return
+            # 1. Получаем PK из выбранной строки
+            pk_value = tree.item(selected_item_id)['values'][list(columns.keys()).index(pk_field)]
+            # 2. Находим оригинальные данные в кэше по этому PK
+            original_data = data_cache.get(pk_value)
+            open_editor(list(original_data.values()) if original_data else None)
+        ttk.Button(controls, text="Редактировать", command=edit_selected).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Удалить", command=delete_item).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Выгрузить в Excel", command=export_to_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Загрузить из Excel", command=import_from_excel).pack(side=tk.LEFT, padx=2)
@@ -1433,22 +1463,20 @@ class GenericEditorDialog(tk.Toplevel):
         self.result = None
         self.entries = {}
 
-        frame = ttk.Frame(self, padding="15")
+        frame = ttk.Frame(self, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
 
-        item_values = {}
-        if item_data:
-            item_values = dict(zip(columns.keys(), item_data))
-
         for i, (key, (label, _, _)) in enumerate(columns.items()):
-            ttk.Label(frame, text=f"{label}:").grid(row=i, column=0, sticky="w", padx=5, pady=2)
+            ttk.Label(frame, text=f"{label}:").grid(row=i, column=0, sticky="w", padx=5, pady=3)
             if key == 'fias_required':
-                var = tk.BooleanVar(value=bool(item_values.get(key)))
+                # Преобразуем строковое 'True'/'False' в булево
+                initial_value = str(item_data.get(key, 'False')).lower() == 'true'
+                var = tk.BooleanVar(value=initial_value)
                 entry = ttk.Checkbutton(frame, variable=var)
                 self.entries[key] = var
             else:
                 entry = ttk.Entry(frame, width=50)
-                entry.insert(0, str(item_values.get(key, '')))
+                entry.insert(0, str(item_data.get(key, '')))
                 # --- ИСПРАВЛЕНИЕ: Блокируем редактирование первичного ключа ---
                 # Это предотвращает случайное изменение GTIN и создание дубликата.
                 if item_data and key == pk_field:
