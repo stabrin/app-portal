@@ -1273,10 +1273,12 @@ class AdminWindow(tk.Tk):
 
         def open_editor(item_data=None):
             """Открывает диалог для добавления/редактирования."""
+            logger.debug(f"Открытие редактора для '{title}'. Данные для редактирования: {item_data}")
             dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
             self.wait_window(dialog)
             if dialog.result:
                 try:
+                    logger.debug(f"Сохранение данных из редактора: {dialog.result}")
                     service_methods['upsert'](dialog.result)
                     refresh_data()
                 except Exception as e:
@@ -1287,8 +1289,10 @@ class AdminWindow(tk.Tk):
             if not selected_item: return
             item_values = tree.item(selected_item)['values']
             pk_value = item_values[list(columns.keys()).index(pk_field)]
+            logger.debug(f"Запрос на удаление записи с ключом '{pk_value}' из справочника '{title}'.")
             if messagebox.askyesno("Подтверждение", f"Удалить запись с ключом '{pk_value}'?", parent=self):
                 try:
+                    logger.info(f"Подтверждено удаление записи с ключом '{pk_value}'.")
                     service_methods['delete'](pk_value)
                     refresh_data()
                 except Exception as e:

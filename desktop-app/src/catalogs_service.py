@@ -96,6 +96,7 @@ class CatalogsService:
 
     def upsert_product(self, product_data: dict):
         """Добавляет или обновляет товар."""
+        logger.debug(f"Попытка UPSERT для товара с GTIN: {product_data.get('gtin')}. Данные: {product_data}")
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 # --- ИСПРАВЛЕНИЕ: Явная проверка на существование перед действием ---
@@ -104,11 +105,13 @@ class CatalogsService:
                 cur.execute("SELECT 1 FROM products WHERE gtin = %s", (product_data['gtin'],))
                 exists = cur.fetchone()
                 if exists:  # Если GTIN найден, обновляем запись
+                    logger.debug(f"Товар с GTIN {product_data['gtin']} существует. Выполняется UPDATE.")
                     cur.execute("""
                         UPDATE products SET name=%s, description_1=%s, description_2=%s, description_3=%s
                         WHERE gtin=%s
                     """, (product_data['name'], product_data.get('description_1'), product_data.get('description_2'), product_data.get('description_3'), product_data['gtin']))
                 else:  # Если GTIN не найден, создаем новую запись
+                    logger.debug(f"Товар с GTIN {product_data['gtin']} не найден. Выполняется INSERT.")
                     cur.execute("""
                         INSERT INTO products (gtin, name, description_1, description_2, description_3)
                         VALUES (%s, %s, %s, %s, %s)
@@ -117,10 +120,12 @@ class CatalogsService:
 
     def delete_product(self, gtin: str):
         """Удаляет товар по GTIN."""
+        logger.debug(f"Попытка удаления товара с GTIN: {gtin}")
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM products WHERE gtin = %s", (gtin,))
             conn.commit()
+        logger.info(f"Товар с GTIN {gtin} успешно удален.")
 
     def get_products_template(self):
         """Возвращает шаблон для импорта товаров."""
