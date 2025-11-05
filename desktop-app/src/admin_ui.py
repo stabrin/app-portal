@@ -11,7 +11,7 @@ import pandas as pd
 import io
 import os
 from datetime import datetime
-# --- ИСПРАВЛЕНИЕ: Добавляем глобальный импорт Pillow ---
+# --- Добавляем глобальный импорт Pillow ---
 try:
     from PIL import Image, ImageTk
 
@@ -40,6 +40,7 @@ from .printing_service import PrintingService, LabelEditorWindow, ImageSelection
 import requests
 from datetime import datetime
 import traceback
+import zlib, base64 # Для сжатия данных QR-кода
 
 def open_label_editor_window(parent_widget, user_info):
     """
@@ -408,54 +409,6 @@ def open_workplace_setup_window(parent_widget, user_info):
 
     # Загружаем данные при открытии
     load_warehouses()
-
-def display_qr_sequence(title, chunks, parent):
-    """Вспомогательная функция для отображения серии QR-кодов."""
-    try:
-        import qrcode
-        from PIL import Image, ImageTk
-    except ImportError: return
-
-    qr_window = tk.Toplevel(parent)
-    qr_window.title(title)
-    qr_window.grab_set()
-
-    current_chunk_index = 0
-    
-    info_label = ttk.Label(qr_window, text="", font=("Arial", 12))
-    info_label.pack(pady=10)
-    qr_label = ttk.Label(qr_window)
-    qr_label.pack(padx=20, pady=10)
-    nav_frame = ttk.Frame(qr_window)
-    nav_frame.pack(pady=10)
-    prev_button = ttk.Button(nav_frame, text="<< Назад")
-    prev_button.pack(side=tk.LEFT, padx=10)
-    next_button = ttk.Button(nav_frame, text="Далее >>")
-    next_button.pack(side=tk.LEFT, padx=10)
-
-    def show_chunk(index):
-        nonlocal current_chunk_index
-        current_chunk_index = index
-        chunk_data = f"{index+1}/{len(chunks)}:{chunks[index]}"
-        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
-        qr.add_data(chunk_data)
-        qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white").resize((350, 350))
-        photo = ImageTk.PhotoImage(img)
-        qr_label.config(image=photo)
-        qr_label.image = photo
-        info_label.config(text=f"Шаг {index + 1} из {len(chunks)}. Отсканируйте код.")
-        prev_button.config(state="normal" if index > 0 else "disabled")
-        next_button.config(state="normal" if index < len(chunks) - 1 else "disabled")
-
-    def show_next():
-        if current_chunk_index < len(chunks) - 1: show_chunk(current_chunk_index + 1)
-    def show_prev():
-        if current_chunk_index > 0: show_chunk(current_chunk_index - 1)
-
-    prev_button.config(command=show_prev)
-    next_button.config(command=show_next)
-    show_chunk(0)
 
 def display_qr_sequence(title, chunks, parent):
     """Вспомогательная функция для отображения серии QR-кодов."""
@@ -1055,6 +1008,42 @@ def open_user_management_window(parent_widget, user_info):
     users_tree.pack(expand=True, fill=tk.BOTH)
 
     load_users()
+
+class AddClientDialog(tk.Toplevel):
+    """Диалог для добавления нового клиента в локальный справочник."""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Добавить нового клиента")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None # Будет хранить {'name': ..., 'inn': ...}
+
+        frame = ttk.Frame(self, padding="15")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text="Наименование:").grid(row=0, column=0, sticky="w", pady=2)
+        self.name_entry = ttk.Entry(frame, width=40)
+        self.name_entry.grid(row=0, column=1, sticky="ew", pady=2)
+
+        ttk.Label(frame, text="ИНН (опционально):").grid(row=1, column=0, sticky="w", pady=2)
+        self.inn_entry = ttk.Entry(frame, width=40)
+        self.inn_entry.grid(row=1, column=1, sticky="ew", pady=2)
+
+        button_frame = ttk.Frame(frame)
+        button_frame.grid(row=2, column=0, columnspan=2, pady=(20, 0), sticky="e")
+        ttk.Button(button_frame, text="Сохранить", command=self._on_save).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.LEFT)
+
+        self.name_entry.focus_set()
+
+    def _on_save(self):
+        name = self.name_entry.get().strip()
+        inn = self.inn_entry.get().strip()
+        if not name:
+            messagebox.showwarning("Внимание", "Наименование клиента не может быть пустым.", parent=self)
+            return
+        self.result = {'name': name, 'inn': inn if inn else None}
+        self.destroy()
 
 class AdminWindow(tk.Tk):
     """Главное окно для роли 'администратор'."""
@@ -2379,6 +2368,7 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         ttk.Label(main_frame, text="Клиент:").pack(anchor="w")
         self.client_var = tk.StringVar()
         self.client_combo = ttk.Combobox(main_frame, textvariable=self.client_var, state="readonly")
+        self.client_combo.bind("<Button-1>", self._on_client_combo_click) # Добавляем обработчик для клика
         self.client_combo.pack(fill=tk.X, pady=5)
         # --- ИЗМЕНЕНИЕ: Первоначальная загрузка клиентов теперь происходит после выбора сценария ---
         # self._load_clients() # Этот вызов будет сделан в _on_scenario_change
@@ -2389,10 +2379,14 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         self.product_groups_listbox.pack(fill=tk.X, pady=5)
         self._load_product_groups()
 
-        # 4. Предположительная дата прибытия
-        ttk.Label(main_frame, text="Предположительная дата прибытия:").pack(anchor="w")
+        # 4. Предположительная дата прибытия (с календарем)
+        ttk.Label(main_frame, text="Планируемая дата прибытия:").pack(anchor="w")
         self.arrival_date_var = tk.StringVar()
-        self.arrival_date_entry = ttk.Entry(main_frame, textvariable=self.arrival_date_var)
+        date_frame = ttk.Frame(main_frame)
+        date_frame.pack(fill=tk.X, pady=5)
+        self.arrival_date_entry = ttk.Entry(date_frame, textvariable=self.arrival_date_var)
+        self.arrival_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(date_frame, text="...", width=3, command=self._open_calendar_dialog).pack(side=tk.LEFT, padx=(5,0))
         self.arrival_date_entry.pack(fill=tk.X, pady=5)
 
         # 5. Номер контейнера/автомобиля
@@ -2419,6 +2413,34 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         # Это гарантирует, что список клиентов будет корректно загружен при открытии окна.
         self._on_scenario_change()
 
+    def _on_client_combo_click(self, event):
+        """Обработчик клика по Combobox клиента. Добавляет кнопку "Добавить нового"."""
+        # Проверяем, что кнопка еще не создана
+        if not hasattr(self, 'add_client_button'):
+            self.add_client_button = ttk.Button(self.client_combo.master, text="Добавить нового", command=self._add_new_client)
+            self.add_client_button.pack(side=tk.RIGHT, padx=5)
+
+    def _add_new_client(self):
+        """Открывает диалог для добавления нового клиента."""
+        dialog = AddClientDialog(self)
+        self.wait_window(dialog)
+        if dialog.result:
+            try:
+                self.catalog_service.upsert_local_client(dialog.result)
+                # Перезагружаем клиентов из текущего источника
+                self._load_clients(source=self.client_source)
+                # Выбираем только что добавленного клиента
+                self.client_var.set(dialog.result['name'])
+                messagebox.showinfo("Успех", f"Клиент '{dialog.result['name']}' успешно добавлен.", parent=self)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось добавить клиента: {e}", parent=self)
+
+    def _open_calendar_dialog(self):
+        """Открывает диалог календаря для выбора даты прибытия."""
+        cal_dialog = CalendarDialog(self, initial_date=datetime.strptime(self.arrival_date_var.get(), "%Y-%m-%d") if self.arrival_date_var.get() else datetime.now())
+        self.wait_window(cal_dialog)
+        if cal_dialog.result:
+            self.arrival_date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
     def _on_scenario_change(self, event=None):
         """
         Обработчик смены сценария. Определяет, откуда загружать клиентов (локально или из API).
@@ -2492,7 +2514,6 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
 
     def _load_initial_values(self):
         """Загружает начальные значения из existing_data."""
-        # --- ИСПРАВЛЕНИЕ: Заполняем все поля, а не только дату ---
         self.arrival_date_var.set(self.initial_data.get('planned_arrival_date', ''))
         self.vehicle_number_entry.insert(0, self.initial_data.get('vehicle_number', ''))
         self.comments_text.insert(tk.END, self.initial_data.get('comments', ''))
