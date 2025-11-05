@@ -1275,9 +1275,9 @@ class AdminWindow(tk.Tk):
                     # Это предотвращает автоматическое преобразование GTIN в число и потерю ведущих нулей.
                     values = [str(item.get(key, '')) for key in columns.keys()]
                     pk_value = str(item.get(pk_field))
-                    # Сохраняем оригинальный объект в кэш
+                    # Сохраняем оригинальный объект в кэш и используем PK как ID строки в Treeview
                     data_cache[pk_value] = item
-                    tree.insert('', 'end', values=values)
+                    tree.insert('', 'end', iid=pk_value, values=values)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить '{title}': {e}", parent=self)
 
@@ -1348,9 +1348,10 @@ class AdminWindow(tk.Tk):
         def edit_selected():
             selected_item_id = tree.focus()
             if not selected_item_id: return
-            # 1. Получаем PK из выбранной строки
-            pk_value = tree.item(selected_item_id)['values'][list(columns.keys()).index(pk_field)]
-            # 2. Находим оригинальные данные в кэше по этому PK
+            # --- ИСПРАВЛЕНИЕ: Получаем PK напрямую из ID строки (iid), а не из values ---
+            # Это гарантирует, что tkinter не преобразует GTIN в число.
+            pk_value = selected_item_id
+            # Находим оригинальные данные в кэше по этому PK
             original_data = data_cache.get(pk_value)
             # --- ИСПРАВЛЕНИЕ: Передаем в редактор словарь, а не список значений ---
             # Это гарантирует, что данные будут правильно сопоставлены с полями.
