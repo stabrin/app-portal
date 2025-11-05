@@ -1466,6 +1466,10 @@ class GenericEditorDialog(tk.Toplevel):
         frame = ttk.Frame(self, padding="10")
         frame.pack(fill=tk.BOTH, expand=True)
 
+        # --- ИСПРАВЛЕНИЕ: Гарантируем, что item_data - это словарь, даже если он пустой ---
+        if item_data is None:
+            item_data = {}
+
         for i, (key, (label, _, _)) in enumerate(columns.items()):
             ttk.Label(frame, text=f"{label}:").grid(row=i, column=0, sticky="w", padx=5, pady=3)
             if key == 'fias_required':
