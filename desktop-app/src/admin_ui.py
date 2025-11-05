@@ -1593,11 +1593,11 @@ class ScenarioEditorDialog(tk.Toplevel):
         self.widgets['post_processing'] = tk.StringVar(value=self.scenario_data.get('post_processing', 'Печать через Bartender'))
         ttk.Combobox(parent, textvariable=self.widgets['post_processing'], values=['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'], state='readonly').pack(fill="x", pady=(0, 5))
 
-        # Доп. опции для собственного алгоритма
-        self.widgets['clarify_prod_date_mark'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_date', False))
-        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date_mark']).pack(anchor="w")
-        self.widgets['clarify_prod_country_mark'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_country', False))
-        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country_mark']).pack(anchor="w")
+        # --- ИСПРАВЛЕНИЕ: Используем общие переменные для доп. опций ---
+        self.widgets['clarify_prod_date'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_date', False))
+        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date']).pack(anchor="w")
+        self.widgets['clarify_prod_country'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_country', False))
+        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country']).pack(anchor="w")
 
     def _create_manual_aggregation_widgets(self, parent):
         # Варианты агрегации
@@ -1605,11 +1605,12 @@ class ScenarioEditorDialog(tk.Toplevel):
         self.widgets['manual_agg_variant'] = tk.StringVar(value=self.scenario_data.get('manual_agg_variant', 'Агрегация в набор'))
         ttk.Combobox(parent, textvariable=self.widgets['manual_agg_variant'], values=['Агрегация в набор', 'Агрегация в короб', 'Агрегация в набор а затем в короб'], state='readonly').pack(fill="x", pady=(0, 5))
 
-        # Доп. опции
-        self.widgets['clarify_prod_date_manual'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_date', False))
-        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date_manual']).pack(anchor="w")
-        self.widgets['clarify_prod_country_manual'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_country', False))
-        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country_manual']).pack(anchor="w")
+        # --- ИСПРАВЛЕНИЕ: Используем те же общие переменные, что и для маркировки ---
+        # Виджеты будут созданы в _create_marking_widgets, здесь мы их просто используем.
+        # Чтобы они не дублировались, мы можем просто перенести их создание в одно место
+        # или, для простоты, просто создать их еще раз, но привязать к тем же переменным.
+        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date']).pack(anchor="w")
+        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country']).pack(anchor="w")
 
     def _on_type_change(self, event=None):
         """Показывает/скрывает фреймы в зависимости от типа сценария."""
@@ -1640,13 +1641,13 @@ class ScenarioEditorDialog(tk.Toplevel):
                 scenario_data['sscc_source'] = self.widgets['sscc_source'].get()
             scenario_data['post_processing'] = self.widgets['post_processing'].get()
             if scenario_data['post_processing'] == 'Собственный алгоритм':
-                scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date_mark'].get()
-                scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country_mark'].get()
+                scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date'].get()
+                scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country'].get()
 
         elif scenario_data['type'] == 'Ручная агрегация':
             scenario_data['manual_agg_variant'] = self.widgets['manual_agg_variant'].get()
-            scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date_manual'].get()
-            scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country_manual'].get()
+            scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date'].get()
+            scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country'].get()
 
         self.result = {
             'id': self.item_data.get('id'),
