@@ -1309,7 +1309,10 @@ class AdminWindow(tk.Tk):
             filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
             if not filepath: return
             try:
-                df = pd.read_excel(filepath, dtype={k: str for k in columns.keys()})
+                # --- ИСПРАВЛЕНИЕ: Явно указываем, что ключевые поля (gtin, id) должны быть текстом ---
+                # Это предотвращает потерю ведущих нулей в GTIN.
+                # Остальные поля пусть pandas определяет автоматически.
+                df = pd.read_excel(filepath, dtype={pk_field: str})
                 df = df.where(pd.notna(df), None) # Заменяем NaN на None
                 service_methods['import'](df)
                 refresh_data()
