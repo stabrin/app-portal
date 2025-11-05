@@ -2341,7 +2341,7 @@ class NewNotificationDialog(tk.Toplevel):
         self.result = (name, arrival_date)
         self.destroy()
 
-class OldNotificationEditorDialog(tk.Toplevel): # Переименовываем, чтобы избежать конфликта
+class NotificationEditorDialog(tk.Toplevel): # Переименовываем, чтобы избежать конфликта
     def __init__(self, parent, user_info, notification_id=None):
         super().__init__(parent)
         self.title("Редактор уведомления о поставке")
