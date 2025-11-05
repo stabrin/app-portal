@@ -1,11 +1,12 @@
 # src/supply_notification_service.py
 
 import logging
-from dateutil.relativedelta import relativedelta
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import pandas as pd
 import io
+import json
+from dateutil.relativedelta import relativedelta
 
 class SupplyNotificationService:
     """
@@ -19,36 +20,104 @@ class SupplyNotificationService:
         """
         self.get_db_connection = db_connection_func
 
-    def get_all_notifications(self):
-        """Возвращает список всех уведомлений о поставке."""
+    def get_notifications_with_counts(self):
+        """Возвращает список уведомлений, не находящихся в архиве, с подсчетом позиций и ДМ."""
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM ap_supply_notifications ORDER BY created_at DESC")
-                return cur.fetchall()
+                # Основной запрос для получения уведомлений
+                cur.execute("""
+                    SELECT 
+                        id, scenario_name, client_name, product_groups, 
+                        planned_arrival_date, vehicle_number, status, comments
+                    FROM ap_supply_notifications
+                    WHERE status NOT IN ('В работе', 'В архиве')
+                    ORDER BY id DESC
+                """)
+                notifications = cur.fetchall()
 
-    def create_notification(self, name, planned_arrival_date):
+                # Запрос для подсчета позиций и ДМ
+                cur.execute("""
+                    SELECT 
+                        notification_id,
+                        COUNT(DISTINCT gtin) as positions_count,
+                        SUM(quantity) as dm_count
+                    FROM ap_supply_notification_details
+                    GROUP BY notification_id
+                """)
+                counts = {row['notification_id']: row for row in cur.fetchall()}
+
+                # Объединяем данные
+                for n in notifications:
+                    count_data = counts.get(n['id'])
+                    if count_data:
+                        n['positions_count'] = count_data['positions_count']
+                        n['dm_count'] = int(count_data['dm_count']) # Убедимся, что это int
+                    else:
+                        n['positions_count'] = 0
+                        n['dm_count'] = 0
+                return notifications
+
+    def create_notification(self, data):
         """Создает новое уведомление о поставке."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO ap_supply_notifications (name, planned_arrival_date, status) VALUES (%s, %s, 'new') RETURNING id",
-                    (name, planned_arrival_date)
+                    """
+                    INSERT INTO ap_supply_notifications (
+                        scenario_id, scenario_name, client_api_id, client_local_id, client_name,
+                        product_groups, planned_arrival_date, vehicle_number, comments, status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'Проект')
+                    RETURNING id
+                    """,
+                    (
+                        data['scenario_id'], data['scenario_name'], data.get('client_api_id'),
+                        data.get('client_local_id'), data['client_name'],
+                        json.dumps(data['product_groups']), data['planned_arrival_date'],
+                        data['vehicle_number'], data['comments']
+                    )
                 )
                 new_id = cur.fetchone()[0]
                 conn.commit()
                 return new_id
+
+    def update_notification(self, notification_id, data):
+        """Обновляет существующее уведомление."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE ap_supply_notifications SET
+                        product_groups = %s,
+                        planned_arrival_date = %s,
+                        vehicle_number = %s,
+                        comments = %s
+                    WHERE id = %s
+                    """,
+                    (
+                        json.dumps(data['product_groups']), data['planned_arrival_date'],
+                        data['vehicle_number'], data['comments'], notification_id
+                    )
+                )
+            conn.commit()
+
+    def get_notification_by_id(self, notification_id):
+        """Получает одно уведомление по ID."""
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM ap_supply_notifications WHERE id = %s", (notification_id,))
+                return cur.fetchone()
 
     def get_notification_files(self, notification_id):
         """Возвращает список файлов для указанного уведомления."""
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT id, filename, file_type, uploaded_at FROM ap_supply_notification_files WHERE notification_id = %s",
+                    "SELECT id, filename, file_type, uploaded_at FROM ap_supply_notification_files WHERE notification_id = %s ORDER BY uploaded_at DESC",
                     (notification_id,)
                 )
                 return cur.fetchall()
 
-    def add_file(self, notification_id, filename, file_data, file_type):
+    def add_notification_file(self, notification_id, filename, file_data, file_type):
         """Добавляет файл к уведомлению."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -56,143 +125,98 @@ class SupplyNotificationService:
                     "INSERT INTO ap_supply_notification_files (notification_id, filename, file_data, file_type) VALUES (%s, %s, %s, %s)",
                     (notification_id, filename, file_data, file_type)
                 )
-                # Обновляем статус уведомления
-                if file_type == 'supplier':
-                    cur.execute("UPDATE ap_supply_notifications SET status = 'files_uploaded' WHERE id = %s", (notification_id,))
-                elif file_type == 'formalized':
-                    cur.execute("UPDATE ap_supply_notifications SET status = 'formalized' WHERE id = %s", (notification_id,))
-                conn.commit()
+            conn.commit()
 
-    def delete_file(self, file_id):
+    def delete_notification_file(self, file_id):
         """Удаляет файл."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM ap_supply_notification_files WHERE id = %s", (file_id,))
-                conn.commit()
+            conn.commit()
 
     def get_formalization_template(self):
         """Возвращает шаблон для формализации в виде DataFrame."""
         return pd.DataFrame(columns=['GTIN', 'Кол-во', 'Агрегация', 'Дата производства', 'Срок годности', 'Окончание срока годности'])
 
     def process_formalized_file(self, notification_id, file_data):
-        """
-        Обрабатывает загруженный формализованный файл, очищает старые детали
-        и загружает новые.
-        """
-        # --- ИСПРАВЛЕНИЕ: Обрабатываем случай, когда file_data is None (для удаления) ---
-        if file_data is None:
-            df = pd.DataFrame()
-        else:
-            try:
-                # Указываем, что колонка GTIN всегда должна читаться как текст
-                df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str}, engine='openpyxl')
-            except Exception as e:
-                logging.error(f"Ошибка чтения Excel файла: {e}")
-                raise ValueError(f"Не удалось прочитать Excel файл. Ошибка: {e}")
+        """Обрабатывает загруженный файл с детализацией."""
+        df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str}, engine='openpyxl')
+        df.columns = [col.strip().lower() for col in df.columns]
 
-        try:
-            details_to_insert = []
-            if not df.empty:
-                # Приводим названия колонок к нижнему регистру для удобства
-                df.columns = [col.strip().lower() for col in df.columns]
+        details_to_insert = []
+        for _, row in df.iterrows():
+            prod_date = pd.to_datetime(row.get('дата производства'), errors='coerce')
+            if pd.isna(prod_date):
+                prod_date = pd.Timestamp.now()
 
-                # Проверяем наличие обязательных колонок
-                required_cols = {'gtin', 'кол-во'}
-                if not required_cols.issubset(df.columns):
-                    raise ValueError(f"Отсутствуют обязательные колонки. Требуются: 'GTIN', 'Кол-во'")
+            exp_date = pd.to_datetime(row.get('окончание срока годности'), errors='coerce')
+            shelf_life_months = pd.to_numeric(row.get('срок годности'), errors='coerce')
 
-                for _, row in df.iterrows():
-                    prod_date = pd.to_datetime(row.get('дата производства'), errors='coerce')
-                    exp_date = pd.to_datetime(row.get('окончание срока годности'), errors='coerce')
-                    shelf_life_months = pd.to_numeric(row.get('срок годности'), errors='coerce')
+            if pd.notna(shelf_life_months):
+                exp_date = prod_date + relativedelta(months=int(shelf_life_months))
+            elif pd.notna(exp_date):
+                delta = relativedelta(exp_date, prod_date)
+                shelf_life_months = delta.years * 12 + delta.months
 
-                    if pd.notna(prod_date) and pd.notna(shelf_life_months) and pd.isna(exp_date):
-                        exp_date = prod_date + relativedelta(months=int(shelf_life_months))
-                    
-                    details_to_insert.append({
-                        'notification_id': notification_id,
-                        'gtin': str(row.get('gtin', '')),
-                        'quantity': int(row.get('кол-во', 0)),
-                        'aggregation': str(row.get('агрегация', '')),
-                        'production_date': None if pd.isna(prod_date) else prod_date.date(),
-                        'expiry_date': None if pd.isna(exp_date) else exp_date.date(),
-                        'product_name': str(row.get('наименование', '')) 
-                    })
+            details_to_insert.append((
+                notification_id,
+                str(row.get('gtin', '')),
+                int(row.get('кол-во', 0)),
+                int(pd.to_numeric(row.get('агрегация'), errors='coerce').fillna(0)),
+                prod_date.date(),
+                int(shelf_life_months) if pd.notna(shelf_life_months) else None,
+                exp_date.date() if pd.notna(exp_date) else None
+            ))
 
-            with self.get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    # 1. Удаляем старые детали для этого уведомления
-                    cur.execute("DELETE FROM ap_supply_notification_details WHERE notification_id = %s", (notification_id,))
-                    logging.info(f"Старые детали для уведомления {notification_id} удалены.")
- 
-                    # 2. Загружаем новые детали (массовая вставка)
-                    from psycopg2.extras import execute_values
-                    insert_query = """
-                        INSERT INTO ap_supply_notification_details (notification_id, gtin, quantity, aggregation, production_date, expiry_date, product_name)
-                        VALUES %s
-                    """
-                    data_tuples = [(d['notification_id'], d['gtin'], d['quantity'], d['aggregation'], d['production_date'], d['expiry_date'], d['product_name']) for d in details_to_insert]
-                    if data_tuples:
-                        execute_values(cur, insert_query, data_tuples)
-                    logging.info(f"Загружено {len(df)} новых строк деталей для уведомления {notification_id}.")
-                conn.commit() 
-            return len(df)
-        except Exception as e:
-            logging.error(f"Ошибка обработки формализованного файла: {e}")
-            raise
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM ap_supply_notification_details WHERE notification_id = %s", (notification_id,))
+                
+                from psycopg2.extras import execute_values
+                insert_query = """
+                    INSERT INTO ap_supply_notification_details 
+                    (notification_id, gtin, quantity, aggregation, production_date, shelf_life_months, expiry_date)
+                    VALUES %s
+                """
+                if details_to_insert:
+                    execute_values(cur, insert_query, details_to_insert)
+                
+                cur.execute("UPDATE ap_supply_notifications SET status = 'Ожидание' WHERE id = %s", (notification_id,))
+            conn.commit()
+        return len(details_to_insert)
 
     def get_notification_details(self, notification_id):
         """Возвращает детализированные строки для уведомления."""
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT * FROM ap_supply_notification_details WHERE notification_id = %s ORDER BY id",
+                    "SELECT id, gtin, quantity, aggregation, production_date, shelf_life_months, expiry_date FROM ap_supply_notification_details WHERE notification_id = %s ORDER BY id",
                     (notification_id,)
                 )
                 return cur.fetchall()
 
-    def update_notification_detail(self, detail_id, gtin, quantity, aggregation, production_date, expiry_date):
-        """
-        Обновляет одну строку в деталях уведомления.
-        Даты должны приходить в формате 'YYYY-MM-DD' или быть None/пустой строкой.
-        """
+    def save_notification_details(self, details_data):
+        """Массово обновляет строки детализации."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                # Преобразуем пустые строки в None для корректной вставки в БД
-                prod_date_or_null = production_date if production_date else None
-                exp_date_or_null = expiry_date if expiry_date else None
+                from psycopg2.extras import execute_values
+                update_query = """
+                    UPDATE ap_supply_notification_details SET
+                        gtin = data.gtin,
+                        quantity = data.quantity,
+                        aggregation = data.aggregation,
+                        production_date = data.production_date,
+                        shelf_life_months = data.shelf_life_months,
+                        expiry_date = data.expiry_date
+                    FROM (VALUES %s) AS data(id, gtin, quantity, aggregation, production_date, shelf_life_months, expiry_date)
+                    WHERE ap_supply_notification_details.id = data.id;
+                """
+                execute_values(cur, update_query, details_data)
+            conn.commit()
 
-                cur.execute(
-                    """UPDATE ap_supply_notification_details 
-                       SET gtin = %s, quantity = %s, aggregation = %s, production_date = %s, expiry_date = %s 
-                       WHERE id = %s""",
-                    (gtin, quantity, aggregation, prod_date_or_null, exp_date_or_null, detail_id)
-                )
-                conn.commit()
-
-    def update_notification_name(self, notification_id, new_name):
-        """Обновляет имя уведомления."""
+    def archive_notification(self, notification_id):
+        """Перемещает уведомление в архив."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE ap_supply_notifications SET name = %s WHERE id = %s",
-                    (new_name, notification_id)
-                )
-                conn.commit()
-    def update_arrival_date(self, notification_id, new_date):
-        """Обновляет планируемую дату прибытия."""
-        with self.get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE ap_supply_notifications SET planned_arrival_date = %s WHERE id = %s",
-                    (new_date, notification_id)
-                )
-                conn.commit()
-
-    def delete_notification(self, notification_id):
-        """Полностью удаляет уведомление и все связанные с ним данные."""
-        with self.get_db_connection() as conn:
-            with conn.cursor() as cur:
-                # Каскадное удаление настроено в БД, поэтому достаточно удалить основную запись
-                cur.execute("DELETE FROM ap_supply_notifications WHERE id = %s", (notification_id,))
-                conn.commit()
+                cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
+            conn.commit()

@@ -210,3 +210,53 @@ class CatalogsService:
                 data_tuples = [tuple(x) for x in df[['id', 'name', 'scenario_data']].to_numpy()]
                 execute_values(cur, upsert_query, data_tuples)
             conn.commit()
+
+    # --- Методы для локального справочника клиентов ---
+
+    def get_local_clients(self):
+        """Возвращает список локальных клиентов из БД."""
+        logger.info("Запрос локального справочника клиентов из БД.")
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT id, name, inn FROM ap_clients ORDER BY name")
+                return cur.fetchall()
+
+    def upsert_local_client(self, client_data: dict):
+        """Добавляет или обновляет локального клиента."""
+        client_id = client_data.get('id')
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if client_id: # Обновление
+                    cur.execute("""
+                        UPDATE ap_clients SET name=%s, inn=%s
+                        WHERE id=%s
+                    """, (client_data['name'], client_data.get('inn'), client_id))
+                else: # Вставка
+                    cur.execute("""
+                        INSERT INTO ap_clients (name, inn)
+                        VALUES (%s, %s)
+                    """, (client_data['name'], client_data.get('inn')))
+            conn.commit()
+
+    def delete_local_client(self, client_id: int):
+        """Удаляет локального клиента по ID."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM ap_clients WHERE id = %s", (client_id,))
+            conn.commit()
+
+    def get_local_clients_template(self):
+        """Возвращает шаблон для импорта локальных клиентов."""
+        return pd.DataFrame(columns=['id', 'name', 'inn'])
+
+    def process_local_clients_import(self, df: pd.DataFrame):
+        """Обрабатывает импорт локальных клиентов из DataFrame."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                upsert_query = """
+                    INSERT INTO ap_clients (id, name, inn) VALUES %s
+                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, inn = EXCLUDED.inn;
+                """
+                data_tuples = [tuple(x) for x in df[['id', 'name', 'inn']].to_numpy()]
+                execute_values(cur, upsert_query, data_tuples)
+            conn.commit()

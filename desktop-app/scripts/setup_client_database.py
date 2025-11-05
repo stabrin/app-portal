@@ -288,45 +288,68 @@ def update_client_db_schema(conn):
         """),
         sql.SQL("COMMENT ON TABLE ap_images IS 'Хранилище изображений (логотипов) для макетов этикеток';"),
 
-        # --- НОВЫЙ БЛОК: Таблицы для уведомлений о поставке ---
+        # --- ИЗМЕНЕНО: Полное пересоздание таблиц уведомлений о поставке ---
+        # Удаляем старые таблицы, если они существуют, для чистого пересоздания
+        sql.SQL("DROP TABLE IF EXISTS ap_supply_notification_details CASCADE;"),
+        sql.SQL("DROP TABLE IF EXISTS ap_supply_notification_files CASCADE;"),
+        sql.SQL("DROP TABLE IF EXISTS ap_supply_notifications CASCADE;"),
+
+        # Новая таблица для локального справочника клиентов
         sql.SQL("""
-            CREATE TABLE IF NOT EXISTS ap_supply_notifications (
+            CREATE TABLE IF NOT EXISTS ap_clients (
                 id SERIAL PRIMARY KEY,
-                name VARCHAR(255) NOT NULL,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                inn VARCHAR(12),
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE ap_clients IS 'Локальный справочник клиентов';"),
+
+        # Новая структура таблицы уведомлений
+        sql.SQL("""
+            CREATE TABLE ap_supply_notifications (
+                id SERIAL PRIMARY KEY,
+                scenario_id INTEGER NOT NULL REFERENCES ap_marking_scenarios(id),
+                scenario_name VARCHAR(255) NOT NULL,
+                client_api_id INTEGER,
+                client_local_id INTEGER REFERENCES ap_clients(id),
+                client_name VARCHAR(255) NOT NULL,
+                product_groups JSONB,
                 planned_arrival_date DATE,
-                status VARCHAR(50) NOT NULL DEFAULT 'new',
+                vehicle_number VARCHAR(100) DEFAULT 'Б/Н',
+                comments TEXT,
+                status VARCHAR(50) NOT NULL DEFAULT 'Проект',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_supply_notifications IS 'Уведомления о поставке';"),
 
+        # Новая структура таблицы файлов
         sql.SQL("""
-            CREATE TABLE IF NOT EXISTS ap_supply_notification_files (
+            CREATE TABLE ap_supply_notification_files (
                 id SERIAL PRIMARY KEY,
                 notification_id INTEGER NOT NULL REFERENCES ap_supply_notifications(id) ON DELETE CASCADE,
-                file_type VARCHAR(50) NOT NULL, -- 'supplier' или 'formalized'
+                file_type VARCHAR(50) NOT NULL, -- 'client_document' или 'formalized_details'
                 filename VARCHAR(255) NOT NULL,
                 file_data BYTEA NOT NULL,
                 uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_supply_notification_files IS 'Файлы, приложенные к уведомлениям о поставке';"),
-
+        
+        # Новая структура таблицы детализации
         sql.SQL("""
-            CREATE TABLE IF NOT EXISTS ap_supply_notification_details (
+            CREATE TABLE ap_supply_notification_details (
                 id SERIAL PRIMARY KEY,
                 notification_id INTEGER NOT NULL REFERENCES ap_supply_notifications(id) ON DELETE CASCADE,
-                gtin VARCHAR(100),
-                product_name TEXT,
+                gtin VARCHAR(14),
                 quantity INTEGER,
-                aggregation TEXT,
+                aggregation INTEGER DEFAULT 0,
                 production_date DATE,
+                shelf_life_months INTEGER,
                 expiry_date DATE
             );
         """),
-        # --- ИСПРАВЛЕНИЕ: Явно добавляем колонку, если она отсутствует, для обратной совместимости ---
-        sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS aggregation TEXT;"),
-
         sql.SQL("COMMENT ON TABLE ap_supply_notification_details IS 'Детализированное содержимое формализованного уведомления о поставке';"),
 
         # --- НОВЫЙ БЛОК: Таблица для сценариев маркировки ---

@@ -1123,44 +1123,97 @@ class AdminWindow(tk.Tk):
         self.after(0, self._set_api_status_color, is_valid)
 
     def _set_api_status_color(self, is_valid):
-        """Устанавливает цвет индикатора API."""
         color = "green" if is_valid else "red"
         self.api_status_indicator.delete("all")
         self.api_status_indicator.create_oval(2, 2, 14, 14, fill=color, outline="")
 
     def _create_supply_notice_tab(self, parent_frame):
-        logger = logging.getLogger(__name__)
-        """Создает содержимое для вкладки 'Уведомление о поставке'."""
         from .supply_notification_service import SupplyNotificationService
         service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
  
-        # Основной контейнер
-        paned_window = ttk.PanedWindow(parent_frame, orient=tk.HORIZONTAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
- 
-        # --- Левая панель: Список уведомлений ---
-        list_frame = ttk.Frame(paned_window, padding="5")
-        paned_window.add(list_frame, weight=1)
- 
-        list_controls = ttk.Frame(list_frame)
-        list_controls.pack(fill=tk.X, pady=5)
- 
-        notifications_tree = ttk.Treeview(list_frame, columns=('id', 'name', 'date', 'status', 'actions'), show='headings')
-        notifications_tree.heading('id', text='ID')
-        notifications_tree.heading('name', text='Наименование')
-        notifications_tree.heading('date', text='План. дата')
-        notifications_tree.heading('status', text='Статус')
-        notifications_tree.heading('actions', text='Действия')
-        notifications_tree.column('id', width=40, anchor=tk.CENTER)
-        notifications_tree.column('name', width=200)
-        notifications_tree.column('date', width=100, anchor=tk.CENTER)
-        notifications_tree.column('status', width=100, anchor=tk.CENTER)
-        notifications_tree.column('actions', width=80, anchor=tk.CENTER)
-        notifications_tree.pack(expand=True, fill='both')
- 
-        # --- Правая панель: Детали уведомления ---
-        details_frame = ttk.Frame(paned_window, padding="5")
-        paned_window.add(details_frame, weight=2)
+        controls = ttk.Frame(parent_frame)
+        controls.pack(fill=tk.X, pady=5)
+
+        cols = ('id', 'scenario_name', 'client_name', 'product_groups', 'planned_arrival_date', 
+                'vehicle_number', 'status', 'positions_count', 'dm_count', 'actions')
+        
+        tree = ttk.Treeview(parent_frame, columns=cols, show='headings')
+        
+        col_map = {
+            'id': ('ID', 50, 'center'),
+            'scenario_name': ('Сценарий', 150, 'w'),
+            'client_name': ('Клиент', 200, 'w'),
+            'product_groups': ('Товарные группы', 200, 'w'),
+            'planned_arrival_date': ('Дата прибытия', 100, 'center'),
+            'vehicle_number': ('Номер ТС', 100, 'center'),
+            'status': ('Статус', 100, 'center'),
+            'positions_count': ('Позиций', 70, 'center'),
+            'dm_count': ('Кодов ДМ', 80, 'center'),
+            'actions': ('Действия', 60, 'center')
+        }
+
+        for col_key, (text, width, anchor) in col_map.items():
+            tree.heading(col_key, text=text)
+            tree.column(col_key, width=width, anchor=anchor)
+
+        tree.pack(expand=True, fill='both')
+
+        # Настройка тегов для подсветки строк
+        tree.tag_configure('Проект', background='light yellow')
+        tree.tag_configure('Ожидание', background='light green')
+
+        def refresh_notifications():
+            for i in tree.get_children(): tree.delete(i)
+            try:
+                notifications = service.get_notifications_with_counts()
+                for n in notifications:
+                    # Преобразуем JSON с товарными группами в строку
+                    pg_list = n.get('product_groups', [])
+                    pg_names = ", ".join([pg.get('name', '') for pg in pg_list]) if pg_list else ''
+                    
+                    values = (
+                        n['id'], n['scenario_name'], n['client_name'], pg_names,
+                        n['planned_arrival_date'], n['vehicle_number'], n['status'],
+                        n['positions_count'], n['dm_count'], "..."
+                    )
+                    tree.insert('', 'end', iid=n['id'], values=values, tags=(n['status'],))
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
+
+        def open_notification_editor(notification_id=None):
+            # Здесь будет новый диалог
+            messagebox.showinfo("В разработке", f"Открытие редактора для уведомления ID: {notification_id}")
+            refresh_notifications()
+
+        def archive_notification():
+            selected_item = tree.focus()
+            if not selected_item: return
+            if messagebox.askyesno("Подтверждение", "Переместить уведомление в архив?", parent=self):
+                try:
+                    service.archive_notification(int(selected_item))
+                    refresh_notifications()
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось архивировать уведомление: {e}", parent=self)
+
+        def show_context_menu(event):
+            item_id = tree.identify_row(event.y)
+            if not item_id: return
+            
+            tree.selection_set(item_id) # Выделяем строку, по которой кликнули
+            
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="Редактировать", command=lambda: open_notification_editor(item_id))
+            menu.add_command(label="Создать заказ", command=lambda: messagebox.showinfo("В разработке", f"Создание заказа для уведомления {item_id}"))
+            menu.add_separator()
+            menu.add_command(label="Удалить в архив", command=archive_notification)
+            menu.post(event.x_root, event.y_root)
+
+        ttk.Button(controls, text="Создать новое уведомление", command=lambda: open_notification_editor()).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Обновить", command=refresh_notifications).pack(side=tk.LEFT, padx=2)
+
+        tree.bind("<Button-3>", show_context_menu) # Правый клик
+
+        refresh_notifications()
 
     def _create_catalogs_tab(self, parent_frame):
         logger = logging.getLogger(__name__)
@@ -1172,6 +1225,25 @@ class AdminWindow(tk.Tk):
         # --- ИЗМЕНЕНИЕ: Создаем вложенный Notebook для разных справочников ---
         notebook = ttk.Notebook(parent_frame)
         notebook.pack(expand=True, fill="both")
+
+        # --- НОВАЯ ВКЛАДКА: Клиенты (локальный справочник) ---
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Клиенты (локальные)",
+            service_methods={
+                'get': service.get_local_clients,
+                'upsert': service.upsert_local_client,
+                'delete': service.delete_local_client,
+                'template': service.get_local_clients_template,
+                'import': service.process_local_clients_import
+            },
+            columns={
+                'id': ('ID', 50, 'center'),
+                'name': ('Наименование', 400, 'w'),
+                'inn': ('ИНН', 150, 'center')
+            },
+            pk_field='id'
+        )
 
         # --- Вкладка 1: Участники (существующая логика) ---
         participants_frame = ttk.Frame(notebook, padding="10")
