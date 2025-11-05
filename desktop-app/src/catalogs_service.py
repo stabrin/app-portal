@@ -98,15 +98,17 @@ class CatalogsService:
         """Добавляет или обновляет товар."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                # Проверяем, существует ли GTIN
+                # --- ИСПРАВЛЕНИЕ: Явная проверка на существование перед действием ---
+                # Это надежнее, чем полагаться на ON CONFLICT, особенно когда
+                # ключ может быть изменен в UI (хотя мы это и заблокировали).
                 cur.execute("SELECT 1 FROM products WHERE gtin = %s", (product_data['gtin'],))
                 exists = cur.fetchone()
-                if exists: # Обновление
+                if exists:  # Если GTIN найден, обновляем запись
                     cur.execute("""
                         UPDATE products SET name=%s, description_1=%s, description_2=%s, description_3=%s
                         WHERE gtin=%s
                     """, (product_data['name'], product_data.get('description_1'), product_data.get('description_2'), product_data.get('description_3'), product_data['gtin']))
-                else: # Вставка
+                else:  # Если GTIN не найден, создаем новую запись
                     cur.execute("""
                         INSERT INTO products (gtin, name, description_1, description_2, description_3)
                         VALUES (%s, %s, %s, %s, %s)

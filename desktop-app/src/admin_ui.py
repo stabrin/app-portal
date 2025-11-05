@@ -1442,7 +1442,9 @@ class GenericEditorDialog(tk.Toplevel):
             else:
                 entry = ttk.Entry(frame, width=50)
                 entry.insert(0, str(item_values.get(key, '')))
-                if key == pk_field and item_data:
+                # --- ИСПРАВЛЕНИЕ: Блокируем редактирование первичного ключа ---
+                # Это предотвращает случайное изменение GTIN и создание дубликата.
+                if item_data and key == pk_field:
                     entry.config(state='readonly')
                 self.entries[key] = entry
             entry.grid(row=i, column=1, sticky="ew", padx=5, pady=2)
