@@ -2529,14 +2529,17 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
 
         # Выбор товарных групп
         initial_groups = self.initial_data.get('product_groups', [])
-        for i, group in enumerate(self.product_groups):
-            if any(g['group_name'] == group['group_name'] for g in initial_groups):
-                self.product_groups_listbox.select_set(i)
+        if initial_groups:
+            for i, group in enumerate(self.product_groups):
+                # Сравниваем по 'group_name', так как это системное имя
+                if any(g.get('group_name') == group.get('group_name') for g in initial_groups):
+                    self.product_groups_listbox.select_set(i)
 
     def _save(self):
         """Сохраняет данные."""
         logging.debug("Начало сохранения данных из диалога уведомления.")
         # 1. Сбор данных
+
         selected_scenario_name = self.scenario_var.get()
         selected_scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
         if not selected_scenario:
@@ -2568,7 +2571,11 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
             'client_api_id': client_api_id,
             'client_local_id': client_local_id,
             'client_name': selected_client_name,
-            'product_groups': [{'id': g['id'], 'name': g['display_name']} for g in selected_product_groups],
+            'product_groups': [{
+                'id': g['id'], 
+                'group_name': g['group_name'], # Системное имя
+                'name': g['display_name'] # Отображаемое имя
+            } for g in selected_product_groups],
             'planned_arrival_date': self.arrival_date_var.get(),
             'vehicle_number': self.vehicle_number_entry.get(),
             'comments': self.comments_text.get("1.0", tk.END)
