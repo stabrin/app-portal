@@ -1182,9 +1182,17 @@ class AdminWindow(tk.Tk):
                 messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
 
         def open_notification_editor(notification_id=None):
-            # Здесь будет новый диалог
-            messagebox.showinfo("В разработке", f"Открытие редактора для уведомления ID: {notification_id}")
-            refresh_notifications()
+            """Открывает диалог для создания/редактирования уведомления."""
+            if notification_id:
+                logging.info(f"Открытие редактора для существующего уведомления ID: {notification_id}")
+            else:
+                logging.info("Открытие редактора для создания нового уведомления.")
+            
+            dialog = NotificationEditorDialog(self, self.user_info, notification_id)
+            self.wait_window(dialog)
+            if dialog.result:
+                logging.info("Диалог уведомлений завершился успешно. Обновление списка...")
+                refresh_notifications()
 
         def archive_notification():
             selected_item = tree.focus()
@@ -1729,8 +1737,8 @@ class ScenarioEditorDialog(tk.Toplevel):
         }
         self.destroy()
 
-class CalendarDialog(tk.Toplevel):
-    """Диалоговое окно с простым календарем."""
+class NotificationEditorDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
     def __init__(self, parent, initial_date=None):
         super().__init__(parent)
         self.title("Выберите дату")
@@ -1870,7 +1878,7 @@ class NewNotificationDialog(tk.Toplevel):
 
         self.result = (name, arrival_date)
         self.destroy()
-class CalendarDialog(tk.Toplevel):
+class CalendarDialog(tk.Toplevel): # Этот класс остается, так как он используется в NewNotificationDialog
     """Диалоговое окно с простым календарем."""
     def __init__(self, parent, initial_date=None):
         super().__init__(parent)
@@ -2332,8 +2340,8 @@ class NewNotificationDialog(tk.Toplevel):
 
         self.result = (name, arrival_date)
         self.destroy()
-class CalendarDialog(tk.Toplevel):
-    """Диалог для создания/редактирования уведомления."""
+
+class OldNotificationEditorDialog(tk.Toplevel): # Переименовываем, чтобы избежать конфликта
     def __init__(self, parent, user_info, notification_id=None):
         super().__init__(parent)
         self.title("Редактор уведомления о поставке")
