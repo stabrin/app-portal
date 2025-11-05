@@ -1247,6 +1247,26 @@ class AdminWindow(tk.Tk):
             pk_field='gtin'
         )
 
+        # --- Вкладка 4: Сценарии маркировки ---
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Сценарии маркировки",
+            service_methods={
+                'get': service.get_marking_scenarios,
+                'upsert': service.upsert_marking_scenario,
+                'delete': service.delete_marking_scenario,
+                'template': service.get_marking_scenarios_template,
+                'import': service.process_marking_scenarios_import
+            },
+            columns={
+                'id': ('ID', 50, 'center'),
+                'name': ('Название сценария', 300, 'w'),
+                'scenario_data': ('Параметры (JSON)', 600, 'w')
+            },
+            pk_field='id',
+            editor_class=ScenarioEditorDialog # Используем кастомный редактор
+        )
+
     def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field):
         """Создает универсальную вкладку для справочника с полным CRUD."""
         logger = logging.getLogger(__name__)
@@ -1281,11 +1301,20 @@ class AdminWindow(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить '{title}': {e}", parent=self)
 
-        def open_editor(item_data=None):
+        def open_editor(item_data=None, editor_class=None):
             """Открывает диалог для добавления/редактирования."""
             logger.debug(f"Открытие редактора для '{title}'. Данные для редактирования: {item_data}")
             # --- ИСПРАВЛЕНИЕ: Убираем лишнее преобразование и передаем словарь напрямую ---
-            dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
+            
+            # --- НОВАЯ ЛОГИКА: Используем кастомный редактор, если он указан ---
+            if editor_class:
+                # Для кастомного редактора передаем user_info
+                dialog = editor_class(self, self.user_info, item_data)
+            else:
+                # Для стандартного редактора передаем колонки и pk_field
+                dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
+
+
             self.wait_window(dialog)
             if dialog.result:
                 try:
@@ -1344,7 +1373,8 @@ class AdminWindow(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Ошибка импорта: {e}", parent=self)
 
-        ttk.Button(controls, text="Добавить", command=lambda: open_editor()).pack(side=tk.LEFT, padx=2)
+        editor_class_for_tab = service_methods.get('editor_class')
+        ttk.Button(controls, text="Добавить", command=lambda: open_editor(editor_class=editor_class_for_tab)).pack(side=tk.LEFT, padx=2)
         # --- ИЗМЕНЕНИЕ: Логика кнопки "Редактировать" ---
         def edit_selected():
             selected_item_id = tree.focus()
@@ -1356,7 +1386,7 @@ class AdminWindow(tk.Tk):
             original_data = data_cache.get(pk_value)
             # --- ИСПРАВЛЕНИЕ: Передаем в редактор словарь, а не список значений ---
             # Это гарантирует, что данные будут правильно сопоставлены с полями.
-            open_editor(original_data)
+            open_editor(original_data, editor_class=editor_class_for_tab)
         ttk.Button(controls, text="Редактировать", command=edit_selected).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Удалить", command=delete_item).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Выгрузить в Excel", command=export_to_excel).pack(side=tk.LEFT, padx=2)
@@ -1496,6 +1526,134 @@ class GenericEditorDialog(tk.Toplevel):
         self.result = {}
         for key, widget in self.entries.items():
             self.result[key] = widget.get()
+        self.destroy()
+
+class ScenarioEditorDialog(tk.Toplevel):
+    """Кастомный редактор для 'Сценариев маркировки'."""
+    def __init__(self, parent, user_info, item_data=None):
+        super().__init__(parent)
+        self.title("Редактор сценария маркировки")
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+        self.widgets = {}
+
+        # Инициализация данных
+        self.item_data = item_data if item_data else {}
+        self.scenario_data = self.item_data.get('scenario_data', {})
+
+        # --- Создание виджетов ---
+        main_frame = ttk.Frame(self, padding="15")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Название сценария
+        ttk.Label(main_frame, text="Название сценария:").pack(anchor="w")
+        self.name_entry = ttk.Entry(main_frame, width=60)
+        self.name_entry.insert(0, self.item_data.get('name', ''))
+        self.name_entry.pack(fill="x", pady=(0, 10))
+
+        # 2. Тип сценария
+        ttk.Label(main_frame, text="Тип сценария:").pack(anchor="w")
+        self.scenario_type_var = tk.StringVar(value=self.scenario_data.get('type', 'Маркировка'))
+        scenario_type_combo = ttk.Combobox(main_frame, textvariable=self.scenario_type_var, values=['Маркировка', 'Ручная агрегация'], state='readonly')
+        scenario_type_combo.pack(fill="x")
+        scenario_type_combo.bind("<<ComboboxSelected>>", self._on_type_change)
+
+        # 3. Контейнеры для опций
+        self.marking_frame = ttk.LabelFrame(main_frame, text="Опции маркировки", padding="10")
+        self.aggregation_frame = ttk.LabelFrame(main_frame, text="Опции ручной агрегации", padding="10")
+
+        self._create_marking_widgets(self.marking_frame)
+        self._create_manual_aggregation_widgets(self.aggregation_frame)
+
+        # Кнопки
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(fill="x", pady=(15, 0))
+        ttk.Button(button_frame, text="Сохранить", command=self._on_ok).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
+
+        self._on_type_change() # Первоначальная настройка видимости
+
+    def _create_marking_widgets(self, parent):
+        # Источник кодов ДМ
+        ttk.Label(parent, text="Источник кодов ДМ:").pack(anchor="w")
+        self.widgets['dm_source'] = tk.StringVar(value=self.scenario_data.get('dm_source', 'Заказ в ДМ.Код'))
+        ttk.Combobox(parent, textvariable=self.widgets['dm_source'], values=['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'], state='readonly').pack(fill="x", pady=(0, 5))
+
+        # Агрегация
+        self.widgets['aggregation_needed'] = tk.BooleanVar(value=self.scenario_data.get('aggregation_needed', False))
+        ttk.Checkbutton(parent, text="Нужна агрегация", variable=self.widgets['aggregation_needed']).pack(anchor="w")
+
+        # Источник SSCC
+        ttk.Label(parent, text="Источник кодов SSCC:").pack(anchor="w", pady=(5,0))
+        self.widgets['sscc_source'] = tk.StringVar(value=self.scenario_data.get('sscc_source', 'Генерировать самостоятельно'))
+        ttk.Combobox(parent, textvariable=self.widgets['sscc_source'], values=['Генерировать самостоятельно', 'Предоставит клиент'], state='readonly').pack(fill="x", pady=(0, 5))
+
+        # Постобработка
+        ttk.Label(parent, text="Постобработка:").pack(anchor="w")
+        self.widgets['post_processing'] = tk.StringVar(value=self.scenario_data.get('post_processing', 'Печать через Bartender'))
+        ttk.Combobox(parent, textvariable=self.widgets['post_processing'], values=['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'], state='readonly').pack(fill="x", pady=(0, 5))
+
+        # Доп. опции для собственного алгоритма
+        self.widgets['clarify_prod_date_mark'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_date', False))
+        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date_mark']).pack(anchor="w")
+        self.widgets['clarify_prod_country_mark'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_country', False))
+        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country_mark']).pack(anchor="w")
+
+    def _create_manual_aggregation_widgets(self, parent):
+        # Варианты агрегации
+        ttk.Label(parent, text="Варианты агрегации:").pack(anchor="w")
+        self.widgets['manual_agg_variant'] = tk.StringVar(value=self.scenario_data.get('manual_agg_variant', 'Агрегация в набор'))
+        ttk.Combobox(parent, textvariable=self.widgets['manual_agg_variant'], values=['Агрегация в набор', 'Агрегация в короб', 'Агрегация в набор а затем в короб'], state='readonly').pack(fill="x", pady=(0, 5))
+
+        # Доп. опции
+        self.widgets['clarify_prod_date_manual'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_date', False))
+        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date_manual']).pack(anchor="w")
+        self.widgets['clarify_prod_country_manual'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_country', False))
+        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country_manual']).pack(anchor="w")
+
+    def _on_type_change(self, event=None):
+        """Показывает/скрывает фреймы в зависимости от типа сценария."""
+        selected_type = self.scenario_type_var.get()
+        if selected_type == 'Маркировка':
+            self.marking_frame.pack(fill="x", expand=True, pady=5)
+            self.aggregation_frame.pack_forget()
+        elif selected_type == 'Ручная агрегация':
+            self.marking_frame.pack_forget()
+            self.aggregation_frame.pack(fill="x", expand=True, pady=5)
+        else:
+            self.marking_frame.pack_forget()
+            self.aggregation_frame.pack_forget()
+
+    def _on_ok(self):
+        """Собирает данные из виджетов и формирует результат."""
+        name = self.name_entry.get().strip()
+        if not name:
+            messagebox.showwarning("Внимание", "Название сценария не может быть пустым.", parent=self)
+            return
+
+        scenario_data = {'type': self.scenario_type_var.get()}
+
+        if scenario_data['type'] == 'Маркировка':
+            scenario_data['dm_source'] = self.widgets['dm_source'].get()
+            scenario_data['aggregation_needed'] = self.widgets['aggregation_needed'].get()
+            if scenario_data['aggregation_needed']:
+                scenario_data['sscc_source'] = self.widgets['sscc_source'].get()
+            scenario_data['post_processing'] = self.widgets['post_processing'].get()
+            if scenario_data['post_processing'] == 'Собственный алгоритм':
+                scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date_mark'].get()
+                scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country_mark'].get()
+
+        elif scenario_data['type'] == 'Ручная агрегация':
+            scenario_data['manual_agg_variant'] = self.widgets['manual_agg_variant'].get()
+            scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date_manual'].get()
+            scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country_manual'].get()
+
+        self.result = {
+            'id': self.item_data.get('id'),
+            'name': name,
+            'scenario_data': scenario_data
+        }
         self.destroy()
 
 class CalendarDialog(tk.Toplevel):

@@ -328,7 +328,35 @@ def update_client_db_schema(conn):
         sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS aggregation TEXT;"),
 
         sql.SQL("COMMENT ON TABLE ap_supply_notification_details IS 'Детализированное содержимое формализованного уведомления о поставке';"),
+
+        # --- НОВЫЙ БЛОК: Таблица для сценариев маркировки ---
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_marking_scenarios (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                scenario_data JSONB NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("""
+            CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+            RETURNS TRIGGER AS $$
+            BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
+            $$ LANGUAGE plpgsql;
+        """),
+        sql.SQL("DROP TRIGGER IF EXISTS set_timestamp ON ap_marking_scenarios;"), # Сначала удаляем старый, если есть
+        sql.SQL("""
+            CREATE TRIGGER set_timestamp
+            BEFORE UPDATE ON ap_marking_scenarios
+            FOR EACH ROW
+            EXECUTE PROCEDURE trigger_set_timestamp();
+        """),
+        sql.SQL("COMMENT ON TABLE ap_marking_scenarios IS 'Справочник сценариев маркировки';"),
+
     ]
+
+
 
     # === Блок для таблицы видимости приложений (из init_visibility.py) ===
     visibility_commands = [

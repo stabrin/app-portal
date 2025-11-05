@@ -1,5 +1,6 @@
 # src/catalogs_service.py
 
+import json
 import logging
 import pandas as pd
 from psycopg2.extras import RealDictCursor, execute_values
