@@ -1284,13 +1284,8 @@ class AdminWindow(tk.Tk):
         def open_editor(item_data=None):
             """Открывает диалог для добавления/редактирования."""
             logger.debug(f"Открытие редактора для '{title}'. Данные для редактирования: {item_data}")
-            # --- ИЗМЕНЕНИЕ: Передаем в диалог словарь, а не список ---
-            # Это делает код более читаемым и менее зависимым от порядка колонок.
-            initial_data_dict = None
-            if item_data:
-                initial_data_dict = dict(zip(columns.keys(), item_data))
-
-            dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, initial_data_dict, pk_field)
+            # --- ИСПРАВЛЕНИЕ: Убираем лишнее преобразование и передаем словарь напрямую ---
+            dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
             self.wait_window(dialog)
             if dialog.result:
                 try:
