@@ -1298,8 +1298,9 @@ class AdminWindow(tk.Tk):
         def delete_item():
             selected_item = tree.focus()
             if not selected_item: return
-            item_values = tree.item(selected_item)['values']
-            pk_value = item_values[list(columns.keys()).index(pk_field)]
+            # --- ИСПРАВЛЕНИЕ: Получаем PK напрямую из ID строки (iid), а не из values ---
+            # Это гарантирует, что tkinter не преобразует GTIN в число и не потеряет ведущий ноль.
+            pk_value = selected_item
             logger.debug(f"Запрос на удаление записи с ключом '{pk_value}' из справочника '{title}'.")
             if messagebox.askyesno("Подтверждение", f"Удалить запись с ключом '{pk_value}'?", parent=self):
                 try:
