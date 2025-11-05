@@ -1174,6 +1174,7 @@ class AdminWindow(tk.Tk):
 
         def open_notification_editor(notification_id=None):
             """Открывает диалог для создания/редактирования уведомления."""
+            logging.info(f"Вызвана функция open_notification_editor с notification_id: {notification_id}")
             if notification_id:
                 logging.info(f"Открытие редактора для существующего уведомления ID: {notification_id}")
             else:
@@ -1197,12 +1198,14 @@ class AdminWindow(tk.Tk):
 
         def show_context_menu(event):
             item_id = tree.identify_row(event.y)
+            logging.info(f"Правый клик мыши. Событие: y={event.y}. Определен ID строки: {item_id}")
             if not item_id: return
             
             tree.selection_set(item_id) # Выделяем строку, по которой кликнули
             
             menu = tk.Menu(self, tearoff=0)
-            menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_notification_editor(item_id))
+            # Добавляем логирование прямо в команду меню
+            menu.add_command(label="Редактировать", command=lambda item_id=item_id: (logging.info(f"Выбран пункт меню 'Редактировать' для ID: {item_id}"), open_notification_editor(item_id)))
             menu.add_command(label="Создать заказ", command=lambda: messagebox.showinfo("В разработке", f"Создание заказа для уведомления {item_id}"))
             menu.add_separator()
             menu.add_command(label="Удалить в архив", command=archive_notification)
