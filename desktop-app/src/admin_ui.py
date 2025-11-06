@@ -1207,7 +1207,11 @@ class AdminWindow(tk.Tk):
             
             menu = tk.Menu(self, tearoff=0)
             # Добавляем логирование прямо в команду меню
-            menu.add_command(label="Редактировать", command=lambda item_id=item_id: (logging.info(f"Выбран пункт меню 'Редактировать' для ID: {item_id}"), open_notification_editor(item_id)))
+            def deferred_open_editor(uid):
+                logging.info(f"Выбран пункт меню 'Редактировать' для ID: {uid}")
+                # ИСПОЛЬЗУЕМ self.after, чтобы отложить вызов и избежать конфликта модальных окон
+                self.after(1, lambda: open_notification_editor(uid))
+            menu.add_command(label="Редактировать", command=lambda item_id=item_id: deferred_open_editor(item_id))
             menu.add_command(label="Создать заказ", command=lambda: messagebox.showinfo("В разработке", f"Создание заказа для уведомления {item_id}"))
             menu.add_separator()
             menu.add_command(label="Удалить в архив", command=archive_notification)
