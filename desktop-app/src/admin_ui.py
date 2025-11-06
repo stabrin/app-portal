@@ -1345,7 +1345,7 @@ class AdminWindow(tk.Tk):
             columns={
                 'id': ('ID', 10, 'center'),
                 'name': ('Название сценария', 200, 'w'),
-                'scenario_data': ('Параметры (JSON)', 800, 'w')
+                'scenario_data': ('Параметры (JSON)', 1000, 'w')
             },
             pk_field='id',
             editor_class=ScenarioEditorDialog # Используем кастомный редактор
