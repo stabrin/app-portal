@@ -1182,9 +1182,12 @@ class AdminWindow(tk.Tk):
             
             # --- ИСПРАВЛЕНИЕ: Передаем user_info и notification_id в правильный конструктор ---
             dialog = NotificationEditorDialog(self, user_info=self.user_info, notification_id=notification_id)
+            # --- ИЗМЕНЕНИЕ: Убираем ожидание, чтобы окно не было модальным ---
             logging.info("Экземпляр NotificationEditorDialog создан.")
-            self.wait_window(dialog)
-            if dialog.result:
+            # self.wait_window(dialog) # Убираем блокировку
+            # Вместо этого, диалог сам вызовет обновление списка при успешном сохранении
+            dialog.on_save_callback = refresh_notifications
+            if getattr(dialog, 'result', False):
                 logging.info("Диалог уведомлений завершился успешно. Обновление списка...")
                 refresh_notifications()
 
@@ -2369,9 +2372,9 @@ class NotificationEditorDialog(tk.Toplevel):
         # --- ИСПРАВЛЕНИЕ: Устанавливаем заголовок в зависимости от режима (создание/редактирование) ---
         title = f"Редактирование уведомления №{notification_id}" if notification_id else "Новое уведомление о поставке"
         self.title(title)
-        
-        self.transient(parent)
-        self.grab_set()
+        # --- ИЗМЕНЕНИЕ: Убираем модальность окна ---
+        # self.transient(parent)
+        # self.grab_set()
         self.result = None
         self.user_info = user_info
         self.notification_id = notification_id
@@ -2380,6 +2383,7 @@ class NotificationEditorDialog(tk.Toplevel):
 
         # --- Инициализация сервисов ---
         from .supply_notification_service import SupplyNotificationService
+        self.on_save_callback = None # Callback для обновления списка после сохранения
         self.service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
         from .catalogs_service import CatalogsService
         self.catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
@@ -2632,6 +2636,8 @@ class NotificationEditorDialog(tk.Toplevel):
                 logging.info("Вызов service.create_notification для создания нового уведомления.")
                 self.service.create_notification(data)
             self.result = True
+            if self.on_save_callback: # Вызываем callback для обновления списка
+                self.on_save_callback()
             self.destroy()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сохранить уведомление: {e}", parent=self)
