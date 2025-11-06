@@ -2644,10 +2644,16 @@ class NotificationEditorDialog(tk.Toplevel):
         """Собирает данные из Treeview и отправляет на сохранение."""
         details_to_save = []
         for item_id in self.details_tree.get_children():
-            values = self.details_tree.item(item_id, "values")
-            row_data = dict(zip(self.details_cols, values))
-            details_to_save.append(row_data)
+            # --- ИСПРАВЛЕНИЕ: Преобразуем данные в кортеж (tuple) для execute_values ---
+            # execute_values ожидает список кортежей, а не словарей.
+            raw_values = self.details_tree.item(item_id, "values")
+            # Преобразуем пустые строки в None для корректной записи в БД
+            processed_values = [val if val != '' else None for val in raw_values]
+            # Убедимся, что ID (первый элемент) является числом
+            processed_values[0] = int(processed_values[0])
+            details_to_save.append(tuple(processed_values))
         try:
+            logging.debug(f"Данные для сохранения детализации: {details_to_save}")
             self.service.save_notification_details(details_to_save)
             messagebox.showinfo("Успех", "Изменения в детализации успешно сохранены.", parent=self)
         except Exception as e:
