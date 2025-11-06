@@ -2399,18 +2399,11 @@ class NotificationEditorDialog(tk.Toplevel):
     def _create_widgets(self):
         logging.info("Начало создания виджетов в NotificationEditorDialog.")
         # --- ИЗМЕНЕНИЕ: Используем PanedWindow для разделения на верх и низ ---
+        # The paned_window should be the main container for the dialog's content.
+        # The previous main_frame and its contents were redundant and causing the issue.
         paned_window = ttk.PanedWindow(self, orient=tk.VERTICAL)
         paned_window.pack(fill=tk.BOTH, expand=True)
 
-        # Основной фрейм
-        main_frame = ttk.Frame(self, padding=10)
-        main_frame.pack(fill=tk.BOTH, expand=True)
-
-        # 1. Сценарий маркировки
-        ttk.Label(main_frame, text="Сценарий маркировки:").pack(anchor="w")
-        self.scenario_var = tk.StringVar()
-        self.scenario_combo = ttk.Combobox(main_frame, textvariable=self.scenario_var, state="readonly")
-        self.scenario_combo.pack(fill=tk.X, pady=5)
         # --- ИЗМЕНЕНИЕ: Создаем PanedWindow и добавляем в него верхнюю часть ---
         top_pane = ttk.Frame(paned_window, padding=10)
         paned_window.add(top_pane, weight=1)
@@ -2428,11 +2421,6 @@ class NotificationEditorDialog(tk.Toplevel):
         # --- ИЗМЕНЕНИЕ: Привязываем событие смены сценария к обновлению списка клиентов ---
         self.scenario_combo.bind("<<ComboboxSelected>>", self._on_scenario_change)
 
-        # 2. Клиент
-        ttk.Label(main_frame, text="Клиент:").pack(anchor="w")
-        self.client_var = tk.StringVar()
-        self.client_combo = ttk.Combobox(main_frame, textvariable=self.client_var, state="readonly")
-        # 2. Клиент
         client_frame = ttk.Frame(header_frame)
         client_frame.pack(fill=tk.X, pady=2)
         ttk.Label(client_frame, text="Клиент:").pack(anchor="w")
