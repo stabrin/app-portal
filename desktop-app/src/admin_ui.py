@@ -1132,7 +1132,7 @@ class AdminWindow(tk.Tk):
         tree = ttk.Treeview(parent_frame, columns=cols, show='headings')
         
         col_map = {
-            'id': ('ID', 50, 'center'),
+            'id': ('ID', 20, 'center'),
             'scenario_name': ('Сценарий', 150, 'w'),
             'client_name': ('Клиент', 200, 'w'),
             'product_groups': ('Товарные группы', 200, 'w'),
