@@ -1170,30 +1170,47 @@ class AdminWindow(tk.Tk):
         tree.tag_configure('Проект', background='light yellow')
         tree.tag_configure('Ожидание', background='light green')
 
-        # --- НОВЫЙ БЛОК: Создание таблицы для сводки в нижней панели ---
-        summary_cols = ('day_label', 'clients_count', 'notifications_count', 'positions_count', 'dm_codes_count')
-        summary_tree = ttk.Treeview(bottom_pane, columns=summary_cols, show='headings')
+        # --- ИЗМЕНЕНИЕ: Создаем многоуровневые заголовки для сводки ---
+        # 1. Фрейм для верхних заголовков (даты)
+        summary_header_frame = ttk.Frame(bottom_pane)
+        summary_header_frame.pack(fill=tk.X)
+
+        # 2. Таблица с нижними заголовками (Ув, Поз, ДМ)
+        summary_cols = ['client_name']
+        summary_col_map = {'client_name': ('Клиент', 200, 'w')}
         
-        summary_col_map = {
-            'day_label': ('День', 150, 'w'),
-            'clients_count': ('Клиентов', 100, 'center'),
-            'notifications_count': ('Уведомлений', 100, 'center'),
-            'positions_count': ('Позиций', 100, 'center'),
-            'dm_codes_count': ('Кодов ДМ', 100, 'center')
-        }
+        day_labels = ['Сегодня', '+1 день', '+2 дня', '+3 дня']
+        sub_headers = ['Ув.', 'Поз.', 'ДМ']
+        
+        # Заполняем фрейм с верхними заголовками
+        ttk.Label(summary_header_frame, text="", width=28).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
+        for day_label in day_labels:
+            # Ширина каждого блока = 3 * 80px + отступы
+            ttk.Label(summary_header_frame, text=day_label, anchor='center', borderwidth=1, relief="solid").pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Формируем ключи и заголовки для таблицы
+        for i in range(4):
+            day_key = f"d{i}"
+            for j, sub_header in enumerate(sub_headers):
+                col_key = f"{day_key}_{sub_headers[j].lower()}"
+                summary_cols.append(col_key)
+                summary_col_map[col_key] = (sub_header, 80, 'center')
+
+        summary_tree = ttk.Treeview(bottom_pane, columns=summary_cols, show='headings')
 
         for col_key, (text, width, anchor) in summary_col_map.items():
             summary_tree.heading(col_key, text=text)
             summary_tree.column(col_key, width=width, anchor=anchor)
 
-        summary_tree.pack(expand=True, fill='both')
+        summary_tree.pack(expand=True, fill='both', pady=(2,0))
 
         def refresh_summary_data():
             for i in summary_tree.get_children(): summary_tree.delete(i)
             try:
                 summary_data = service.get_arrival_summary()
                 for row in summary_data:
-                    values = [row.get(key, '') for key in summary_cols]
+                    # Собираем значения в правильном порядке
+                    values = [row.get(key) for key in summary_cols]
                     summary_tree.insert('', 'end', values=values)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить сводку: {e}", parent=self)

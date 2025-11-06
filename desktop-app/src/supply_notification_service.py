@@ -64,34 +64,43 @@ class SupplyNotificationService:
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 query = """
-                WITH daily_stats AS (
+                WITH details_agg AS (
+                    -- Сначала агрегируем детализацию, чтобы избежать дублирования при JOIN
                     SELECT
-                        n.planned_arrival_date,
-                        COUNT(DISTINCT n.client_name) as clients_count,
-                        COUNT(n.id) as notifications_count,
-                        COALESCE(SUM(d.positions_count), 0) as positions_count,
-                        COALESCE(SUM(d.dm_count), 0) as dm_codes_count
-                    FROM 
-                        ap_supply_notifications n
-                    LEFT JOIN (
-                        SELECT 
-                            notification_id, 
-                            COUNT(DISTINCT gtin) as positions_count, 
-                            SUM(quantity) as dm_count
-                        FROM ap_supply_notification_details
-                        GROUP BY notification_id
-                    ) d ON n.id = d.notification_id
-                    WHERE n.planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
-                    GROUP BY n.planned_arrival_date
+                        notification_id,
+                        COUNT(DISTINCT gtin) as positions_count,
+                        SUM(quantity) as dm_count
+                    FROM ap_supply_notification_details
+                    GROUP BY notification_id
                 )
                 SELECT
-                    CASE 
-                        WHEN planned_arrival_date = CURRENT_DATE THEN 'Сегодня'
-                        ELSE TO_CHAR(planned_arrival_date, 'DD.MM.YYYY (Day)')
-                    END as day_label,
-                    clients_count, notifications_count, positions_count, dm_codes_count
-                FROM daily_stats
-                ORDER BY planned_arrival_date;
+                    n.client_name,
+                    -- Агрегация для СЕГОДНЯ (d0)
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE THEN 1 ELSE 0 END), 0) as d0_ув,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE THEN d.positions_count ELSE 0 END), 0) as d0_поз,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE THEN d.dm_count ELSE 0 END), 0) as d0_дм,
+                    -- Агрегация для ЗАВТРА (d1)
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 1 THEN 1 ELSE 0 END), 0) as d1_ув,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 1 THEN d.positions_count ELSE 0 END), 0) as d1_поз,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 1 THEN d.dm_count ELSE 0 END), 0) as d1_дм,
+                    -- Агрегация для ПОСЛЕЗАВТРА (d2)
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 2 THEN 1 ELSE 0 END), 0) as d2_ув,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 2 THEN d.positions_count ELSE 0 END), 0) as d2_поз,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 2 THEN d.dm_count ELSE 0 END), 0) as d2_дм,
+                    -- Агрегация для +3 ДНЯ (d3)
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 3 THEN 1 ELSE 0 END), 0) as d3_ув,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 3 THEN d.positions_count ELSE 0 END), 0) as d3_поз,
+                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 3 THEN d.dm_count ELSE 0 END), 0) as d3_дм
+                FROM
+                    ap_supply_notifications n
+                LEFT JOIN details_agg d ON n.id = d.notification_id
+                WHERE
+                    n.planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+                    AND n.status NOT IN ('В работе', 'В архиве')
+                GROUP BY
+                    n.client_name
+                ORDER BY
+                    n.client_name;
                 """
                 cur.execute(query)
                 summary = cur.fetchall()
