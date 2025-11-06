@@ -70,7 +70,7 @@ class SupplyNotificationService:
                         n.client_name,
                         n.planned_arrival_date,
                         COUNT(DISTINCT n.id) as notifications_count,
-                        COUNT(DISTINCT d.gtin) as positions_count,
+                        COUNT(DISTINCT CASE WHEN d.gtin IS NOT NULL AND d.gtin != '' THEN d.gtin END) as positions_count,
                         COALESCE(SUM(d.quantity), 0) as dm_count
                     FROM
                         ap_supply_notifications n

@@ -1180,16 +1180,20 @@ class AdminWindow(tk.Tk):
         summary_col_map = {'client_name': ('Клиент', 200, 'w')}
         
         # --- ИЗМЕНЕНИЕ: Генерируем реальные даты и убираем точки из заголовков ---
-        from datetime import date, timedelta
-        today = date.today()
+        from datetime import date, timedelta, datetime
+        today = datetime.now().date()
         day_labels = [(today + timedelta(days=i)).strftime('%d-%m-%Y') for i in range(4)]
         sub_headers = ['Ув', 'Поз', 'ДМ']
         
         # Заполняем фрейм с верхними заголовками
-        ttk.Label(summary_header_frame, text="", width=28).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
+        # --- ИСПРАВЛЕНИЕ: Используем Frame с фиксированной шириной для точного выравнивания ---
+        ttk.Frame(summary_header_frame, width=200).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
         for day_label in day_labels:
-            # Ширина каждого блока = 3 * 80px + отступы
-            ttk.Label(summary_header_frame, text=day_label, anchor='center', borderwidth=1, relief="solid").pack(side=tk.LEFT, fill=tk.X, expand=True)
+            # Ширина каждого блока = 3 * 80px = 240px
+            date_header_block = ttk.Frame(summary_header_frame, width=240)
+            date_header_block.pack(side=tk.LEFT)
+            date_header_block.pack_propagate(False) # Запрещаем дочерним элементам менять размер фрейма
+            ttk.Label(date_header_block, text=day_label, anchor='center', borderwidth=1, relief="solid").pack(fill=tk.BOTH, expand=True)
 
         # Формируем ключи и заголовки для таблицы
         for i in range(4):
@@ -1198,23 +1202,41 @@ class AdminWindow(tk.Tk):
                 col_key = f"{day_key}_{sub_headers[j].lower()}"
                 summary_cols.append(col_key)
                 summary_col_map[col_key] = (sub_header, 80, 'center')
-
-        summary_tree = ttk.Treeview(bottom_pane, columns=summary_cols, show='headings')
+        
+        # --- ИЗМЕНЕНИЕ: Добавляем рамку вокруг таблицы ---
+        summary_tree_frame = ttk.Frame(bottom_pane, borderwidth=1, relief="solid")
+        summary_tree_frame.pack(expand=True, fill='both', pady=(2,0))
+        summary_tree = ttk.Treeview(summary_tree_frame, columns=summary_cols, show='headings')
+        summary_tree.pack(expand=True, fill='both')
 
         for col_key, (text, width, anchor) in summary_col_map.items():
             summary_tree.heading(col_key, text=text)
             summary_tree.column(col_key, width=width, anchor=anchor)
 
-        summary_tree.pack(expand=True, fill='both', pady=(2,0))
+        # --- НОВЫЙ БЛОК: Настройка тега для итоговой строки ---
+        summary_tree.tag_configure('total_row', background='lightgrey', font=('Arial', 9, 'bold'))
 
         def refresh_summary_data():
             for i in summary_tree.get_children(): summary_tree.delete(i)
             try:
                 summary_data = service.get_arrival_summary()
+                
+                # --- НОВЫЙ БЛОК: Подсчет итогов ---
+                totals = {key: 0 for key in summary_cols if key != 'client_name'}
+                
                 for row in summary_data:
                     # --- ИЗМЕНЕНИЕ: Заменяем None на 0 при сборке значений ---
                     values = [row.get(key, 0) for key in summary_cols]
                     summary_tree.insert('', 'end', values=values)
+                    # Суммируем значения для итоговой строки
+                    for key in totals:
+                        totals[key] += row.get(key, 0)
+                
+                # Добавляем итоговую строку, если есть данные
+                if summary_data:
+                    total_values = ['ИТОГО'] + [totals.get(key, 0) for key in summary_cols if key != 'client_name']
+                    summary_tree.insert('', 'end', values=total_values, tags=('total_row',))
+
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить сводку: {e}", parent=self)
 
