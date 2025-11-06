@@ -2665,6 +2665,7 @@ class NotificationEditorDialog(tk.Toplevel):
             self.service.save_notification_details(details_to_save)
             messagebox.showinfo("Успех", "Изменения в детализации успешно сохранены.", parent=self)
         except Exception as e:
+            logging.error(f"Ошибка при сохранении детализации: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось сохранить детализацию: {e}", parent=self)
 
     def _on_client_combo_click(self, event):
