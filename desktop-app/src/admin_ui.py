@@ -1123,6 +1123,18 @@ class AdminWindow(tk.Tk):
         from .supply_notification_service import SupplyNotificationService
         service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
  
+        # --- ИЗМЕНЕНИЕ: Создаем PanedWindow для разделения на 2 части ---
+        paned_window = ttk.PanedWindow(parent_frame, orient=tk.VERTICAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+
+        # --- Верхняя часть (3/4) ---
+        top_pane = ttk.Frame(paned_window)
+        paned_window.add(top_pane, weight=3)
+
+        # --- Нижняя часть (1/4) ---
+        bottom_pane = ttk.LabelFrame(paned_window, text="Сводка по ожидаемым поставкам на 3 дня", padding=5)
+        paned_window.add(bottom_pane, weight=1)
+
         controls = ttk.Frame(parent_frame)
         controls.pack(fill=tk.X, pady=5)
 
@@ -1130,7 +1142,11 @@ class AdminWindow(tk.Tk):
                 'vehicle_number', 'status', 'positions_count', 'dm_count', 'actions')
         
         tree = ttk.Treeview(parent_frame, columns=cols, show='headings')
-        
+        # --- ИЗМЕНЕНИЕ: Размещаем элементы управления и таблицу в верхней панели ---
+        controls = ttk.Frame(top_pane)
+        controls.pack(fill=tk.X, pady=5)
+
+        tree = ttk.Treeview(top_pane, columns=cols, show='headings')
         col_map = {
             'id': ('ID', 10, 'center'),
             'scenario_name': ('Сценарий', 150, 'w'),
@@ -1154,6 +1170,37 @@ class AdminWindow(tk.Tk):
         tree.tag_configure('Проект', background='light yellow')
         tree.tag_configure('Ожидание', background='light green')
 
+        # --- НОВЫЙ БЛОК: Создание таблицы для сводки в нижней панели ---
+        summary_cols = ('client_name', 'today', 'plus_1_day', 'plus_2_days', 'plus_3_days', 'total_notifications', 'total_positions', 'total_dm_codes')
+        summary_tree = ttk.Treeview(bottom_pane, columns=summary_cols, show='headings')
+        
+        summary_col_map = {
+            'client_name': ('Клиент', 200, 'w'),
+            'today': ('Сегодня', 80, 'center'),
+            'plus_1_day': ('+1 день', 80, 'center'),
+            'plus_2_days': ('+2 дня', 80, 'center'),
+            'plus_3_days': ('+3 дня', 80, 'center'),
+            'total_notifications': ('Всего ув.', 80, 'center'),
+            'total_positions': ('Всего поз.', 80, 'center'),
+            'total_dm_codes': ('Всего ДМ', 80, 'center')
+        }
+
+        for col_key, (text, width, anchor) in summary_col_map.items():
+            summary_tree.heading(col_key, text=text)
+            summary_tree.column(col_key, width=width, anchor=anchor)
+
+        summary_tree.pack(expand=True, fill='both')
+
+        def refresh_summary_data():
+            for i in summary_tree.get_children(): summary_tree.delete(i)
+            try:
+                summary_data = service.get_arrival_summary()
+                for row in summary_data:
+                    values = [row.get(key, 0) for key in summary_cols]
+                    summary_tree.insert('', 'end', values=values)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось загрузить сводку: {e}", parent=self)
+
         def refresh_notifications():
             for i in tree.get_children(): tree.delete(i)
             try:
@@ -1172,6 +1219,11 @@ class AdminWindow(tk.Tk):
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
 
+        def refresh_all():
+            refresh_notifications()
+            refresh_summary_data()
+                messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
+
         def open_notification_editor(notification_id=None):
             """Открывает диалог для создания/редактирования уведомления."""
             logging.info(f"Вызвана функция open_notification_editor с notification_id: {notification_id}, тип: {type(notification_id)}")
@@ -1186,7 +1238,7 @@ class AdminWindow(tk.Tk):
             logging.info("Экземпляр NotificationEditorDialog создан.")
             # self.wait_window(dialog) # Убираем блокировку
             # Вместо этого, диалог сам вызовет обновление списка при успешном сохранении
-            dialog.on_save_callback = refresh_notifications
+            dialog.on_save_callback = refresh_all
             if getattr(dialog, 'result', False):
                 logging.info("Диалог уведомлений завершился успешно. Обновление списка...")
                 refresh_notifications()
@@ -1197,7 +1249,7 @@ class AdminWindow(tk.Tk):
             if messagebox.askyesno("Подтверждение", "Переместить уведомление в архив?", parent=self):
                 try:
                     service.archive_notification(int(selected_item))
-                    refresh_notifications()
+                    refresh_all()
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось архивировать уведомление: {e}", parent=self)
 
@@ -1221,11 +1273,11 @@ class AdminWindow(tk.Tk):
             menu.post(event.x_root, event.y_root)
 
         ttk.Button(controls, text="Создать новое уведомление", command=lambda: open_notification_editor()).pack(side=tk.LEFT, padx=2)
-        ttk.Button(controls, text="Обновить", command=refresh_notifications).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls, text="Обновить", command=refresh_all).pack(side=tk.LEFT, padx=2)
 
         tree.bind("<Button-3>", show_context_menu) # Правый клик
 
-        refresh_notifications()
+        refresh_all()
 
     def _create_catalogs_tab(self, parent_frame):
         logger = logging.getLogger(__name__)

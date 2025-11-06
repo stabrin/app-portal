@@ -57,6 +57,53 @@ class SupplyNotificationService:
                         n['dm_count'] = 0
                 return notifications
 
+    def get_arrival_summary(self):
+        """
+        Возвращает сгруппированную сводку по поставкам на ближайшие 4 дня.
+        """
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                query = """
+                WITH notification_counts AS (
+                    -- Подсчитываем количество уведомлений по клиентам и датам
+                    SELECT
+                        client_name,
+                        planned_arrival_date,
+                        COUNT(id) as notification_count
+                    FROM ap_supply_notifications
+                    WHERE planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+                    GROUP BY client_name, planned_arrival_date
+                ),
+                detail_sums AS (
+                    -- Подсчитываем суммы позиций и кодов ДМ
+                    SELECT
+                        n.client_name,
+                        SUM(d.quantity) as total_dm,
+                        COUNT(DISTINCT d.gtin) as total_positions
+                    FROM ap_supply_notification_details d
+                    JOIN ap_supply_notifications n ON d.notification_id = n.id
+                    WHERE n.planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+                    GROUP BY n.client_name
+                )
+                -- Финальная сборка данных
+                SELECT
+                    nc.client_name,
+                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE THEN nc.notification_count ELSE 0 END) as today,
+                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE + 1 THEN nc.notification_count ELSE 0 END) as plus_1_day,
+                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE + 2 THEN nc.notification_count ELSE 0 END) as plus_2_days,
+                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE + 3 THEN nc.notification_count ELSE 0 END) as plus_3_days,
+                    SUM(nc.notification_count) as total_notifications,
+                    COALESCE(ds.total_positions, 0) as total_positions,
+                    COALESCE(ds.total_dm, 0) as total_dm_codes
+                FROM notification_counts nc
+                LEFT JOIN detail_sums ds ON nc.client_name = ds.client_name
+                GROUP BY nc.client_name, ds.total_positions, ds.total_dm
+                ORDER BY nc.client_name;
+                """
+                cur.execute(query)
+                summary = cur.fetchall()
+                return summary
+
     def create_notification(self, data):
         """Создает новое уведомление о поставке."""
         logging.info(f"Создание нового уведомления с данными: {data}")
