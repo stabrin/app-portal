@@ -1179,8 +1179,11 @@ class AdminWindow(tk.Tk):
         summary_cols = ['client_name']
         summary_col_map = {'client_name': ('Клиент', 200, 'w')}
         
-        day_labels = ['Сегодня', '+1 день', '+2 дня', '+3 дня']
-        sub_headers = ['Ув.', 'Поз.', 'ДМ']
+        # --- ИЗМЕНЕНИЕ: Генерируем реальные даты и убираем точки из заголовков ---
+        from datetime import date, timedelta
+        today = date.today()
+        day_labels = [(today + timedelta(days=i)).strftime('%d-%m-%Y') for i in range(4)]
+        sub_headers = ['Ув', 'Поз', 'ДМ']
         
         # Заполняем фрейм с верхними заголовками
         ttk.Label(summary_header_frame, text="", width=28).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
@@ -1209,8 +1212,8 @@ class AdminWindow(tk.Tk):
             try:
                 summary_data = service.get_arrival_summary()
                 for row in summary_data:
-                    # Собираем значения в правильном порядке
-                    values = [row.get(key) for key in summary_cols]
+                    # --- ИЗМЕНЕНИЕ: Заменяем None на 0 при сборке значений ---
+                    values = [row.get(key, 0) for key in summary_cols]
                     summary_tree.insert('', 'end', values=values)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить сводку: {e}", parent=self)

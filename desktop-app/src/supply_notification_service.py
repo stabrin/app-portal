@@ -64,43 +64,47 @@ class SupplyNotificationService:
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 query = """
-                WITH details_agg AS (
-                    -- Сначала агрегируем детализацию, чтобы избежать дублирования при JOIN
+                WITH daily_client_stats AS (
+                    -- Сначала агрегируем данные по каждому клиенту и дню
                     SELECT
-                        notification_id,
-                        COUNT(DISTINCT gtin) as positions_count,
-                        SUM(quantity) as dm_count
-                    FROM ap_supply_notification_details
-                    GROUP BY notification_id
+                        n.client_name,
+                        n.planned_arrival_date,
+                        COUNT(DISTINCT n.id) as notifications_count,
+                        COUNT(DISTINCT d.gtin) as positions_count,
+                        COALESCE(SUM(d.quantity), 0) as dm_count
+                    FROM
+                        ap_supply_notifications n
+                    LEFT JOIN 
+                        ap_supply_notification_details d ON n.id = d.notification_id
+                    WHERE
+                        n.planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+                        AND n.status NOT IN ('В работе', 'В архиве')
+                    GROUP BY
+                        n.client_name, n.planned_arrival_date
                 )
                 SELECT
-                    n.client_name,
+                    client_name,
                     -- Агрегация для СЕГОДНЯ (d0)
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE THEN 1 ELSE 0 END), 0) as d0_ув,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE THEN d.positions_count ELSE 0 END), 0) as d0_поз,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE THEN d.dm_count ELSE 0 END), 0) as d0_дм,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE THEN notifications_count ELSE 0 END) as d0_ув,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE THEN positions_count ELSE 0 END) as d0_поз,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE THEN dm_count ELSE 0 END) as d0_дм,
                     -- Агрегация для ЗАВТРА (d1)
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 1 THEN 1 ELSE 0 END), 0) as d1_ув,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 1 THEN d.positions_count ELSE 0 END), 0) as d1_поз,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 1 THEN d.dm_count ELSE 0 END), 0) as d1_дм,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 1 THEN notifications_count ELSE 0 END) as d1_ув,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 1 THEN positions_count ELSE 0 END) as d1_поз,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 1 THEN dm_count ELSE 0 END) as d1_дм,
                     -- Агрегация для ПОСЛЕЗАВТРА (d2)
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 2 THEN 1 ELSE 0 END), 0) as d2_ув,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 2 THEN d.positions_count ELSE 0 END), 0) as d2_поз,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 2 THEN d.dm_count ELSE 0 END), 0) as d2_дм,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 2 THEN notifications_count ELSE 0 END) as d2_ув,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 2 THEN positions_count ELSE 0 END) as d2_поз,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 2 THEN dm_count ELSE 0 END) as d2_дм,
                     -- Агрегация для +3 ДНЯ (d3)
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 3 THEN 1 ELSE 0 END), 0) as d3_ув,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 3 THEN d.positions_count ELSE 0 END), 0) as d3_поз,
-                    COALESCE(SUM(CASE WHEN n.planned_arrival_date = CURRENT_DATE + 3 THEN d.dm_count ELSE 0 END), 0) as d3_дм
-                FROM
-                    ap_supply_notifications n
-                LEFT JOIN details_agg d ON n.id = d.notification_id
-                WHERE
-                    n.planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
-                    AND n.status NOT IN ('В работе', 'В архиве')
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 3 THEN notifications_count ELSE 0 END) as d3_ув,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 3 THEN positions_count ELSE 0 END) as d3_поз,
+                    SUM(CASE WHEN planned_arrival_date = CURRENT_DATE + 3 THEN dm_count ELSE 0 END) as d3_дм
+                FROM daily_client_stats
                 GROUP BY
-                    n.client_name
+                    client_name
                 ORDER BY
-                    n.client_name;
+                    client_name;
                 """
                 cur.execute(query)
                 summary = cur.fetchall()
