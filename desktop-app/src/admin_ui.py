@@ -1053,7 +1053,7 @@ class AdminWindow(tk.Tk):
         super().__init__()
         self.user_info = user_info
         self.title(f"ТильдаКод [Пользователь: {self.user_info['name']}, Роль: {self.user_info['role']}]")
-        self.geometry("600x400")
+        self.state('zoomed') # Запускаем окно в развернутом виде
  
         self._create_menu()
  
@@ -1184,19 +1184,25 @@ class AdminWindow(tk.Tk):
         today = datetime.now().date()
         day_labels = [(today + timedelta(days=i)).strftime('%d-%m-%Y') for i in range(4)]
         sub_headers = ['Ув', 'Поз', 'ДМ']
-        
+
         # Заполняем фрейм с верхними заголовками
-        # --- ИСПРАВЛЕНИЕ: Используем фреймы с точной шириной в пикселях для идеального выравнивания ---
-        ttk.Frame(summary_header_frame, width=200).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
+        # --- НОВАЯ ЛОГИКА: Используем "распорки" для центрирования ---
+        ttk.Frame(summary_header_frame).pack(side=tk.LEFT, expand=True, fill=tk.X) # Левая распорка
+        
+        # Блок для заголовка "Клиент"
+        ttk.Frame(summary_header_frame, width=200).pack(side=tk.LEFT)
+        
+        # Блоки для дат
         for day_label in day_labels:
             header_width = 240 # 3 колонки * 80px
             header_height = 25 # Явно задаем высоту
             logging.debug(f"Создание блока заголовка для '{day_label}' с размерами {header_width}x{header_height}px")
-            # Ширина каждого блока = 3 колонки * 80px = 240px
             date_header_block = ttk.Frame(summary_header_frame, width=header_width, height=header_height)
             date_header_block.pack(side=tk.LEFT)
             date_header_block.pack_propagate(False) # Запрещаем дочерним элементам менять размер родителя
             ttk.Label(date_header_block, text=day_label, anchor='center', borderwidth=1, relief="solid").pack(fill=tk.BOTH, expand=True)
+
+        ttk.Frame(summary_header_frame).pack(side=tk.LEFT, expand=True, fill=tk.X) # Правая распорка
 
         # Формируем ключи и заголовки для таблицы
         for i in range(4):
