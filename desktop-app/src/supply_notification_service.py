@@ -144,29 +144,43 @@ class SupplyNotificationService:
 
     def process_formalized_file(self, notification_id, file_data):
         """Обрабатывает загруженный файл с детализацией."""
-        df = pd.read_excel(io.BytesIO(file_data), dtype={'GTIN': str}, engine='openpyxl')
+        # --- ИЗМЕНЕНИЕ: Читаем все колонки как строки, чтобы избежать авто-преобразования pandas ---
+        df = pd.read_excel(io.BytesIO(file_data), dtype=str, engine='openpyxl')
         df.columns = [col.strip().lower() for col in df.columns]
 
         details_to_insert = []
         for _, row in df.iterrows():
+            # 1. Дата производства: если пустая, ставим текущую
             prod_date = pd.to_datetime(row.get('дата производства'), errors='coerce')
             if pd.isna(prod_date):
                 prod_date = pd.Timestamp.now()
 
+            # 2. Срок годности и дата окончания
             exp_date = pd.to_datetime(row.get('окончание срока годности'), errors='coerce')
             shelf_life_months = pd.to_numeric(row.get('срок годности'), errors='coerce')
 
+            # Приоритетное правило: если есть "Срок годности", считаем "Окончание срока годности"
             if pd.notna(shelf_life_months):
                 exp_date = prod_date + relativedelta(months=int(shelf_life_months))
+            # Вторичное правило: если есть "Окончание срока годности", а "Срок годности" пуст, считаем его
             elif pd.notna(exp_date):
                 delta = relativedelta(exp_date, prod_date)
                 shelf_life_months = delta.years * 12 + delta.months
 
+            # 3. Кол-во и Агрегация с надежным преобразованием в число
+            quantity = pd.to_numeric(row.get('кол-во'), errors='coerce')
+            if pd.isna(quantity) or quantity > 1000000:
+                quantity = 0 # Ставим 0, если не число или больше лимита
+
+            aggregation = pd.to_numeric(row.get('агрегация'), errors='coerce')
+            if pd.isna(aggregation):
+                aggregation = 0 # Ставим 0, если не число
+
             details_to_insert.append((
                 notification_id,
                 str(row.get('gtin', '')),
-                int(row.get('кол-во', 0)),
-                int(pd.to_numeric(row.get('агрегация'), errors='coerce').fillna(0)),
+                int(quantity),
+                int(aggregation),
                 prod_date.date(),
                 int(shelf_life_months) if pd.notna(shelf_life_months) else None,
                 exp_date.date() if pd.notna(exp_date) else None
