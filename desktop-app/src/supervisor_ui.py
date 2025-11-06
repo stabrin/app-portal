@@ -186,6 +186,8 @@ def open_clients_management_window(parent_widget):
                     messagebox.showerror("Ошибка", "Произошла ошибка при обновлении схемы. Подробности в app.log.", parent=editor_window)
 
             except Exception as e:
+                error_details = traceback.format_exc()
+                logging.error(f"Не удалось выполнить инициализацию БД клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка", f"Не удалось выполнить инициализацию: {e}", parent=editor_window)
             finally:
                 if client_conn: client_conn.close()
@@ -225,8 +227,9 @@ def open_clients_management_window(parent_widget):
                 logging.info(f"Пользователь '{user_login}' успешно синхронизирован с БД клиента '{db_name}'.")
                 return True
             except Exception as e:
-                logging.error(f"Ошибка синхронизации пользователя с БД клиента: {e}")
+                error_details = traceback.format_exc()
                 if client_conn: client_conn.rollback()
+                logging.error(f"Ошибка синхронизации пользователя с БД клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка синхронизации", f"Не удалось обновить данные в базе клиента: {e}", parent=editor_window)
                 return False
             finally:

@@ -16,13 +16,11 @@ def get_main_db_connection():
     Контекстный менеджер, который возвращает готовое SSL-соединение
     с ГЛАВНОЙ базой данных (portal_db).
     """
-    # Загружаем переменные из .env файла
     # --- ИЗМЕНЕНИЕ: Убираем зависимость от .env и хардкодим параметры ---
     db_params = {
         "dbname": "tilda_db",
-
         "user": "portal_user",
-        "password": "!T-W0rkshop",
+        "password": "!T-W0rkshop", 
         "host": "109.172.115.204",
         "port": "5432",
         "connect_timeout": 10,
