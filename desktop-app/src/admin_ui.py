@@ -21,7 +21,7 @@ except ImportError:
 
 # Настройка логирования
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [admin_ui.py] - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -2478,7 +2478,7 @@ class NotificationEditorDialog(tk.Toplevel):
             bottom_pane = ttk.Frame(paned_window, padding=10)
             paned_window.add(bottom_pane, weight=2)
 
-            details_frame = ttk.LabelFrame(bottom_pane, text="Детализация уведомления (ap_supply_notification_details)")
+            details_frame = ttk.LabelFrame(bottom_pane, text="Детализация уведомления")
             details_frame.pack(fill=tk.BOTH, expand=True)
 
             # Кнопки управления детализацией

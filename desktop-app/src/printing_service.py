@@ -56,7 +56,7 @@ except ImportError:
 
 # Конфигурация логирования
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [printing_service] - %(message)s',
     handlers=[
         logging.StreamHandler(),
