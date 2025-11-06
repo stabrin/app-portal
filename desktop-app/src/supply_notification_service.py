@@ -64,41 +64,34 @@ class SupplyNotificationService:
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 query = """
-                WITH notification_counts AS (
-                    -- Подсчитываем количество уведомлений по клиентам и датам
+                WITH daily_stats AS (
                     SELECT
-                        client_name,
-                        planned_arrival_date,
-                        COUNT(id) as notification_count
-                    FROM ap_supply_notifications
-                    WHERE planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
-                    GROUP BY client_name, planned_arrival_date
-                ),
-                detail_sums AS (
-                    -- Подсчитываем суммы позиций и кодов ДМ
-                    SELECT
-                        n.client_name,
-                        SUM(d.quantity) as total_dm,
-                        COUNT(DISTINCT d.gtin) as total_positions
-                    FROM ap_supply_notification_details d
-                    JOIN ap_supply_notifications n ON d.notification_id = n.id
+                        n.planned_arrival_date,
+                        COUNT(DISTINCT n.client_name) as clients_count,
+                        COUNT(n.id) as notifications_count,
+                        COALESCE(SUM(d.positions_count), 0) as positions_count,
+                        COALESCE(SUM(d.dm_count), 0) as dm_codes_count
+                    FROM 
+                        ap_supply_notifications n
+                    LEFT JOIN (
+                        SELECT 
+                            notification_id, 
+                            COUNT(DISTINCT gtin) as positions_count, 
+                            SUM(quantity) as dm_count
+                        FROM ap_supply_notification_details
+                        GROUP BY notification_id
+                    ) d ON n.id = d.notification_id
                     WHERE n.planned_arrival_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
-                    GROUP BY n.client_name
+                    GROUP BY n.planned_arrival_date
                 )
-                -- Финальная сборка данных
                 SELECT
-                    nc.client_name,
-                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE THEN nc.notification_count ELSE 0 END) as today,
-                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE + 1 THEN nc.notification_count ELSE 0 END) as plus_1_day,
-                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE + 2 THEN nc.notification_count ELSE 0 END) as plus_2_days,
-                    SUM(CASE WHEN nc.planned_arrival_date = CURRENT_DATE + 3 THEN nc.notification_count ELSE 0 END) as plus_3_days,
-                    SUM(nc.notification_count) as total_notifications,
-                    COALESCE(ds.total_positions, 0) as total_positions,
-                    COALESCE(ds.total_dm, 0) as total_dm_codes
-                FROM notification_counts nc
-                LEFT JOIN detail_sums ds ON nc.client_name = ds.client_name
-                GROUP BY nc.client_name, ds.total_positions, ds.total_dm
-                ORDER BY nc.client_name;
+                    CASE 
+                        WHEN planned_arrival_date = CURRENT_DATE THEN 'Сегодня'
+                        ELSE TO_CHAR(planned_arrival_date, 'DD.MM.YYYY (Day)')
+                    END as day_label,
+                    clients_count, notifications_count, positions_count, dm_codes_count
+                FROM daily_stats
+                ORDER BY planned_arrival_date;
                 """
                 cur.execute(query)
                 summary = cur.fetchall()

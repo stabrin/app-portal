@@ -1132,7 +1132,7 @@ class AdminWindow(tk.Tk):
         paned_window.add(top_pane, weight=3)
 
         # --- Нижняя часть (1/4) ---
-        bottom_pane = ttk.LabelFrame(paned_window, text="Сводка по ожидаемым поставкам на 3 дня", padding=5)
+        bottom_pane = ttk.LabelFrame(paned_window, text="Сводка по дням", padding=5)
         paned_window.add(bottom_pane, weight=1)
 
         controls = ttk.Frame(parent_frame)
@@ -1171,18 +1171,15 @@ class AdminWindow(tk.Tk):
         tree.tag_configure('Ожидание', background='light green')
 
         # --- НОВЫЙ БЛОК: Создание таблицы для сводки в нижней панели ---
-        summary_cols = ('client_name', 'today', 'plus_1_day', 'plus_2_days', 'plus_3_days', 'total_notifications', 'total_positions', 'total_dm_codes')
+        summary_cols = ('day_label', 'clients_count', 'notifications_count', 'positions_count', 'dm_codes_count')
         summary_tree = ttk.Treeview(bottom_pane, columns=summary_cols, show='headings')
         
         summary_col_map = {
-            'client_name': ('Клиент', 200, 'w'),
-            'today': ('Сегодня', 80, 'center'),
-            'plus_1_day': ('+1 день', 80, 'center'),
-            'plus_2_days': ('+2 дня', 80, 'center'),
-            'plus_3_days': ('+3 дня', 80, 'center'),
-            'total_notifications': ('Всего ув.', 80, 'center'),
-            'total_positions': ('Всего поз.', 80, 'center'),
-            'total_dm_codes': ('Всего ДМ', 80, 'center')
+            'day_label': ('День', 150, 'w'),
+            'clients_count': ('Клиентов', 100, 'center'),
+            'notifications_count': ('Уведомлений', 100, 'center'),
+            'positions_count': ('Позиций', 100, 'center'),
+            'dm_codes_count': ('Кодов ДМ', 100, 'center')
         }
 
         for col_key, (text, width, anchor) in summary_col_map.items():
@@ -1196,7 +1193,7 @@ class AdminWindow(tk.Tk):
             try:
                 summary_data = service.get_arrival_summary()
                 for row in summary_data:
-                    values = [row.get(key, 0) for key in summary_cols]
+                    values = [row.get(key, '') for key in summary_cols]
                     summary_tree.insert('', 'end', values=values)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить сводку: {e}", parent=self)
