@@ -174,7 +174,7 @@ def open_clients_management_window(parent_widget):
                     with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
                         fp.write(db_ssl_cert)
                         temp_cert_file = fp.name
-                    ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
+                    ssl_params = {'sslmode': 'require', 'sslrootcert': temp_cert_file}
                     logging.info(f"Используется временный SSL-сертификат: {temp_cert_file}")
 
                 logging.info(f"Подключаюсь к базе клиента '{db_name}' на {db_host}...")
@@ -208,7 +208,7 @@ def open_clients_management_window(parent_widget):
                     with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
                         fp.write(db_ssl_cert)
                         temp_cert_file = fp.name
-                    ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
+                    ssl_params = {'sslmode': 'require', 'sslrootcert': temp_cert_file}
 
                 client_conn = psycopg2.connect(host=db_host, port=db_port, dbname=db_name, user=db_user, password=db_password, **ssl_params)
                 with client_conn.cursor() as cur:

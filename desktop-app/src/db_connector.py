@@ -25,7 +25,7 @@ def get_main_db_connection():
         "password": "!T-W0rkshop",
         "host": "109.172.115.204",
         "port": "5432",
-        "connect_timeout": 5,
+        "connect_timeout": 10,
         "sslmode": 'verify-full'
     }
 
