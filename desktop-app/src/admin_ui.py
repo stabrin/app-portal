@@ -21,7 +21,7 @@ except ImportError:
 
 # Настройка логирования
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - [admin_ui.py] - %(message)s',
     handlers=[
         logging.StreamHandler(),
@@ -1189,8 +1189,11 @@ class AdminWindow(tk.Tk):
         # --- ИСПРАВЛЕНИЕ: Используем фреймы с точной шириной в пикселях для идеального выравнивания ---
         ttk.Frame(summary_header_frame, width=200).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
         for day_label in day_labels:
+            header_width = 240 # 3 колонки * 80px
+            header_height = 25 # Явно задаем высоту
+            logging.debug(f"Создание блока заголовка для '{day_label}' с размерами {header_width}x{header_height}px")
             # Ширина каждого блока = 3 колонки * 80px = 240px
-            date_header_block = ttk.Frame(summary_header_frame, width=240)
+            date_header_block = ttk.Frame(summary_header_frame, width=header_width, height=header_height)
             date_header_block.pack(side=tk.LEFT)
             date_header_block.pack_propagate(False) # Запрещаем дочерним элементам менять размер родителя
             ttk.Label(date_header_block, text=day_label, anchor='center', borderwidth=1, relief="solid").pack(fill=tk.BOTH, expand=True)
