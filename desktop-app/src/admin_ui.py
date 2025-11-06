@@ -1222,7 +1222,6 @@ class AdminWindow(tk.Tk):
         def refresh_all():
             refresh_notifications()
             refresh_summary_data()
-                messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
 
         def open_notification_editor(notification_id=None):
             """Открывает диалог для создания/редактирования уведомления."""
