@@ -1174,13 +1174,15 @@ class AdminWindow(tk.Tk):
 
         def open_notification_editor(notification_id=None):
             """Открывает диалог для создания/редактирования уведомления."""
-            logging.info(f"Вызвана функция open_notification_editor с notification_id: {notification_id}")
+            logging.info(f"Вызвана функция open_notification_editor с notification_id: {notification_id}, тип: {type(notification_id)}")
             if notification_id:
                 logging.info(f"Открытие редактора для существующего уведомления ID: {notification_id}")
             else:
                 logging.info("Открытие редактора для создания нового уведомления.")
             
-            dialog = NotificationEditorDialog(self, self.user_info, notification_id)
+            # --- ИСПРАВЛЕНИЕ: Передаем user_info и notification_id в правильный конструктор ---
+            dialog = NotificationEditorDialog(self, user_info=self.user_info, notification_id=notification_id)
+            logging.info("Экземпляр NotificationEditorDialog создан.")
             self.wait_window(dialog)
             if dialog.result:
                 logging.info("Диалог уведомлений завершился успешно. Обновление списка...")
@@ -2336,8 +2338,8 @@ class NewNotificationDialog(tk.Toplevel):
         self.result = (name, arrival_date)
         self.destroy()
 
-class NotificationEditorDialog(tk.Toplevel): # Переименовываем, чтобы избежать конфликта
-    def __init__(self, parent, user_info, notification_id=None):
+class _LegacyNotificationDialog(tk.Toplevel): # Переименовываем, чтобы избежать конфликта
+    def __init__(self, parent, initial_date=None):
         super().__init__(parent)
         self.title("Редактор уведомления о поставке")
         self.transient(parent)
@@ -2356,7 +2358,38 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
 
         self._create_widgets()
 
+class NotificationEditorDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
+    def __init__(self, parent, user_info, notification_id=None):
+        super().__init__(parent)
+        # --- ИСПРАВЛЕНИЕ: Устанавливаем заголовок в зависимости от режима (создание/редактирование) ---
+        title = f"Редактирование уведомления №{notification_id}" if notification_id else "Новое уведомление о поставке"
+        self.title(title)
+        
+        self.transient(parent)
+        self.grab_set()
+        self.result = None
+        self.user_info = user_info
+        self.notification_id = notification_id
+
+        logging.info(f"Инициализация NotificationEditorDialog. ID: {self.notification_id}")
+
+        # --- Инициализация сервисов ---
+        from .supply_notification_service import SupplyNotificationService
+        self.service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
+        from .catalogs_service import CatalogsService
+        self.catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
+
+        self.initial_data = {}
+        if notification_id:
+            logging.info(f"Загрузка данных для уведомления ID: {notification_id}")
+            self.initial_data = self.service.get_notification_by_id(notification_id)
+            logging.info(f"Данные загружены: {self.initial_data}")
+
+        self._create_widgets()
+
     def _create_widgets(self):
+        logging.info("Начало создания виджетов в NotificationEditorDialog.")
         # Основной фрейм
         main_frame = ttk.Frame(self, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -2419,6 +2452,7 @@ class NotificationEditorDialog(tk.Toplevel): # Переименовываем, �
         # --- ИЗМЕНЕНИЕ: Вызываем смену сценария вручную после загрузки всех данных ---
         # Это гарантирует, что список клиентов будет корректно загружен при открытии окна.
         self._on_scenario_change()
+        logging.info("Создание виджетов в NotificationEditorDialog завершено.")
 
     def _on_client_combo_click(self, event):
         """Обработчик клика по Combobox клиента. Добавляет кнопку "Добавить нового"."""
