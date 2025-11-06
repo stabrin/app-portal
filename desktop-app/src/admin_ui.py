@@ -2527,6 +2527,11 @@ class NotificationEditorDialog(tk.Toplevel):
         self._on_scenario_change()
         logging.info("Создание виджетов в NotificationEditorDialog завершено.")
 
+        # --- ИЗМЕНЕНИЕ: Блокируем поля, если это режим редактирования ---
+        if self.notification_id:
+            self.scenario_combo.config(state='disabled')
+            self.client_combo.config(state='disabled')
+
     # --- Методы для управления документами клиента ---
     def _load_notification_files(self):
         self.files_listbox.delete(0, tk.END)
@@ -2765,54 +2770,62 @@ class NotificationEditorDialog(tk.Toplevel):
     def _save(self):
         """Сохраняет данные."""
         logging.debug("Начало сохранения данных из диалога уведомления.")
-        # 1. Сбор данных
-
-        selected_scenario_name = self.scenario_var.get()
-        selected_scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
-        if not selected_scenario:
-            messagebox.showerror("Ошибка", "Не выбран сценарий маркировки.", parent=self)
-            return
-
-        # --- ИЗМЕНЕНИЕ: Логика получения ID клиента в зависимости от источника ---
-        selected_client_name = self.client_var.get()
-        selected_client_obj = next((c for c in self.clients if c.get('name') == selected_client_name), None)
-        if not selected_client_obj:
-            messagebox.showerror("Ошибка", "Не выбран клиент.", parent=self)
-            return
-
-        client_api_id = None
-        client_local_id = None
-        if self.client_source == 'api':
-            client_api_id = selected_client_obj.get('id')
-        else: # 'local'
-            client_local_id = selected_client_obj.get('id')
-        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
-
+        
         selected_product_groups_indices = self.product_groups_listbox.curselection()
         selected_product_groups = [self.product_groups[i] for i in selected_product_groups_indices]
 
-        # 2. Формирование словаря данных
-        data = {
-            'scenario_id': selected_scenario['id'],
-            'scenario_name': selected_scenario['name'],
-            'client_api_id': client_api_id,
-            'client_local_id': client_local_id,
-            'client_name': selected_client_name,
-            'product_groups': [{
-                'id': g['id'], 
-                'group_name': g['group_name'], # Системное имя
-                'name': g['display_name'] # Отображаемое имя
-            } for g in selected_product_groups],
-            'planned_arrival_date': self.arrival_date_var.get(),
-            'vehicle_number': self.vehicle_number_entry.get(),
-            'comments': self.comments_text.get("1.0", tk.END)
-        }
+        # --- НОВАЯ ЛОГИКА: Разделяем сохранение для создания и редактирования ---
+        if self.notification_id:
+            # РЕДАКТИРОВАНИЕ: Собираем только изменяемые поля
+            data = {
+                'product_groups': [{
+                    'id': g['id'], 
+                    'group_name': g['group_name'],
+                    'name': g['display_name']
+                } for g in selected_product_groups],
+                'planned_arrival_date': self.arrival_date_var.get(),
+                'vehicle_number': self.vehicle_number_entry.get(),
+                'comments': self.comments_text.get("1.0", tk.END).strip()
+            }
+        else:
+            # СОЗДАНИЕ: Собираем все поля, как и раньше
+            selected_scenario_name = self.scenario_var.get()
+            selected_scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
+            if not selected_scenario:
+                messagebox.showerror("Ошибка", "Не выбран сценарий маркировки.", parent=self)
+                return
+
+            selected_client_name = self.client_var.get()
+            selected_client_obj = next((c for c in self.clients if c.get('name') == selected_client_name), None)
+            if not selected_client_obj:
+                messagebox.showerror("Ошибка", "Не выбран клиент.", parent=self)
+                return
+
+            client_api_id = selected_client_obj.get('id') if self.client_source == 'api' else None
+            client_local_id = selected_client_obj.get('id') if self.client_source == 'local' else None
+
+            data = {
+                'scenario_id': selected_scenario['id'],
+                'scenario_name': selected_scenario['name'],
+                'client_api_id': client_api_id,
+                'client_local_id': client_local_id,
+                'client_name': selected_client_name,
+                'product_groups': [{
+                    'id': g['id'], 
+                    'group_name': g['group_name'],
+                    'name': g['display_name']
+                } for g in selected_product_groups],
+                'planned_arrival_date': self.arrival_date_var.get(),
+                'vehicle_number': self.vehicle_number_entry.get(),
+                'comments': self.comments_text.get("1.0", tk.END).strip()
+            }
 
         logging.debug(f"Собранные данные для сохранения: {data}")
 
-        # 3. Сохранение данных
+        # Сохранение данных
         try:
             if self.notification_id:
+                logging.info(f"Вызов service.update_notification для ID: {self.notification_id}")
                 self.service.update_notification(self.notification_id, data)
             else:
                 logging.info("Вызов service.create_notification для создания нового уведомления.")
