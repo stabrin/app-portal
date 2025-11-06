@@ -2465,6 +2465,11 @@ class NotificationEditorDialog(tk.Toplevel):
         self.vehicle_number_entry = ttk.Entry(header_frame)
         self.vehicle_number_entry.pack(fill=tk.X, pady=2)
 
+        # 6. Комментарии
+        ttk.Label(header_frame, text="Комментарии:").pack(anchor="w")
+        self.comments_text = tk.Text(header_frame, height=3)
+        self.comments_text.pack(fill=tk.X, pady=2)
+
         # --- НОВЫЙ БЛОК: Документы от клиента (только в режиме редактирования) ---
         if self.notification_id:
             docs_frame = ttk.LabelFrame(top_pane, text="Документы от клиента")
