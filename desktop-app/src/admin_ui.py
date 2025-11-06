@@ -2398,6 +2398,10 @@ class NotificationEditorDialog(tk.Toplevel):
 
     def _create_widgets(self):
         logging.info("Начало создания виджетов в NotificationEditorDialog.")
+        # --- ИЗМЕНЕНИЕ: Используем PanedWindow для разделения на верх и низ ---
+        paned_window = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+
         # Основной фрейм
         main_frame = ttk.Frame(self, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -2407,6 +2411,19 @@ class NotificationEditorDialog(tk.Toplevel):
         self.scenario_var = tk.StringVar()
         self.scenario_combo = ttk.Combobox(main_frame, textvariable=self.scenario_var, state="readonly")
         self.scenario_combo.pack(fill=tk.X, pady=5)
+        # --- ИЗМЕНЕНИЕ: Создаем PanedWindow и добавляем в него верхнюю часть ---
+        top_pane = ttk.Frame(paned_window, padding=10)
+        paned_window.add(top_pane, weight=1)
+
+        # --- Верхняя часть: Основная информация ---
+        header_frame = ttk.LabelFrame(top_pane, text="Основная информация")
+        header_frame.pack(fill=tk.BOTH, expand=True)
+
+        # 1. Сценарий маркировки
+        ttk.Label(header_frame, text="Сценарий маркировки:").pack(anchor="w")
+        self.scenario_var = tk.StringVar()
+        self.scenario_combo = ttk.Combobox(header_frame, textvariable=self.scenario_var, state="readonly")
+        self.scenario_combo.pack(fill=tk.X, pady=2)
         self._load_scenarios()
         # --- ИЗМЕНЕНИЕ: Привязываем событие смены сценария к обновлению списка клиентов ---
         self.scenario_combo.bind("<<ComboboxSelected>>", self._on_scenario_change)
@@ -2415,41 +2432,89 @@ class NotificationEditorDialog(tk.Toplevel):
         ttk.Label(main_frame, text="Клиент:").pack(anchor="w")
         self.client_var = tk.StringVar()
         self.client_combo = ttk.Combobox(main_frame, textvariable=self.client_var, state="readonly")
+        # 2. Клиент
+        client_frame = ttk.Frame(header_frame)
+        client_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(client_frame, text="Клиент:").pack(anchor="w")
+        self.client_var = tk.StringVar()
+        client_inner_frame = ttk.Frame(client_frame)
+        client_inner_frame.pack(fill=tk.X)
+        self.client_combo = ttk.Combobox(client_inner_frame, textvariable=self.client_var, state="readonly")
         self.client_combo.bind("<Button-1>", self._on_client_combo_click) # Добавляем обработчик для клика
-        self.client_combo.pack(fill=tk.X, pady=5)
+        self.client_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         # --- ИЗМЕНЕНИЕ: Первоначальная загрузка клиентов теперь происходит после выбора сценария ---
         # self._load_clients() # Этот вызов будет сделан в _on_scenario_change
 
         # 3. Товарные группы
-        ttk.Label(main_frame, text="Товарные группы:").pack(anchor="w")
-        self.product_groups_listbox = tk.Listbox(main_frame, selectmode=tk.MULTIPLE, height=4)
-        self.product_groups_listbox.pack(fill=tk.X, pady=5)
+        ttk.Label(header_frame, text="Товарные группы:").pack(anchor="w")
+        self.product_groups_listbox = tk.Listbox(header_frame, selectmode=tk.MULTIPLE, height=3)
+        self.product_groups_listbox.pack(fill=tk.X, pady=2)
         self._load_product_groups()
 
         # 4. Предположительная дата прибытия (с календарем)
-        ttk.Label(main_frame, text="Планируемая дата прибытия:").pack(anchor="w")
+        ttk.Label(header_frame, text="Планируемая дата прибытия:").pack(anchor="w")
         self.arrival_date_var = tk.StringVar()
-        date_frame = ttk.Frame(main_frame)
-        date_frame.pack(fill=tk.X, pady=5)
-
+        date_frame = ttk.Frame(header_frame)
+        date_frame.pack(fill=tk.X, pady=2)
         self.arrival_date_entry = ttk.Entry(date_frame, textvariable=self.arrival_date_var)
         self.arrival_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(date_frame, text="...", width=3, command=self._open_calendar_dialog).pack(side=tk.LEFT, padx=(5,0))
-        self.arrival_date_entry.pack(fill=tk.X, pady=5)
 
         # 5. Номер контейнера/автомобиля
-        ttk.Label(main_frame, text="Номер контейнера/автомобиля:").pack(anchor="w")
-        self.vehicle_number_entry = ttk.Entry(main_frame)
-        self.vehicle_number_entry.pack(fill=tk.X, pady=5)
+        ttk.Label(header_frame, text="Номер контейнера/автомобиля:").pack(anchor="w")
+        self.vehicle_number_entry = ttk.Entry(header_frame)
+        self.vehicle_number_entry.pack(fill=tk.X, pady=2)
 
-        # 6. Комментарии
-        ttk.Label(main_frame, text="Комментарии:").pack(anchor="w")
-        self.comments_text = tk.Text(main_frame, height=4)
-        self.comments_text.pack(fill=tk.X, pady=5)
+        # --- НОВЫЙ БЛОК: Документы от клиента (только в режиме редактирования) ---
+        if self.notification_id:
+            docs_frame = ttk.LabelFrame(top_pane, text="Документы от клиента")
+            docs_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+            
+            docs_controls = ttk.Frame(docs_frame)
+            docs_controls.pack(fill=tk.X, pady=2)
+            ttk.Button(docs_controls, text="Загрузить", command=self._upload_client_document).pack(side=tk.LEFT)
+            ttk.Button(docs_controls, text="Скачать", command=self._download_client_document).pack(side=tk.LEFT, padx=5)
+            ttk.Button(docs_controls, text="Удалить", command=self._delete_client_document).pack(side=tk.LEFT)
+
+            self.files_listbox = tk.Listbox(docs_frame, height=3)
+            self.files_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            self._load_notification_files()
+
+        # --- Нижняя часть: Детализация (только в режиме редактирования) ---
+        if self.notification_id:
+            bottom_pane = ttk.Frame(paned_window, padding=10)
+            paned_window.add(bottom_pane, weight=2)
+
+            details_frame = ttk.LabelFrame(bottom_pane, text="Детализация уведомления (ap_supply_notification_details)")
+            details_frame.pack(fill=tk.BOTH, expand=True)
+
+            # Кнопки управления детализацией
+            details_controls = ttk.Frame(details_frame)
+            details_controls.pack(fill=tk.X, pady=5)
+            ttk.Button(details_controls, text="Скачать шаблон", command=self._download_details_template).pack(side=tk.LEFT)
+            ttk.Button(details_controls, text="Загрузить из файла", command=self._upload_details_file).pack(side=tk.LEFT, padx=5)
+            ttk.Button(details_controls, text="Сохранить детализацию", command=self._save_details_from_table).pack(side=tk.RIGHT)
+
+            # Таблица детализации
+            self.details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
+            self.details_tree = ttk.Treeview(details_frame, columns=self.details_cols, show='headings')
+            
+            col_map = {
+                "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "quantity": ("Кол-во", 80, "e"),
+                "aggregation": ("Агрегация", 80, "center"), "production_date": ("Дата произв.", 100, "center"),
+                "shelf_life_months": ("Срок годн. (мес)", 100, "center"), "expiry_date": ("Годен до", 100, "center")
+            }
+            for col, (text, width, anchor) in col_map.items():
+                self.details_tree.heading(col, text=text)
+                self.details_tree.column(col, width=width, anchor=anchor)
+            
+            self.details_tree.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.details_tree.bind("<Double-1>", self._on_details_double_click)
+            self._load_notification_details()
 
         # Кнопки управления
-        buttons_frame = ttk.Frame(main_frame)
-        buttons_frame.pack(fill=tk.X, pady=10)
+        buttons_frame = ttk.Frame(top_pane)
+        buttons_frame.pack(fill=tk.X, pady=(10,0))
         ttk.Button(buttons_frame, text="Сохранить", command=self._save).pack(side=tk.RIGHT, padx=5)
         ttk.Button(buttons_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
 
@@ -2461,6 +2526,122 @@ class NotificationEditorDialog(tk.Toplevel):
         # Это гарантирует, что список клиентов будет корректно загружен при открытии окна.
         self._on_scenario_change()
         logging.info("Создание виджетов в NotificationEditorDialog завершено.")
+
+    # --- Методы для управления документами клиента ---
+    def _load_notification_files(self):
+        self.files_listbox.delete(0, tk.END)
+        self.client_files = self.service.get_notification_files(self.notification_id)
+        for f in self.client_files:
+            self.files_listbox.insert(tk.END, f['filename'])
+
+    def _upload_client_document(self):
+        filepath = filedialog.askopenfilename(parent=self)
+        if not filepath: return
+        try:
+            filename = os.path.basename(filepath)
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            self.service.add_notification_file(self.notification_id, filename, file_data, 'client_document')
+            self._load_notification_files()
+            messagebox.showinfo("Успех", "Файл успешно загружен.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить файл: {e}", parent=self)
+
+    def _download_client_document(self):
+        selected_indices = self.files_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Внимание", "Выберите файл для скачивания.", parent=self)
+            return
+        file_id = self.client_files[selected_indices[0]]['id']
+        # Эта функция должна быть реализована в сервисе
+        file_content, filename = self.service.get_file_content(file_id)
+        save_path = filedialog.asksaveasfilename(initialfile=filename, parent=self)
+        if save_path:
+            with open(save_path, 'wb') as f:
+                f.write(file_content)
+            messagebox.showinfo("Успех", "Файл сохранен.", parent=self)
+
+    def _delete_client_document(self):
+        selected_indices = self.files_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Внимание", "Выберите файл для удаления.", parent=self)
+            return
+        if not messagebox.askyesno("Подтверждение", "Удалить выбранный файл?", parent=self):
+            return
+        file_id = self.client_files[selected_indices[0]]['id']
+        self.service.delete_notification_file(file_id)
+        self._load_notification_files()
+
+    # --- Методы для управления детализацией ---
+    def _load_notification_details(self):
+        for i in self.details_tree.get_children(): self.details_tree.delete(i)
+        details = self.service.get_notification_details(self.notification_id)
+        for item in details:
+            values = [item.get(col, '') for col in self.details_cols]
+            self.details_tree.insert('', 'end', iid=item['id'], values=values)
+
+    def _on_details_double_click(self, event):
+        """Обработчик двойного клика для редактирования ячейки."""
+        region = self.details_tree.identify("region", event.x, event.y)
+        if region != "cell": return
+
+        column_id = self.details_tree.identify_column(event.x)
+        column_index = int(column_id.replace('#', '')) - 1
+        item_id = self.details_tree.focus()
+        
+        x, y, width, height = self.details_tree.bbox(item_id, column_id)
+
+        entry_var = tk.StringVar()
+        entry = ttk.Entry(self.details_tree, textvariable=entry_var)
+        entry.place(x=x, y=y, width=width, height=height)
+        
+        current_value = self.details_tree.item(item_id, "values")[column_index]
+        entry_var.set(current_value)
+        entry.focus_set()
+
+        def on_focus_out(event):
+            new_value = entry_var.get()
+            current_values = list(self.details_tree.item(item_id, "values"))
+            current_values[column_index] = new_value
+            self.details_tree.item(item_id, values=tuple(current_values))
+            entry.destroy()
+
+        entry.bind("<FocusOut>", on_focus_out)
+        entry.bind("<Return>", on_focus_out)
+
+    def _download_details_template(self):
+        df = self.service.get_formalization_template()
+        save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], parent=self)
+        if save_path:
+            df.to_excel(save_path, index=False)
+            messagebox.showinfo("Успех", "Шаблон успешно сохранен.", parent=self)
+
+    def _upload_details_file(self):
+        if not messagebox.askyesno("Подтверждение", "Загрузка из файла полностью заменит текущую детализацию. Продолжить?", parent=self):
+            return
+        filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+        if not filepath: return
+        try:
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            rows_processed = self.service.process_formalized_file(self.notification_id, file_data)
+            self._load_notification_details()
+            messagebox.showinfo("Успех", f"Файл успешно обработан. Загружено {rows_processed} строк.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось обработать файл: {e}", parent=self)
+
+    def _save_details_from_table(self):
+        """Собирает данные из Treeview и отправляет на сохранение."""
+        details_to_save = []
+        for item_id in self.details_tree.get_children():
+            values = self.details_tree.item(item_id, "values")
+            row_data = dict(zip(self.details_cols, values))
+            details_to_save.append(row_data)
+        try:
+            self.service.save_notification_details(details_to_save)
+            messagebox.showinfo("Успех", "Изменения в детализации успешно сохранены.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить детализацию: {e}", parent=self)
 
     def _on_client_combo_click(self, event):
         """Обработчик клика по Combobox клиента. Добавляет кнопку "Добавить нового"."""
@@ -2568,10 +2749,6 @@ class NotificationEditorDialog(tk.Toplevel):
         self.comments_text.insert(tk.END, self.initial_data.get('comments', ''))
         
         # --- ИСПРАВЛЕНИЕ: Устанавливаем клиента при редактировании ---
-        initial_client_name = self.initial_data.get('client_name')
-        if initial_client_name:
-            self.client_var.set(initial_client_name)
-
         # Выбор товарных групп
         initial_groups = self.initial_data.get('product_groups', [])
         if initial_groups:
@@ -2579,6 +2756,11 @@ class NotificationEditorDialog(tk.Toplevel):
                 # Сравниваем по 'group_name', так как это системное имя
                 if any(g.get('group_name') == group.get('group_name') for g in initial_groups):
                     self.product_groups_listbox.select_set(i)
+        
+        # --- ИСПРАВЛЕНИЕ: Устанавливаем клиента при редактировании ---
+        initial_client_name = self.initial_data.get('client_name')
+        if initial_client_name:
+            self.client_var.set(initial_client_name)
 
     def _save(self):
         """Сохраняет данные."""
