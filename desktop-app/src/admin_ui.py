@@ -2647,10 +2647,18 @@ class NotificationEditorDialog(tk.Toplevel):
             # --- ИСПРАВЛЕНИЕ: Преобразуем данные в кортеж (tuple) для execute_values ---
             # execute_values ожидает список кортежей, а не словарей.
             raw_values = self.details_tree.item(item_id, "values")
-            # Преобразуем пустые строки в None для корректной записи в БД
-            processed_values = [val if val != '' else None for val in raw_values]
-            # Убедимся, что ID (первый элемент) является числом
-            processed_values[0] = int(processed_values[0])
+            
+            # --- НОВОЕ ИСПРАВЛЕНИЕ: Приводим типы данных к тем, что ожидает БД ---
+            # id, gtin, quantity, aggregation, production_date, shelf_life_months, expiry_date
+            processed_values = [
+                int(raw_values[0]) if raw_values[0] else None,  # id (int)
+                raw_values[1] if raw_values[1] else None,       # gtin (str)
+                int(raw_values[2]) if raw_values[2] else None,  # quantity (int)
+                int(raw_values[3]) if raw_values[3] else None,  # aggregation (int)
+                raw_values[4] if raw_values[4] else None,       # production_date (date as str)
+                int(raw_values[5]) if raw_values[5] else None,  # shelf_life_months (int)
+                raw_values[6] if raw_values[6] else None        # expiry_date (date as str)
+            ]
             details_to_save.append(tuple(processed_values))
         try:
             logging.debug(f"Данные для сохранения детализации: {details_to_save}")
