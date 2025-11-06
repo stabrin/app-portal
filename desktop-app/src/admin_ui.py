@@ -1187,13 +1187,10 @@ class AdminWindow(tk.Tk):
         
         # Заполняем фрейм с верхними заголовками
         # --- ИСПРАВЛЕНИЕ: Используем Frame с фиксированной шириной для точного выравнивания ---
-        ttk.Frame(summary_header_frame, width=200).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
+        ttk.Label(summary_header_frame, text="", width=28).pack(side=tk.LEFT) # Пустышка для колонки "Клиент"
         for day_label in day_labels:
-            # Ширина каждого блока = 3 * 80px = 240px
-            date_header_block = ttk.Frame(summary_header_frame, width=240)
-            date_header_block.pack(side=tk.LEFT)
-            date_header_block.pack_propagate(False) # Запрещаем дочерним элементам менять размер фрейма
-            ttk.Label(date_header_block, text=day_label, anchor='center', borderwidth=1, relief="solid").pack(fill=tk.BOTH, expand=True)
+            # --- ИСПРАВЛЕНИЕ: Возвращаем более простую и надежную структуру ---
+            ttk.Label(summary_header_frame, text=day_label, width=34, anchor='center', borderwidth=1, relief="solid").pack(side=tk.LEFT)
 
         # Формируем ключи и заголовки для таблицы
         for i in range(4):
