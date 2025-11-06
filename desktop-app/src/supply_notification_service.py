@@ -223,9 +223,9 @@ class SupplyNotificationService:
                         gtin = data.gtin,
                         quantity = data.quantity,
                         aggregation = data.aggregation,
-                        production_date = data.production_date,
+                        production_date = data.production_date::date,
                         shelf_life_months = data.shelf_life_months,
-                        expiry_date = data.expiry_date
+                        expiry_date = data.expiry_date::date
                     FROM (VALUES %s) AS data(id, gtin, quantity, aggregation, production_date, shelf_life_months, expiry_date)
                     WHERE ap_supply_notification_details.id = data.id;
                 """
