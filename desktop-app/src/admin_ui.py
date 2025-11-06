@@ -1184,18 +1184,22 @@ class AdminWindow(tk.Tk):
         today = datetime.now().date()
         day_labels = [(today + timedelta(days=i)).strftime('%d-%m-%Y') for i in range(4)]
         sub_headers = ['Ув', 'Поз', 'ДМ']
-
+        
         # Заполняем фрейм с верхними заголовками
-        # --- НОВАЯ ЛОГИКА: Возвращаемся к pack, но с фиксированными размерами для стабильности ---
-        ttk.Frame(summary_header_frame, width=200).pack(side=tk.LEFT) # Отступ, равный ширине колонки "Клиент"
+        # --- НОВАЯ ЛОГИКА: Возвращаемся к grid, но с minsize вместо weight для более точного контроля ---
+        summary_header_frame.columnconfigure(0, weight=1) # Левая распорка
+        summary_header_frame.columnconfigure(1, minsize=200) # Отступ для колонки "Клиент"
+        for i in range(4):
+            summary_header_frame.columnconfigure(i + 2, minsize=240) # Блок для даты (3*80px)
+        summary_header_frame.columnconfigure(6, weight=1) # Правая распорка
 
         # Блоки для дат
-        for day_label in day_labels:
+        for i, day_label in enumerate(day_labels):
             header_width = 240 # 3 колонки * 80px
             header_height = 25 # Явно задаем высоту
             logging.debug(f"Создание блока заголовка для '{day_label}' с размерами {header_width}x{header_height}px")
             date_header_block = ttk.Frame(summary_header_frame, width=header_width, height=header_height)
-            date_header_block.pack(side=tk.LEFT)
+            date_header_block.grid(row=0, column=i + 2, sticky='nsew')
             date_header_block.pack_propagate(False) # Запрещаем дочерним элементам менять размер родителя
             ttk.Label(date_header_block, text=day_label, anchor='center', borderwidth=1, relief="solid").pack(fill=tk.BOTH, expand=True)
 
