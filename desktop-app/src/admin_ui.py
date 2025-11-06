@@ -1343,9 +1343,9 @@ class AdminWindow(tk.Tk):
                 'import': service.process_marking_scenarios_import
             },
             columns={
-                'id': ('ID', 10, 'center'),
-                'name': ('Название сценария', 200, 'w'),
-                'scenario_data': ('Параметры (JSON)', 1000, 'w')
+                'id': ('ID', 50, 'center'),
+                'name': ('Название сценария', 150, 'w'),
+                'scenario_data': ('Параметры (JSON)', 300, 'w')
             },
             pk_field='id',
             editor_class=ScenarioEditorDialog # Используем кастомный редактор
