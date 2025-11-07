@@ -128,36 +128,34 @@ class StandaloneLoginWindow(tk.Tk):
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
 
-                    # --- НОВЫЙ БЛОК: Получаем API токен ---
-                    try:
-                        logging.info("Attempting to get API token...")
-                        api_base_url = os.getenv('API_BASE_URL')
-                        if api_base_url is None:
-                            logging.error("API_BASE_URL is not set in the environment variables.")
-                            messagebox.showwarning("API Warning", "API_BASE_URL не установлена в переменных окружения.", parent=self)
-                            raise ValueError("API_BASE_URL is not set.")
-                        token_url = f"{api_base_url.rstrip('/')}/user/token" 
-                        api_credentials = {
-                            "email": os.getenv('API_EMAIL'),
-                            "password": os.getenv('API_PASSWORD')
-                        }
-                        response = requests.get(token_url, json=api_credentials, timeout=10)
-                        response.raise_for_status()
-
-                        tokens = response.json()
-                        user_info['api_access_token'] = tokens.get('access')
-                        user_info['api_refresh_token'] = tokens.get('refresh')
-                        logging.info("API token successfully received and stored in user_info.")
-
-                    except requests.exceptions.RequestException as e:
-                        # Не прерываем вход, если API недоступно, но выводим ошибку.
-                        # Индикатор в главном окне будет красным.
-                        logging.error(f"API authentication failed: {e}")
-                        messagebox.showwarning("API Warning", f"Не удалось получить токен API: {e}", parent=self)
-
                     # Если это администратор, добавляем всю информацию о его клиенте
                     # --- ИСПРАВЛЕНИЕ: Читаем SSL-сертификат из активного соединения ---
                     if user_role == 'администратор':
+                        # --- ПЕРЕМЕЩЕННЫЙ БЛОК: Получаем API токен только для администратора ---
+                        try:
+                            logging.info("Attempting to get API token for administrator...")
+                            api_base_url = os.getenv('API_BASE_URL')
+                            if api_base_url is None:
+                                logging.error("API_BASE_URL is not set in the environment variables.")
+                                messagebox.showwarning("API Warning", "API_BASE_URL не установлена в переменных окружения.", parent=self)
+                                raise ValueError("API_BASE_URL is not set.")
+                            token_url = f"{api_base_url.rstrip('/')}/user/token"
+                            api_credentials = {
+                                "email": os.getenv('API_EMAIL'),
+                                "password": os.getenv('API_PASSWORD')
+                            }
+                            response = requests.get(token_url, json=api_credentials, timeout=10)
+                            response.raise_for_status()
+
+                            tokens = response.json()
+                            user_info['api_access_token'] = tokens.get('access')
+                            user_info['api_refresh_token'] = tokens.get('refresh')
+                            logging.info("API token successfully received and stored in user_info.")
+
+                        except requests.exceptions.RequestException as e:
+                            logging.error(f"API authentication failed: {e}")
+                            messagebox.showwarning("API Warning", f"Не удалось получить токен API: {e}", parent=self)
+
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
