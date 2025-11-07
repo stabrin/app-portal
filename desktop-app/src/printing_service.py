@@ -91,6 +91,7 @@ class PrintingService:
             raise ValueError("Неполные параметры подключения к базе данных.")
 
         temp_cert_file = None
+        conn = None # Инициализируем conn
         try:
             if db_config.get('db_ssl_cert'):
                 logging.debug("Создание временного файла сертификата SSL.")
@@ -99,11 +100,15 @@ class PrintingService:
                     temp_cert_file = fp.name
                 conn_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
 
-            conn = psycopg2.connect(**conn_params)
+            # ИСПРАВЛЕНИЕ: Добавляем .strip() к хосту, чтобы убрать случайные пробелы/переносы
+            if conn_params.get('host'):
+                conn_params['host'] = conn_params['host'].strip()
+
+            conn = psycopg2.connect(**conn_params) # type: ignore
             logging.info(f"Успешное подключение к БД: {conn_params['dbname']}")
             return conn
         except Exception as e:
-            logging.error(f"Ошибка подключения к БД: {e}")
+            logging.error(f"Ошибка подключения к БД: {e}", exc_info=True)
             raise
         finally:
             if temp_cert_file and os.path.exists(temp_cert_file):
