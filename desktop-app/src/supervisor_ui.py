@@ -8,6 +8,7 @@ import os
 import logging
 import traceback
 import psycopg2
+import tempfile
 from psycopg2 import sql
 import bcrypt
  
