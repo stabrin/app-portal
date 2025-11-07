@@ -24,14 +24,17 @@ def run_db_setup():
         desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         # Формируем путь к скрипту
         script_path = os.path.join(desktop_app_root, 'scripts', 'setup_database.py')
-        # --- ИСПРАВЛЕНИЕ: Явно указываем путь к Python внутри виртуального окружения ---
-        # Это гарантирует, что скрипт будет запущен с правильными библиотеками,
-        # независимо от того, как было запущено основное GUI-приложение.
-        # --- ИСПРАВЛЕНИЕ 2: Путь к Python зависит от ОС ---
-        if sys.platform == "win32":
-            python_executable = os.path.join(desktop_app_root, '.venv', 'Scripts', 'python.exe')
+
+        # --- УНИВЕРСАЛЬНОЕ РЕШЕНИЕ: Определяем, запущено ли приложение как скомпилированный exe ---
+        if getattr(sys, 'frozen', False):
+            # Мы в скомпилированном приложении. Используем основной исполняемый файл.
+            python_executable = sys.executable
         else:
-            python_executable = os.path.join(desktop_app_root, '.venv', 'bin', 'python')
+            # Мы в режиме разработки. Используем python из виртуального окружения.
+            if sys.platform == "win32":
+                python_executable = os.path.join(desktop_app_root, '.venv', 'Scripts', 'python.exe')
+            else:
+                python_executable = os.path.join(desktop_app_root, '.venv', 'bin', 'python')
 
         if not os.path.exists(python_executable) or not os.path.exists(script_path):
             tk.messagebox.showerror("Ошибка", f"Не найден исполняемый файл Python или скрипт:\n{python_executable}\n{script_path}")
