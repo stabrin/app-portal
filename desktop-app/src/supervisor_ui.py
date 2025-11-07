@@ -429,13 +429,14 @@ def open_clients_management_window(parent_widget):
                         cur.execute("SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password FROM clients WHERE id = %s", (client_id,))
                         client_data = cur.fetchone()
                 if client_data:
+                    # ИСПРАВЛЕНИЕ: Используем числовые индексы для доступа к данным из кортежа client_data
+                    db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "API Base URL": 7, "API Email": 8, "API Password": 9}
                     for field in fields:
-                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "API Base URL": 7, "API Email": 8, "API Password": 9}
                         if field in db_field_map:
                             idx = db_field_map[field]
                             value = client_data[idx] if client_data[idx] is not None else ""
                             entries[field].insert(0, str(value))
-                    ssl_cert_value = client_data[6] if client_data[6] is not None else ""
+                    ssl_cert_value = client_data[6] if client_data[6] is not None else "" # Индекс 6 для db_ssl_cert
                     ssl_cert_text.insert('1.0', ssl_cert_value)
                 load_users_for_editor(client_id)
             except Exception as e:
