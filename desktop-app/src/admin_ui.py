@@ -1542,17 +1542,30 @@ class AdminWindow(tk.Tk):
                 ],
                 parent=self
             )
-            if not filepath: return
+            if not filepath:
+                logger.debug(f"Импорт для '{title}' отменен: файл не выбран.")
+                return
+            
+            logger.info(f"Начало импорта для '{title}' из файла: {filepath}")
             try:
                 # --- ИСПРАВЛЕНИЕ: Явно указываем, что ключевые поля (gtin, id) должны быть текстом ---
                 # Это предотвращает потерю ведущих нулей в GTIN.
                 # Остальные поля пусть pandas определяет автоматически.
                 df = pd.read_excel(filepath, dtype={pk_field: str})
                 df = df.where(pd.notna(df), None) # Заменяем NaN на None
-                service_methods['import'](df.to_dict('records'))
+                
+                logger.debug(f"Прочитано {len(df)} строк из Excel файла.")
+                
+                data_to_import = df.to_dict('records')
+                logger.debug(f"Данные для импорта (первые 2 записи): {data_to_import[:2]}")
+
+                service_methods['import'](data_to_import)
+                
+                logger.info(f"Импорт для '{title}' успешно завершен. Обновление таблицы...")
                 refresh_data()
                 messagebox.showinfo("Успех", "Данные успешно импортированы.", parent=self)
             except Exception as e:
+                logger.error(f"Ошибка при импорте из Excel для '{title}': {e}", exc_info=True)
                 messagebox.showerror("Ошибка", f"Ошибка импорта: {e}", parent=self)
 
         ttk.Button(controls, text="Добавить", command=lambda: open_editor(editor_class=editor_class)).pack(side=tk.LEFT, padx=2)
