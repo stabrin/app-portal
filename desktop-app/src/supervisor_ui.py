@@ -440,7 +440,7 @@ def open_clients_management_window(parent_widget):
                 load_users_for_editor(client_id)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить данные клиента: {e}", parent=editor_window)
-                editor_window.destroy()
+                return editor_window.destroy()
         else:
             for btn in [btn_add_user, btn_edit_user, btn_delete_user, btn_toggle_user]:
                 btn.config(state="disabled")
