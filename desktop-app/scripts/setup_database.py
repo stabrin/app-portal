@@ -53,28 +53,31 @@ def initialize_main_database():
         if not MAIN_DB_NAME:
             raise ValueError("Переменная DB_NAME не задана в .env файле.")
 
-        # --- Этап 1: Создание базы данных ---
-        logger.info(f"Подключаюсь к системной базе 'postgres' для создания '{MAIN_DB_NAME}'...")
+        # --- Этап 1: Проверка существования базы данных ---
+        logger.info(f"Подключаюсь к системной базе 'postgres' для проверки существования '{MAIN_DB_NAME}'...")
         
-        conn_system = psycopg2.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname='postgres',
-            sslmode='verify-full', sslrootcert=cert_path
-        )
-        conn_system.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-        
-        with conn_system.cursor() as cur:
-            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
-            if cur.fetchone():
-                logger.info(f"База данных '{MAIN_DB_NAME}' уже существует. Пропускаю создание.")
-            else:
-                logger.info(f"Создаю базу данных '{MAIN_DB_NAME}'...")
-                cur.execute(f"CREATE DATABASE {MAIN_DB_NAME}")
-                cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
-                if cur.fetchone():
-                    logger.info(f"ПРОВЕРКА УСПЕШНА: База данных '{MAIN_DB_NAME}' теперь существует.")
-                else:
-                    raise Exception(f"КРИТИЧЕСКАЯ ОШИБКА: Команда CREATE DATABASE для '{MAIN_DB_NAME}' выполнилась, но база данных не появилась.")
-        conn_system.close()
+        try:
+            with psycopg2.connect(
+                host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname='postgres',
+                sslmode='verify-full', sslrootcert=cert_path
+            ) as conn_system:
+                conn_system.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
+                with conn_system.cursor() as cur:
+                    cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
+                    if not cur.fetchone():
+                        logger.error(f"База данных '{MAIN_DB_NAME}' не найдена.")
+                        error_message = (
+                            f"База данных '{MAIN_DB_NAME}' не найдена на сервере {DB_HOST}.\n\n"
+                            "Пожалуйста, создайте ее и соответствующего пользователя вручную.\n\n"
+                            "Примерные SQL-команды:\n"
+                            f"CREATE DATABASE {MAIN_DB_NAME};\n"
+                            f"CREATE USER {DB_USER} WITH PASSWORD '{DB_PASSWORD}';\n"
+                            f"GRANT ALL PRIVILEGES ON DATABASE {MAIN_DB_NAME} TO {DB_USER};"
+                        )
+                        return False, error_message
+        except psycopg2.OperationalError as e:
+            logger.error(f"Ошибка подключения к серверу PostgreSQL: {e}")
+            return False, f"Не удалось подключиться к серверу PostgreSQL для проверки базы данных. Убедитесь, что сервер доступен и учетные данные верны.\n\nОшибка: {e}"
 
         # --- Этап 2: Создание таблиц в новой базе данных ---
         logger.info(f"Подключаюсь к '{MAIN_DB_NAME}' для создания таблиц...")
@@ -82,8 +85,7 @@ def initialize_main_database():
         with psycopg2.connect(
             host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=MAIN_DB_NAME,
             sslmode='verify-full', sslrootcert=cert_path
-        )
-            as conn_main_db:
+        ) as conn_main_db:
             conn_main_db.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             with conn_main_db.cursor() as cur:
                 # Создаем перечисляемый тип для ролей пользователей
