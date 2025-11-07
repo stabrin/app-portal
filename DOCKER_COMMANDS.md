@@ -66,3 +66,6 @@ docker-compose ps
 # Открыть интерактивную оболочку (shell) внутри сервиса с именем 'app'
 docker-compose exec app /bin/sh
 ```
+
+
+git sparse-checkout add scripts
