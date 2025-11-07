@@ -288,6 +288,16 @@ def update_client_db_schema(conn):
         """),
         sql.SQL("COMMENT ON TABLE ap_images IS 'Хранилище изображений (логотипов) для макетов этикеток';"),
 
+        # --- НОВАЯ ТАБЛИЦА: Настройки подключения к API ---
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_settings (
+                setting_key VARCHAR(100) PRIMARY KEY,
+                setting_value TEXT,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE ap_settings IS 'Таблица для хранения настроек, например, для API';"),
+
         # --- ИЗМЕНЕНО: Полное пересоздание таблиц уведомлений о поставке ---
         # Удаляем старые таблицы, если они существуют, для чистого пересоздания
         sql.SQL("DROP TABLE IF EXISTS ap_supply_notification_details CASCADE;"),

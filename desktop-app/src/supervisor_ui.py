@@ -135,7 +135,7 @@ def open_clients_management_window(parent_widget):
         client_data_frame.pack(fill=tk.X, pady=5)
 
         entries = {}
-        fields = ["Имя", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль"]
+        fields = ["Имя", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль", "API Base URL", "API Email", "API Password"]
 
         for i, field in enumerate(fields):
             ttk.Label(client_data_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
@@ -407,11 +407,11 @@ def open_clients_management_window(parent_widget):
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
+                        cur.execute("SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password FROM clients WHERE id = %s", (client_id,))
                         client_data = cur.fetchone()
                 if client_data:
                     for field in fields:
-                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5}
+                        db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "API Base URL": 7, "API Email": 8, "API Password": 9}
                         if field in db_field_map:
                             idx = db_field_map[field]
                             value = client_data[idx] if client_data[idx] is not None else ""
@@ -435,17 +435,20 @@ def open_clients_management_window(parent_widget):
                 'db_name': entries['DB Имя'].get(),
                 'db_user': entries['DB Пользователь'].get(),
                 'db_password': entries['DB Пароль'].get(),
-                'db_ssl_cert': ssl_cert_text.get('1.0', 'end-1c')
+                'db_ssl_cert': ssl_cert_text.get('1.0', 'end-1c'),
+                'api_base_url': entries['API Base URL'].get(),
+                'api_email': entries['API Email'].get(),
+                'api_password': entries['API Password'].get()
             }
 
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
                         if client_id:
-                            query = sql.SQL("UPDATE clients SET name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, db_ssl_cert=%s WHERE id=%s")
+                            query = sql.SQL("UPDATE clients SET name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, db_ssl_cert=%s, api_base_url=%s, api_email=%s, api_password=%s WHERE id=%s")
                             cur.execute(query, (*data_to_save.values(), client_id))
                         else:
-                            query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id")
+                            query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
                             cur.execute(query, tuple(data_to_save.values()))
                             new_client_id = cur.fetchone()[0]
                             client_id = new_client_id
@@ -464,6 +467,38 @@ def open_clients_management_window(parent_widget):
                             )
                     conn.commit()
                 
+                # --- НОВЫЙ БЛОК: Синхронизация настроек с базой клиента ---
+                logging.info("Синхронизация настроек API с базой данных клиента...")
+                client_conn = None
+                temp_cert_file = None
+                try:
+                    ssl_params = {}
+                    if data_to_save['db_ssl_cert']:
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                            fp.write(data_to_save['db_ssl_cert'])
+                            temp_cert_file = fp.name
+                        ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
+
+                    client_conn = psycopg2.connect(host=data_to_save['db_host'], port=data_to_save['db_port'], dbname=data_to_save['db_name'], user=data_to_save['db_user'], password=data_to_save['db_password'], **ssl_params)
+                    with client_conn.cursor() as cur:
+                        settings_to_sync = [
+                            ('API_BASE_URL', data_to_save['api_base_url']),
+                            ('API_EMAIL', data_to_save['api_email']),
+                            ('API_PASSWORD', data_to_save['api_password'])
+                        ]
+                        from psycopg2.extras import execute_values
+                        upsert_query = "INSERT INTO ap_settings (setting_key, setting_value) VALUES %s ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW();"
+                        execute_values(cur, upsert_query, settings_to_sync)
+                    client_conn.commit()
+                    logging.info("Настройки API успешно синхронизированы с БД клиента.")
+                except Exception as sync_err:
+                    logging.error(f"Ошибка синхронизации настроек с БД клиента: {sync_err}")
+                    messagebox.showerror("Ошибка синхронизации", f"Не удалось обновить настройки в базе клиента: {sync_err}", parent=editor_window)
+                finally:
+                    if client_conn: client_conn.close()
+                    if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
+
                 load_clients()
                 btn_init_db.config(state="normal")
                 if not editor_window.title().startswith("Редактор"):

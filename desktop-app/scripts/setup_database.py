@@ -122,6 +122,9 @@ def main():
                 logging.info("Таблица 'clients' создана или уже существует.")
                 # Добавляем колонку, если таблица уже была создана без нее (для обратной совместимости)
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS db_ssl_cert TEXT;")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(255);")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_email VARCHAR(255);")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_password VARCHAR(255);")
                 
                 logging.info("Создаю таблицу 'users' со связью с 'clients'...")
                 cur.execute("""
