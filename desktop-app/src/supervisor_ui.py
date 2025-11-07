@@ -13,6 +13,7 @@ import bcrypt
  
 # --- ИСПРАВЛЕНИЕ: Используем абсолютный импорт, так как 'scripts' - это пакет верхнего уровня ---
 from .db_connector import get_main_db_connection
+from .utils import resource_path
 from scripts.setup_client_database import update_client_db_schema
 
 def run_db_setup():
@@ -22,11 +23,12 @@ def run_db_setup():
     try:
         logging.debug("Запуск функции run_db_setup для инициализации главной БД.")
         # Определяем путь к корневой папке приложения
-        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        logging.debug(f"Корень приложения: {desktop_app_root}")
-        # Формируем путь к скрипту
-        script_path = os.path.join(desktop_app_root, 'scripts', 'setup_database.py')
+        # --- ИСПРАВЛЕНИЕ: Используем resource_path для надежного определения пути к скрипту ---
+        # Это будет работать и в режиме разработки, и в скомпилированном приложении.
+        script_path = resource_path(os.path.join('scripts', 'setup_database.py'))
         logging.debug(f"Путь к скрипту: {script_path}")
+        # Корень приложения теперь определяется относительно скрипта
+        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(script_path), '..'))
 
         # --- УНИВЕРСАЛЬНОЕ РЕШЕНИЕ: Определяем, запущено ли приложение как скомпилированный exe ---
         is_frozen = getattr(sys, 'frozen', False)
