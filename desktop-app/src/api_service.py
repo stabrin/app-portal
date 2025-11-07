@@ -16,9 +16,12 @@ class ApiService:
         :param user_info: Словарь с данными пользователя, включая 'api_access_token'.
         """
         self.user_info = user_info
-        self.api_base_url = os.getenv('API_BASE_URL')
+        # --- ИЗМЕНЕНИЕ: Получаем URL из конфигурации клиента, а не из .env ---
+        api_config = self.user_info.get('client_api_config', {})
+        self.api_base_url = api_config.get('api_base_url')
+
         if not self.api_base_url:
-            raise ValueError("Переменная окружения API_BASE_URL не установлена.")
+            raise ValueError("URL для подключения к API не найден в конфигурации пользователя.")
 
     def _get_auth_headers(self):
         """Создает заголовок авторизации."""

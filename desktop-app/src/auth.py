@@ -113,7 +113,8 @@ class StandaloneLoginWindow(tk.Tk):
                     # и все данные для подключения к ней.
                     query = """
                         SELECT u.name, u.password_hash, u.role, u.client_id,
-                               c.db_name, c.db_host, c.db_port, c.db_user, c.db_password, c.db_ssl_cert
+                               c.db_name, c.db_host, c.db_port, c.db_user, c.db_password, c.db_ssl_cert,
+                               c.api_base_url, c.api_email, c.api_password
                         FROM users u
                         LEFT JOIN clients c ON u.client_id = c.id
                         WHERE u.login = %s AND (u.role = 'супервизор' OR u.role = 'администратор')
@@ -122,8 +123,9 @@ class StandaloneLoginWindow(tk.Tk):
                     user_data = cur.fetchone()
 
             if user_data:
-                (user_name, hashed_password, user_role, client_id,
-                 db_name, db_host, db_port, db_user, db_password, db_ssl_cert) = user_data
+                (user_name, hashed_password, user_role, client_id, db_name, db_host, 
+                 db_port, db_user, db_password, db_ssl_cert, api_base_url, 
+                 api_email, api_password) = user_data
 
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
@@ -133,16 +135,15 @@ class StandaloneLoginWindow(tk.Tk):
                     if user_role == 'администратор':
                         # --- ПЕРЕМЕЩЕННЫЙ БЛОК: Получаем API токен только для администратора ---
                         try:
-                            logging.info("Attempting to get API token for administrator...")
-                            api_base_url = os.getenv('API_BASE_URL')
+                            logging.info("Попытка получить токен API для администратора...")
                             if api_base_url is None:
-                                logging.error("API_BASE_URL is not set in the environment variables.")
-                                messagebox.showwarning("API Warning", "API_BASE_URL не установлена в переменных окружения.", parent=self)
-                                raise ValueError("API_BASE_URL is not set.")
+                                logging.error("API_BASE_URL не задан для этого клиента в базе данных.")
+                                messagebox.showwarning("Предупреждение API", "URL для подключения к API не настроен для этого клиента.", parent=self)
+                                raise ValueError("API_BASE_URL не настроен.")
                             token_url = f"{api_base_url.rstrip('/')}/user/token"
                             api_credentials = {
-                                "email": os.getenv('API_EMAIL'),
-                                "password": os.getenv('API_PASSWORD')
+                                "email": api_email,
+                                "password": api_password
                             }
                             response = requests.get(token_url, json=api_credentials, timeout=10)
                             response.raise_for_status()
@@ -150,16 +151,20 @@ class StandaloneLoginWindow(tk.Tk):
                             tokens = response.json()
                             user_info['api_access_token'] = tokens.get('access')
                             user_info['api_refresh_token'] = tokens.get('refresh')
-                            logging.info("API token successfully received and stored in user_info.")
+                            logging.info("Токен API успешно получен и сохранен в user_info.")
 
                         except requests.exceptions.RequestException as e:
-                            logging.error(f"API authentication failed: {e}")
-                            messagebox.showwarning("API Warning", f"Не удалось получить токен API: {e}", parent=self)
+                            logging.error(f"Аутентификация в API провалена: {e}")
+                            messagebox.showwarning("Предупреждение API", f"Не удалось получить токен API: {e}", parent=self)
 
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
                             "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert
+                        }
+                        # --- НОВЫЙ БЛОК: Сохраняем конфигурацию API в user_info ---
+                        user_info['client_api_config'] = {
+                            "api_base_url": api_base_url, "api_email": api_email, "api_password": api_password
                         }
                     self.on_complete_callback(user_info) # Сначала вызываем callback
                     self.destroy() # Затем уничтожаем окно
