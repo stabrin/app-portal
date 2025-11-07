@@ -96,19 +96,15 @@ class PrintingService:
             if db_config.get('db_ssl_cert'):
                 logging.debug("Создание временного файла сертификата SSL.")
                 with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
-                    fp.write(db_config['db_ssl_cert'])
+                    fp.write(db_config['db_ssl_cert'].strip()) # ИСПРАВЛЕНИЕ: Убираем лишние пробелы/переносы
                     temp_cert_file = fp.name
                 conn_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
 
-            # ИСПРАВЛЕНИЕ: Добавляем .strip() к хосту, чтобы убрать случайные пробелы/переносы
-            if conn_params.get('host'):
-                conn_params['host'] = conn_params['host'].strip()
-
-            conn = psycopg2.connect(**conn_params) # type: ignore
+            conn = psycopg2.connect(**conn_params)
             logging.info(f"Успешное подключение к БД: {conn_params['dbname']}")
             return conn
         except Exception as e:
-            logging.error(f"Ошибка подключения к БД: {e}", exc_info=True)
+            logging.error(f"Ошибка подключения к БД: {e}")
             raise
         finally:
             if temp_cert_file and os.path.exists(temp_cert_file):
