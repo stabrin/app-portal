@@ -20,13 +20,18 @@ def run_db_setup():
     Запускает скрипт setup_database.py в новом окне терминала.
     """
     try:
+        logging.debug("Запуск функции run_db_setup для инициализации главной БД.")
         # Определяем путь к корневой папке приложения
         desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        logging.debug(f"Корень приложения: {desktop_app_root}")
         # Формируем путь к скрипту
         script_path = os.path.join(desktop_app_root, 'scripts', 'setup_database.py')
+        logging.debug(f"Путь к скрипту: {script_path}")
 
         # --- УНИВЕРСАЛЬНОЕ РЕШЕНИЕ: Определяем, запущено ли приложение как скомпилированный exe ---
-        if getattr(sys, 'frozen', False):
+        is_frozen = getattr(sys, 'frozen', False)
+        logging.debug(f"Приложение запущено как скомпилированный файл (frozen): {is_frozen}")
+        if is_frozen:
             # Мы в скомпилированном приложении. Используем основной исполняемый файл.
             python_executable = sys.executable
         else:
@@ -35,12 +40,17 @@ def run_db_setup():
                 python_executable = os.path.join(desktop_app_root, '.venv', 'Scripts', 'python.exe')
             else:
                 python_executable = os.path.join(desktop_app_root, '.venv', 'bin', 'python')
+        
+        logging.debug(f"Выбранный исполняемый файл Python: {python_executable}")
 
         if not os.path.exists(python_executable) or not os.path.exists(script_path):
-            tk.messagebox.showerror("Ошибка", f"Не найден исполняемый файл Python или скрипт:\n{python_executable}\n{script_path}")
+            error_msg = f"Не найден исполняемый файл Python или скрипт:\nPython: {python_executable}\nСкрипт: {script_path}"
+            logging.error(error_msg)
+            tk.messagebox.showerror("Ошибка", error_msg)
             return
 
         command = [python_executable, script_path]
+        logging.info(f"Запуск команды для обновления БД: {command}")
 
         if sys.platform == "win32":
             subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
