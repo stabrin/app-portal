@@ -467,18 +467,21 @@ def open_clients_management_window(parent_widget):
                 try:
                     ssl_params = {}
                     if data_to_save['db_ssl_cert']:
-                        import tempfile
+                        # --- ИСПРАВЛЕНИЕ: Используем with для автоматического создания и удаления файла ---
+                        # Это более безопасный и чистый подход.
                         with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
                             fp.write(data_to_save['db_ssl_cert'])
-                            temp_cert_file = fp.name
+                            temp_cert_file = fp.name # Запоминаем имя файла
                         ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
 
                     client_conn = psycopg2.connect(host=data_to_save['db_host'], port=data_to_save['db_port'], dbname=data_to_save['db_name'], user=data_to_save['db_user'], password=data_to_save['db_password'], **ssl_params)
                     with client_conn.cursor() as cur:
+                        # --- ИСПРАВЛЕНИЕ: Сохраняем все необходимые ключи, а не только последние три ---
                         settings_to_sync = [
-                            ('API_BASE_URL', data_to_save['api_base_url']),
-                            ('API_EMAIL', data_to_save['api_email']),
-                            ('API_PASSWORD', data_to_save['api_password'])
+                            ('DB_HOST', data_to_save['db_host']), ('DB_PORT', str(data_to_save['db_port'])),
+                            ('DB_NAME', data_to_save['db_name']), ('DB_USER', data_to_save['db_user']),
+                            ('DB_PASSWORD', data_to_save['db_password']), ('API_BASE_URL', data_to_save['api_base_url']),
+                            ('API_EMAIL', data_to_save['api_email']), ('API_PASSWORD', data_to_save['api_password'])
                         ]
                         from psycopg2.extras import execute_values
                         upsert_query = "INSERT INTO ap_settings (setting_key, setting_value) VALUES %s ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW();"
