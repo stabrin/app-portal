@@ -14,51 +14,24 @@ import bcrypt
 # --- ИСПРАВЛЕНИЕ: Используем абсолютный импорт, так как 'scripts' - это пакет верхнего уровня ---
 from .db_connector import get_main_db_connection
 from .utils import resource_path
+# --- ИЗМЕНЕНИЕ: Импортируем функции напрямую ---
 from scripts.setup_client_database import update_client_db_schema
+from scripts.setup_database import initialize_main_database
 
 def run_db_setup():
     """
-    Запускает скрипт setup_database.py в новом окне терминала.
+    Запускает функцию initialize_main_database для создания/обновления главной БД.
     """
     try:
         logging.debug("Запуск функции run_db_setup для инициализации главной БД.")
-        # Определяем путь к корневой папке приложения
-        # --- ИСПРАВЛЕНИЕ: Используем resource_path для надежного определения пути к скрипту ---
-        # Это будет работать и в режиме разработки, и в скомпилированном приложении.
-        script_path = resource_path(os.path.join('scripts', 'setup_database.py'))
-        logging.debug(f"Путь к скрипту: {script_path}")
-        # Корень приложения теперь определяется относительно скрипта
-        desktop_app_root = os.path.abspath(os.path.join(os.path.dirname(script_path), '..'))
-
-        # --- УНИВЕРСАЛЬНОЕ РЕШЕНИЕ: Определяем, запущено ли приложение как скомпилированный exe ---
-        is_frozen = getattr(sys, 'frozen', False)
-        logging.debug(f"Приложение запущено как скомпилированный файл (frozen): {is_frozen}")
-        if is_frozen:
-            # Мы в скомпилированном приложении. Используем основной исполняемый файл.
-            python_executable = sys.executable
+        # Вызываем импортированную функцию напрямую
+        success, message = initialize_main_database()
+        if success:
+            logging.info(f"Результат инициализации БД: {message}")
+            messagebox.showinfo("Успех", message)
         else:
-            # Мы в режиме разработки. Используем python из виртуального окружения.
-            if sys.platform == "win32":
-                python_executable = os.path.join(desktop_app_root, '.venv', 'Scripts', 'python.exe')
-            else:
-                python_executable = os.path.join(desktop_app_root, '.venv', 'bin', 'python')
-        
-        logging.debug(f"Выбранный исполняемый файл Python: {python_executable}")
-
-        if not os.path.exists(python_executable) or not os.path.exists(script_path):
-            error_msg = f"Не найден исполняемый файл Python или скрипт:\nPython: {python_executable}\nСкрипт: {script_path}"
-            logging.error(error_msg)
-            tk.messagebox.showerror("Ошибка", error_msg)
-            return
-
-        command = [python_executable, script_path]
-        logging.info(f"Запуск команды для обновления БД: {command}")
-
-        if sys.platform == "win32":
-            subprocess.Popen(command, creationflags=subprocess.CREATE_NEW_CONSOLE)
-        else:
-            subprocess.Popen(['xterm', '-e'] + command)
-
+            logging.error(f"Результат инициализации БД: {message}")
+            messagebox.showerror("Ошибка", message)
     except Exception as e:
         error_details = traceback.format_exc()
         logging.error(f"Не удалось запустить скрипт 'setup_database.py': {e}\n{error_details}")
