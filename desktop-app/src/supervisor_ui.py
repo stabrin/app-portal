@@ -549,7 +549,17 @@ def open_clients_management_window(parent_widget):
     client_buttons_frame = ttk.Frame(clients_frame)
     client_buttons_frame.pack(fill=tk.X, padx=5, pady=5)
     ttk.Button(client_buttons_frame, text="Создать", command=lambda: open_client_editor()).pack(side=tk.LEFT, padx=2)
-    ttk.Button(client_buttons_frame, text="Редактировать", command=lambda: open_client_editor(clients_tree.item(clients_tree.focus())['values'][0]) if clients_tree.focus() else None).pack(side=tk.LEFT, padx=2)
+
+    def edit_selected_client():
+        """Безопасно получает ID клиента и открывает редактор."""
+        selected_item = clients_tree.focus()
+        if not selected_item:
+            logging.debug("Кнопка 'Редактировать' нажата, но клиент не выбран.")
+            return
+        client_id = clients_tree.item(selected_item)['values'][0]
+        logging.debug(f"Нажата кнопка 'Редактировать'. ID клиента: {client_id}, тип: {type(client_id)}.")
+        open_client_editor(client_id)
+    ttk.Button(client_buttons_frame, text="Редактировать", command=edit_selected_client).pack(side=tk.LEFT, padx=2)
 
     clients_cols = ('id', 'name', 'db_host', 'created_at')
     clients_tree = ttk.Treeview(clients_frame, columns=clients_cols, show='headings')
