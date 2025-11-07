@@ -159,8 +159,7 @@ class StandaloneLoginWindow(tk.Tk):
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
-                            "db_user": db_user, "db_password": db_password,
-                            "db_ssl_cert": ssl_cert_content # Используем прочитанное содержимое
+                            "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert
                         }
                     self.on_complete_callback(user_info) # Сначала вызываем callback
                     self.destroy() # Затем уничтожаем окно
