@@ -254,41 +254,38 @@ def update_client_db_schema(conn):
     ]
     
     # === Блок для новых таблиц портала (префикс ap_) ===
+    # Фаза 1: Создание всех таблиц с базовыми колонками (PRIMARY KEY, NOT NULL)
+    # без внешних ключей и уникальных ограничений, которые могут зависеть от других таблиц.
     ap_tables_commands = [
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS ap_workplaces (
                 id SERIAL PRIMARY KEY,
                 warehouse_name VARCHAR(255) NOT NULL,
                 workplace_number INTEGER NOT NULL,
-                access_token UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                UNIQUE (warehouse_name, workplace_number)
+                access_token UUID NOT NULL DEFAULT gen_random_uuid(), -- Добавляем DEFAULT для NOT NULL
+                is_active BOOLEAN NOT NULL DEFAULT TRUE, -- Добавляем DEFAULT для NOT NULL
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
-        # Добавляем создание таблицы для шаблонов этикеток
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS label_templates (
                 id SERIAL PRIMARY KEY,
-                name VARCHAR(255) UNIQUE NOT NULL,
+                name VARCHAR(255) NOT NULL,
                 template_json JSONB NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
         sql.SQL("COMMENT ON TABLE label_templates IS 'Шаблоны макетов этикеток в формате JSON';"),
-        # --- НОВАЯ ТАБЛИЦА ДЛЯ ИЗОБРАЖЕНИЙ ---
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS ap_images (
                 id SERIAL PRIMARY KEY,
-                name VARCHAR(255) UNIQUE NOT NULL,
+                name VARCHAR(255) NOT NULL,
                 image_data BYTEA NOT NULL,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_images IS 'Хранилище изображений (логотипов) для макетов этикеток';"),
-
-        # --- НОВАЯ ТАБЛИЦА: Настройки подключения к API ---
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS ap_settings (
                 setting_key VARCHAR(100) PRIMARY KEY,
@@ -297,48 +294,40 @@ def update_client_db_schema(conn):
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_settings IS 'Таблица для хранения настроек, например, для API';"),
-
-        # --- ИЗМЕНЕНО: Полное пересоздание таблиц уведомлений о поставке ---
-        # Удаляем старые таблицы, если они существуют, для чистого пересоздания
-        sql.SQL("DROP TABLE IF EXISTS ap_supply_notification_details CASCADE;"),
-        sql.SQL("DROP TABLE IF EXISTS ap_supply_notification_files CASCADE;"),
-        sql.SQL("DROP TABLE IF EXISTS ap_supply_notifications CASCADE;"),
-
-        # Новая таблица для локального справочника клиентов
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS ap_clients (
                 id SERIAL PRIMARY KEY,
-                name VARCHAR(255) UNIQUE NOT NULL,
+                name VARCHAR(255) NOT NULL,
                 inn VARCHAR(12),
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_clients IS 'Локальный справочник клиентов';"),
-
-        # Новая структура таблицы уведомлений
         sql.SQL("""
-            CREATE TABLE ap_supply_notifications (
+            CREATE TABLE IF NOT EXISTS ap_marking_scenarios (
                 id SERIAL PRIMARY KEY,
-                scenario_id INTEGER NOT NULL REFERENCES ap_marking_scenarios(id),
+                name VARCHAR(255) NOT NULL,
+                scenario_data JSONB NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE ap_marking_scenarios IS 'Справочник сценариев маркировки';"),
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS ap_supply_notifications (
+                id SERIAL PRIMARY KEY,
+                scenario_id INTEGER NOT NULL, -- FK добавится позже
                 scenario_name VARCHAR(255) NOT NULL,
-                client_api_id INTEGER,
-                client_local_id INTEGER REFERENCES ap_clients(id),
                 client_name VARCHAR(255) NOT NULL,
-                product_groups JSONB,
-                planned_arrival_date DATE,
-                vehicle_number VARCHAR(100) DEFAULT 'Б/Н',
-                comments TEXT,
                 status VARCHAR(50) NOT NULL DEFAULT 'Проект',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_supply_notifications IS 'Уведомления о поставке';"),
-
-        # Новая структура таблицы файлов
         sql.SQL("""
-            CREATE TABLE ap_supply_notification_files (
+            CREATE TABLE IF NOT EXISTS ap_supply_notification_files (
                 id SERIAL PRIMARY KEY,
-                notification_id INTEGER NOT NULL REFERENCES ap_supply_notifications(id) ON DELETE CASCADE,
+                notification_id INTEGER NOT NULL, -- FK добавится позже
                 file_type VARCHAR(50) NOT NULL, -- 'client_document' или 'formalized_details'
                 filename VARCHAR(255) NOT NULL,
                 file_data BYTEA NOT NULL,
@@ -346,12 +335,10 @@ def update_client_db_schema(conn):
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_supply_notification_files IS 'Файлы, приложенные к уведомлениям о поставке';"),
-        
-        # Новая структура таблицы детализации
         sql.SQL("""
-            CREATE TABLE ap_supply_notification_details (
+            CREATE TABLE IF NOT EXISTS ap_supply_notification_details (
                 id SERIAL PRIMARY KEY,
-                notification_id INTEGER NOT NULL REFERENCES ap_supply_notifications(id) ON DELETE CASCADE,
+                notification_id INTEGER NOT NULL, -- FK добавится позже
                 gtin VARCHAR(14),
                 quantity INTEGER,
                 aggregation INTEGER DEFAULT 0,
@@ -361,17 +348,57 @@ def update_client_db_schema(conn):
             );
         """),
         sql.SQL("COMMENT ON TABLE ap_supply_notification_details IS 'Детализированное содержимое формализованного уведомления о поставке';"),
+        
+        # Фаза 2: Добавление колонок, которые могли быть добавлены позже
+        sql.SQL("ALTER TABLE ap_workplaces ADD COLUMN IF NOT EXISTS access_token UUID NOT NULL DEFAULT gen_random_uuid();"),
+        sql.SQL("ALTER TABLE ap_workplaces ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;"),
+        sql.SQL("ALTER TABLE ap_workplaces ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
 
-        # --- НОВЫЙ БЛОК: Таблица для сценариев маркировки ---
-        sql.SQL("""
-            CREATE TABLE IF NOT EXISTS ap_marking_scenarios (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) UNIQUE NOT NULL,
-                scenario_data JSONB NOT NULL,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-            );
-        """),
+        sql.SQL("ALTER TABLE label_templates ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+        sql.SQL("ALTER TABLE label_templates ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+
+        sql.SQL("ALTER TABLE ap_images ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+
+        sql.SQL("ALTER TABLE ap_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+
+        sql.SQL("ALTER TABLE ap_clients ADD COLUMN IF NOT EXISTS inn VARCHAR(12);"),
+        sql.SQL("ALTER TABLE ap_clients ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+
+        sql.SQL("ALTER TABLE ap_marking_scenarios ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+        sql.SQL("ALTER TABLE ap_marking_scenarios ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD COLUMN IF NOT EXISTS client_api_id INTEGER;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD COLUMN IF NOT EXISTS client_local_id INTEGER;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD COLUMN IF NOT EXISTS product_groups JSONB;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD COLUMN IF NOT EXISTS planned_arrival_date DATE;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD COLUMN IF NOT EXISTS vehicle_number VARCHAR(100) DEFAULT 'Б/Н';"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD COLUMN IF NOT EXISTS comments TEXT;"),
+
+        sql.SQL("ALTER TABLE ap_supply_notification_files ADD COLUMN IF NOT EXISTS uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();"),
+
+        sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS production_date DATE;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS shelf_life_months INTEGER;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS expiry_date DATE;"),
+
+        # Фаза 3: Добавление ограничений (UNIQUE, FOREIGN KEY)
+        sql.SQL("ALTER TABLE ap_workplaces ADD CONSTRAINT IF NOT EXISTS uq_warehouse_workplace UNIQUE (warehouse_name, workplace_number);"),
+
+        sql.SQL("ALTER TABLE label_templates ADD CONSTRAINT IF NOT EXISTS uq_label_template_name UNIQUE (name);"),
+
+        sql.SQL("ALTER TABLE ap_images ADD CONSTRAINT IF NOT EXISTS uq_image_name UNIQUE (name);"),
+
+        sql.SQL("ALTER TABLE ap_clients ADD CONSTRAINT IF NOT EXISTS uq_client_name UNIQUE (name);"),
+
+        sql.SQL("ALTER TABLE ap_marking_scenarios ADD CONSTRAINT IF NOT EXISTS uq_marking_scenario_name UNIQUE (name);"),
+
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT IF NOT EXISTS fk_scenario FOREIGN KEY (scenario_id) REFERENCES ap_marking_scenarios(id);"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT IF NOT EXISTS fk_client_local FOREIGN KEY (client_local_id) REFERENCES ap_clients(id);"),
+
+        sql.SQL("ALTER TABLE ap_supply_notification_files ADD CONSTRAINT IF NOT EXISTS fk_notification_file FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE;"),
+
+        sql.SQL("ALTER TABLE ap_supply_notification_details ADD CONSTRAINT IF NOT EXISTS fk_notification_detail FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE;"),
+
+        # Триггер для ap_marking_scenarios (оставляем как есть, т.к. он использует CREATE OR REPLACE FUNCTION и DROP/CREATE TRIGGER)
         sql.SQL("""
             CREATE OR REPLACE FUNCTION trigger_set_timestamp()
             RETURNS TRIGGER AS $$
@@ -385,8 +412,6 @@ def update_client_db_schema(conn):
             FOR EACH ROW
             EXECUTE PROCEDURE trigger_set_timestamp();
         """),
-        sql.SQL("COMMENT ON TABLE ap_marking_scenarios IS 'Справочник сценариев маркировки';"),
-
     ]
 
 
