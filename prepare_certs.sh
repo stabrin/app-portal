@@ -44,7 +44,15 @@ else
     DNS_COUNT=1
     IP_COUNT=1
 
+    # Добавляем CN как первый DNS в SAN, чтобы он всегда присутствовал.
+    SAN_LIST+="DNS.$DNS_COUNT = $SERVER_CN\n"
+    DNS_COUNT=$((DNS_COUNT + 1))
+
     for arg in "$@"; do
+        # Пропускаем первый аргумент, так как он уже добавлен как CN и первый DNS.
+        if [ "$arg" = "$SERVER_CN" ]; then
+            continue
+        fi
         # Простая проверка, является ли аргумент IP-адресом
         if [[ $arg =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             SAN_LIST+="IP.$IP_COUNT = $arg\n"
@@ -54,7 +62,8 @@ else
             DNS_COUNT=$((DNS_COUNT + 1))
         fi
     done
-    echo "Генерируем самоподписанный сертификат и приватный ключ на 10 лет с SANs..."
+    echo "Генерируем самоподписанный сертификат и приватный ключ на 10 лет..."
+    echo -e "SAN список:\n$SAN_LIST"
 
     openssl req -new -x509 -days 3650 -nodes \
         -out "$PG_CERT" \
@@ -79,11 +88,17 @@ extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
 [alt_names]
-$SAN_LIST
+$(echo -e "$SAN_LIST")
 EOF
 )
     echo "Сертификат и ключ успешно сгенерированы."
 fi
+
+echo ""
+echo "--- Проверка сгенерированного сертификата ---"
+openssl x509 -in "$PG_CERT" -text -noout | grep -A 3 "Subject Alternative Name"
+echo "-------------------------------------------"
+echo ""
 
 echo "Готово! Сертификаты сгенерированы."
 echo ""
