@@ -712,7 +712,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             if db_config.get('db_ssl_cert'):
                 logging.debug("Создание временного файла сертификата SSL.")
                 with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
-                    fp.write(db_config['db_ssl_cert'])
+                    fp.write(db_config['db_ssl_cert'].strip()) # ИСПРАВЛЕНИЕ: Убираем лишние пробелы/переносы
                     temp_cert_file = fp.name
                 conn_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
 
