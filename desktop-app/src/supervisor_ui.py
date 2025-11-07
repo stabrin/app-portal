@@ -27,7 +27,11 @@ def run_db_setup():
         # --- ИСПРАВЛЕНИЕ: Явно указываем путь к Python внутри виртуального окружения ---
         # Это гарантирует, что скрипт будет запущен с правильными библиотеками,
         # независимо от того, как было запущено основное GUI-приложение.
-        python_executable = os.path.join(desktop_app_root, '.venv', 'Scripts', 'python.exe')
+        # --- ИСПРАВЛЕНИЕ 2: Путь к Python зависит от ОС ---
+        if sys.platform == "win32":
+            python_executable = os.path.join(desktop_app_root, '.venv', 'Scripts', 'python.exe')
+        else:
+            python_executable = os.path.join(desktop_app_root, '.venv', 'bin', 'python')
 
         if not os.path.exists(python_executable) or not os.path.exists(script_path):
             tk.messagebox.showerror("Ошибка", f"Не найден исполняемый файл Python или скрипт:\n{python_executable}\n{script_path}")
