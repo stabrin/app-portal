@@ -1549,7 +1549,7 @@ class AdminWindow(tk.Tk):
                 # Остальные поля пусть pandas определяет автоматически.
                 df = pd.read_excel(filepath, dtype={pk_field: str})
                 df = df.where(pd.notna(df), None) # Заменяем NaN на None
-                service_methods['import'](df)
+                service_methods['import'](df.to_dict('records'))
                 refresh_data()
                 messagebox.showinfo("Успех", "Данные успешно импортированы.", parent=self)
             except Exception as e:
