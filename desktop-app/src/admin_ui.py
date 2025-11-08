@@ -2680,8 +2680,8 @@ class AdminWindow(tk.Tk):
                     except Exception as e:
                         messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
 
-                # --- ИСПРАВЛЕНИЕ: "Редактировать" теперь вызывает новую функцию ---
-                menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_editor_with_scenario(item_id))
+                # --- ИСПРАВЛЕНИЕ: Используем правильное имя функции ---
+                menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_correct_editor(item_id))
                 menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
 
                 if order_status in ('delta', 'dmkod'):
