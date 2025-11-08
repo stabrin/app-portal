@@ -1523,7 +1523,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                 with self._get_client_db_connection() as conn:
                     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                         cur.execute("""
-                            SELECT o.participant_id, o.notes, pg.dm_template
+                            SELECT o.participant_id, o.notes, pg.dm_template, o.client_api_id
                             FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
                             WHERE o.id = %s
                         """, (self.order_id,))
@@ -1544,7 +1544,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                     } for _, p in aggregated_df.iterrows()
                 ]
                 api_payload = {
-                    "participant_id": order_info['participant_id'], "production_order_id": order_info['notes'] or "",
+                    "participant_id": order_info['client_api_id'], "production_order_id": order_info['notes'] or "",
                     "contact_person": self.user_info['name'], "products": products_payload
                 }
 
