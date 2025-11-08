@@ -12,22 +12,48 @@ from app.services.tobacco_service import parse_tobacco_dm
 from app.db import get_db_connection
 from app.utils import upsert_data_to_db
 from app.services.sscc_service import generate_sscc, read_and_increment_counter
+from typing import Optional
 
 # Константа-разделитель для кодов DataMatrix
 GS_SEPARATOR = '\x1d'
 
 # --- ФУНКЦИИ-ПОМОЩНИКИ ---
+# --- Логика из datamatrix-app/app/services/tobacco_service.py ---
 
 def analyze_filename(filename: str) -> dict:
+def parse_tobacco_dm(dm_string: str) -> Optional[dict]:
     """
     Разбирает имя файла. Если начинается с "Тираж_", извлекает номер.
     Иначе возвращает номер тиража '0'.
+    Парсит строку DataMatrix для табачной продукции.
+    Возвращает словарь с данными или None, если строка не соответствует формату.
     """
     pattern = re.compile(r"^Тираж_(\d+).*")
     match = pattern.match(filename)
     if match:
         return {"tirazh_number": match.group(1)}
     return {"tirazh_number": "0"}
+    cleaned_dm = re.sub(r'[\x00-\x1c\x1e-\x1f\x7f]', '', dm_string).strip()
+
+    if len(cleaned_dm) != 29:
+        return {"error": "InvalidLength", "length": len(cleaned_dm), "original_string": dm_string[:40]}
+
+    gtin = cleaned_dm[0:14]
+    serial = cleaned_dm[14:21]
+    code8005 = cleaned_dm[21:25]
+    internal_93 = cleaned_dm[25:29]
+    
+    return {
+        'datamatrix': cleaned_dm,
+        'gtin': gtin,
+        'serial': serial,
+        'code_8005': code8005,
+        'crypto_part_93': internal_93,
+        'crypto_part_91': '',
+        'crypto_part_92': ''
+    }
+
+# --- Логика из datamatrix-app/app/services/aggregation_service.py ---
 
 def parse_datamatrix(dm_string: str) -> dict:
     """Разбирает (парсит) строку DataMatrix на составные части."""
@@ -63,6 +89,7 @@ def generate_standalone_sscc(quantity: int, owner: str) -> tuple[list, list]:
     if not owner or not owner.strip():
         logs.append("ОШИБКА: Имя владельца не может быть пустым.")
         return logs, []
+# --- Логика из datamatrix-app/app/services/sscc_service.py ---
 
     try:
         conn = get_db_connection()
@@ -143,6 +170,15 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
         if file_info['tirazh_number'] != '0':
             tirazh_num = file_info['tirazh_number']
             logs.append(f"  -> Номер тиража определен из имени файла: {tirazh_num}")
+def calculate_sscc_check_digit(base_sscc: str) -> int:
+    """Вычисляет контрольную цифру для 17-значного SSCC по алгоритму GS1."""
+    if len(base_sscc) != 17:
+        raise ValueError("База для SSCC должна содержать 17 цифр")
+    total_sum = 0
+    for i, digit_char in enumerate(reversed(base_sscc)):
+        digit = int(digit_char)
+        if i % 2 == 0:
+            total_sum += digit * 3
         else:
             tirazh_num = str(file_counter)
             logs.append(f"  -> Номер тиража присвоен по порядку: {tirazh_num}")
@@ -159,6 +195,8 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
                     lines = f.readlines()
             
             logs.append(f"  [Отладка] Файл прочитан. Общее количество полученных строк: {len(lines)}")
+            total_sum += digit * 1
+    return (10 - (total_sum % 10)) % 10
 
             for line_num, line in enumerate(lines, 1):
                 dm_string = line.strip()
@@ -166,6 +204,10 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
                     continue
                 
                 total_lines_processed += 1
+def generate_sscc(sscc_id: int, gcp: str) -> tuple[str, str]:
+    """Вспомогательная функция для генерации SSCC."""
+    if not gcp:
+        raise ValueError("GCP (Global Company Prefix) не задан.")
 
                 if dm_type == 'tobacco':
                     parsed_data = parse_tobacco_dm(dm_string)
@@ -177,6 +219,8 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
                         continue
                 else: # 'standard'
                     parsed_data = parse_datamatrix(dm_string)
+    if len(gcp) > 16:
+        raise ValueError(f"Некорректная длина GCP '{gcp}' ({len(gcp)} символов).")
 
                 # Эта проверка теперь общая для всех типов DM
                 if not parsed_data.get('gtin'):
@@ -197,8 +241,17 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
             continue
             
         file_counter += 1
+    serial_number_length = 16 - len(gcp)
+    serial_number_capacity = 10 ** serial_number_length
 
     saved_file_paths = [item[0] for item in saved_files_paths_with_original_names]
+    extension_digit = (sscc_id // serial_number_capacity) % 10
+    serial_number = sscc_id % serial_number_capacity
+    serial_part = str(serial_number).zfill(serial_number_length)
+    base_sscc = str(extension_digit) + gcp + serial_part
+    check_digit = calculate_sscc_check_digit(base_sscc)
+    full_sscc = base_sscc + str(check_digit)
+    return base_sscc, full_sscc
 
     if not all_dm_data:
         logs.append("Не найдено корректных кодов DataMatrix в файлах.")
@@ -210,6 +263,17 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
     items_df = pd.DataFrame(all_dm_data)
     logs.append(f"\nВсего найдено и разобрано {len(items_df)} кодов DataMatrix.")
     logs.append("Проверяю, не были ли эти коды обработаны ранее...")
+def read_and_increment_counter(cursor, counter_name: str, increment_by: int = 1) -> tuple[int, Optional[str], str]:
+    """
+    Атомарно читает и увеличивает счетчик в БД.
+    Возвращает (новое_значение, сообщение_с_предупреждением | None, используемый_gcp).
+    """
+    cursor.execute(
+        "SELECT current_value FROM system_counters WHERE counter_name = %s FOR UPDATE;",
+        (counter_name,)
+    )
+    current_value = cursor.fetchone()[0]
+    new_value = current_value + increment_by
     
     conn = None
     try:
@@ -224,6 +288,10 @@ def run_aggregation_process(order_id: int, files: list, dm_type: str, aggregatio
                 if conn: conn.close()
                 return logs
             initial_order_status = status_result[0]
+    # В десктопной версии логика предупреждений и смены GCP может быть другой,
+    # поэтому пока оставляем заглушку.
+    warning_message = None
+    gcp_to_use = os.getenv('SSCC_GCP_1', '') # Временно берем из .env, в будущем можно переделать на конфиг клиента
 
             # Проверка на существование кодов
             dm_to_check = tuple(items_df['datamatrix'].unique())
@@ -458,3 +526,9 @@ def run_import_from_dmkod(order_id: int) -> list:
         if conn: conn.close()
 
     return logs
+    cursor.execute(
+        "UPDATE system_counters SET current_value = %s WHERE counter_name = %s;",
+        (new_value, counter_name)
+    )
+    
+    return new_value, warning_message, gcp_to_use
