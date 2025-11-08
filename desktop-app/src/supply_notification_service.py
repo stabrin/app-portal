@@ -157,6 +157,81 @@ class SupplyNotificationService:
             conn.commit()
             logging.info(f"Уведомление ID: {notification_id} успешно обновлено.")
 
+    def create_order_from_notification(self, notification_id: int):
+        """
+        Создает заказ в таблице 'orders' на основе данных из уведомления о поставке.
+        Возвращает кортеж (bool, str) - успех и сообщение.
+        """
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1. Получаем данные уведомления и сценария
+                cur.execute("""
+                    SELECT 
+                        n.id, n.product_groups, n.scenario_id, n.client_api_id, n.client_local_id,
+                        n.client_name, n.vehicle_number,
+                        s.scenario_data
+                    FROM ap_supply_notifications n
+                    JOIN ap_marking_scenarios s ON n.scenario_id = s.id
+                    WHERE n.id = %s
+                """, (notification_id,))
+                notification = cur.fetchone()
+
+                if not notification:
+                    return False, f"Уведомление с ID {notification_id} не найдено."
+
+                # 2. Проверяем количество товарных групп
+                product_groups = notification['product_groups']
+                if not product_groups or len(product_groups) > 1:
+                    msg = f"Разделите это уведомление на {len(product_groups)} и после этого создайте отдельные заказы для каждой товарной группы."
+                    return False, msg
+
+                # 3. Проверяем тип сценария
+                scenario_data = notification['scenario_data']
+                if scenario_data.get('type') == 'Ручная агрегация':
+                    return False, "Создание заказа для сценария 'Ручная агрегация' находится в процессе реализации."
+
+                # 4. Готовим данные и создаем заказ в 'orders'
+                status = 'dmkod' if scenario_data.get('dm_source') == 'Заказ в ДМ.Код' else 'new'
+                product_group_id = product_groups[0].get('id')
+
+                cur.execute("""
+                    INSERT INTO orders (
+                        client_api_id, client_local_id, client_name, scenario_id, notification_id, 
+                        order_date, notes, status, product_group_id
+                    ) VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s)
+                    RETURNING id;
+                """, (
+                    notification['client_api_id'], notification['client_local_id'], notification['client_name'],
+                    notification['scenario_id'], notification['id'], notification['vehicle_number'],
+                    status, product_group_id
+                ))
+                new_order_id = cur.fetchone()['id']
+                logging.info(f"Создан новый заказ с ID {new_order_id} из уведомления ID {notification_id}.")
+
+                # 5. Переносим детализацию
+                cur.execute("""
+                    SELECT gtin, quantity, production_date, expiry_date 
+                    FROM ap_supply_notification_details 
+                    WHERE notification_id = %s
+                """, (notification_id,))
+                details = cur.fetchall()
+
+                if details:
+                    from psycopg2.extras import execute_values
+                    details_to_insert = [
+                        (new_order_id, d['gtin'], d['quantity'], d['production_date'], d['expiry_date'])
+                        for d in details
+                    ]
+                    insert_query = """
+                        INSERT INTO dmkod_aggregation_details (order_id, gtin, dm_quantity, production_date, expiry_date)
+                        VALUES %s
+                    """
+                    execute_values(cur, insert_query, details_to_insert)
+                    logging.info(f"Перенесено {len(details_to_insert)} строк детализации в заказ ID {new_order_id}.")
+
+            conn.commit()
+            return True, f"Заказ №{new_order_id} успешно создан на основе уведомления."
+
     def get_notification_by_id(self, notification_id):
         """Получает одно уведомление по ID."""
         with self.get_db_connection() as conn:

@@ -1313,7 +1313,22 @@ class AdminWindow(tk.Tk):
                 # ИСПОЛЬЗУЕМ self.after, чтобы отложить вызов и избежать конфликта модальных окон
                 self.after(1, lambda: open_notification_editor(uid))
             menu.add_command(label="Редактировать", command=lambda item_id=item_id: deferred_open_editor(item_id))
-            menu.add_command(label="Создать заказ", command=lambda: messagebox.showinfo("В разработке", f"Создание заказа для уведомления {item_id}"))
+            
+            # --- НОВАЯ ЛОГИКА: Создание заказа ---
+            def create_order_from_notification_ui(notif_id):
+                logging.info(f"Запрос на создание заказа из уведомления ID: {notif_id}")
+                try:
+                    # Вызываем новый метод сервиса
+                    success, message = service.create_order_from_notification(notif_id)
+                    if success:
+                        messagebox.showinfo("Успех", message, parent=self)
+                        # Можно добавить обновление вкладки "Заказы"
+                    else:
+                        messagebox.showwarning("Внимание", message, parent=self)
+                except Exception as e:
+                    logging.error(f"Ошибка при создании заказа из уведомления {notif_id}: {e}", exc_info=True)
+                    messagebox.showerror("Ошибка", f"Не удалось создать заказ: {e}", parent=self)
+            menu.add_command(label="Создать заказ", command=lambda item_id=item_id: create_order_from_notification_ui(item_id))
             menu.add_separator()
             menu.add_command(label="Удалить в архив", command=archive_notification)
             menu.post(event.x_root, event.y_root)
