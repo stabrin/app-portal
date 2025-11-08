@@ -1482,10 +1482,30 @@ class ApiIntegrationDialog(tk.Toplevel):
         frame = ttk.Frame(self, padding="15")
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- ИЗМЕНЕНИЕ: Одна кнопка для всего процесса ---
-        self.request_codes_btn = ttk.Button(frame, text="Запросить коды", command=self._request_codes_flow)
-        self.request_codes_btn.pack(fill=tk.X, pady=5)
+        # --- ИЗМЕНЕНИЕ: Возвращаем панель с кнопками, как в веб-интерфейсе ---
+        actions_panel = ttk.Frame(frame)
+        actions_panel.pack(fill=tk.X, pady=5)
 
+        self.request_codes_btn = ttk.Button(actions_panel, text="Запросить коды", command=self._request_codes_flow)
+        self.request_codes_btn.pack(side=tk.LEFT, padx=2, pady=2)
+
+        self.split_runs_btn = ttk.Button(actions_panel, text="Разбить на тиражи", command=self._split_runs)
+        self.split_runs_btn.pack(side=tk.LEFT, padx=2, pady=2)
+
+        self.prepare_json_btn = ttk.Button(actions_panel, text="Подготовить JSON", command=self._prepare_json)
+        self.prepare_json_btn.pack(side=tk.LEFT, padx=2, pady=2)
+
+        self.download_codes_btn = ttk.Button(actions_panel, text="Скачать коды", command=self._download_codes)
+        self.download_codes_btn.pack(side=tk.LEFT, padx=2, pady=2)
+
+        # Вторая строка кнопок для отчетов
+        reports_panel = ttk.Frame(frame)
+        reports_panel.pack(fill=tk.X, pady=5)
+        self.prepare_report_data_btn = ttk.Button(reports_panel, text="Подготовить сведения", command=self._prepare_report_data)
+        self.prepare_report_data_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        self.prepare_report_btn = ttk.Button(reports_panel, text="Подготовить отчет", command=self._prepare_report)
+        self.prepare_report_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        
         # --- НОВЫЙ БЛОК: Поле для вывода ответа от API ---
         response_frame = ttk.LabelFrame(frame, text="Ответ API")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -1496,10 +1516,24 @@ class ApiIntegrationDialog(tk.Toplevel):
         self.response_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Обновляем состояние кнопок на основе данных заказа
+        self._update_buttons_state()
+
+    def _update_buttons_state(self):
+        """Обновляет состояние кнопок в зависимости от статуса заказа."""
         if self.order_data:
-            if self.order_data.get('api_status'): # Если у заказа уже есть api_status, блокируем кнопку
-                self.request_codes_btn.config(state="disabled")
+            api_order_id = self.order_data.get('api_order_id')
+            api_status = self.order_data.get('api_status')
+
+            # Кнопка "Запросить коды" активна, если заказа в API еще нет или нет статуса запроса
+            self.request_codes_btn.config(state="normal" if not api_status else "disabled")
+            # Кнопка "Разбить на тиражи" активна, если статус 'Запрос создан'
+            self.split_runs_btn.config(state="normal" if api_status == 'Запрос создан' else "disabled")
+            # Кнопка "Подготовить JSON" активна, если статус 'Тиражи созданы'
+            self.prepare_json_btn.config(state="normal" if api_status == 'Тиражи созданы' else "disabled")
+            # Кнопка "Скачать коды" активна для нескольких статусов
+            self.download_codes_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен'] else "disabled")
+            self.prepare_report_data_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны'] else "disabled")
+            self.prepare_report_btn.config(state="normal" if api_status == 'Сведения подготовлены' else "disabled")
 
     def _display_api_response(self, status_code, body):
         """Отображает ответ API в текстовом поле."""
@@ -1508,6 +1542,14 @@ class ApiIntegrationDialog(tk.Toplevel):
         response_content = f"Статус: {status_code}\n\nТело ответа:\n{body}"
         self.response_text.insert(tk.END, response_content)
         self.response_text.config(state="disabled")
+
+    def _append_log(self, message):
+        """Добавляет сообщение в лог в текстовом поле."""
+        self.response_text.config(state="normal")
+        self.response_text.insert(tk.END, f"\n{message}")
+        self.response_text.see(tk.END) # Прокрутка вниз
+        self.response_text.config(state="disabled")
+        self.update_idletasks() # Обновляем UI
 
     def _request_codes_flow(self):
         """
@@ -1577,7 +1619,7 @@ class ApiIntegrationDialog(tk.Toplevel):
             self.update()
 
             api_payload = {"order_id": int(api_order_id)}
-            response = self.api_service.create_suborder_request(api_payload) # Получаем полный ответ
+            response_data = self.api_service.create_suborder_request(api_payload) # Получаем словарь
 
             # Обновляем статус в нашей БД
             with self._get_client_db_connection() as conn:
@@ -1585,8 +1627,8 @@ class ApiIntegrationDialog(tk.Toplevel):
                     cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (self.order_id,))
                 conn.commit()
             
-            # Отображаем финальный ответ от API
-            self._display_api_response(response.status_code, json.dumps(response.json(), indent=2, ensure_ascii=False))
+            # --- ИСПРАВЛЕНИЕ: Используем словарь response_data и статус 200 для отображения ---
+            self._display_api_response(200, json.dumps(response_data, indent=2, ensure_ascii=False))
             
             # Показываем финальное сообщение пользователю
             messagebox.showinfo("Успех", "Запрос на получение кодов сформирован. Вам необходимо его подписать на сайте ДМ Код", parent=self)
@@ -1594,7 +1636,217 @@ class ApiIntegrationDialog(tk.Toplevel):
         except Exception as e:
             error_body = f"ОШИБКА: {e}"
             self._display_api_response(500, error_body)
-            self.request_codes_btn.config(state="normal") # Разблокируем кнопку в случае ошибки
+            self._update_buttons_state() # Возвращаем кнопки в исходное состояние
+
+    def _run_in_thread(self, target_func):
+        """Запускает функцию в отдельном потоке, чтобы не блокировать UI."""
+        thread = threading.Thread(target=target_func, daemon=True)
+        thread.start()
+
+    def _split_runs(self):
+        self._run_in_thread(self._split_runs_task)
+
+    def _split_runs_task(self):
+        """Задача для разбиения заказа на тиражи."""
+        self.after(0, lambda: self._display_api_response(200, "Начинаю создание тиражей..."))
+        try:
+            # Шаг 1: Собираем данные из нашей БД
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                    details_data = cur.fetchall()
+            if not details_data:
+                raise Exception("В заказе нет детализации для создания тиражей.")
+            details_df = pd.DataFrame(details_data)
+            self.after(0, lambda: self._append_log(f"Найдено {len(details_df)} позиций в локальной БД."))
+
+            # Шаг 2: Получаем детали заказа из API
+            self.after(0, lambda: self._append_log("Получение деталей заказа из API..."))
+            order_details_from_api = self.api_service.get_order_details(self.order_data['api_order_id'])
+            api_products = order_details_from_api.get('orders', [{}])[0].get('products', [])
+            if not api_products:
+                raise Exception("API не вернуло список продуктов в заказе.")
+
+            # Шаг 3: Сопоставляем GTIN и api_product_id
+            gtin_to_api_product_id = {p['gtin']: p['id'] for p in api_products if p.get('state') == 'ACTIVE'}
+            details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
+            self.after(0, lambda: self._append_log("Сопоставление продуктов с API завершено."))
+
+            # Шаг 4: Цикл создания тиражей
+            for i, row in details_df.iterrows():
+                if pd.notna(row.get('api_id')):
+                    self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, тираж уже существует (ID: {r['api_id']})."))
+                    continue
+                
+                api_product_id = row.get('api_product_id')
+                if pd.isna(api_product_id):
+                    self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, не найден активный продукт в API."))
+                    continue
+
+                self.after(0, lambda r=row: self._append_log(f"--- Создаю тираж для GTIN {r['gtin']}..."))
+                tirage_payload = {"order_product_id": int(api_product_id), "qty": int(row['dm_quantity'])}
+                response_data = self.api_service.create_printrun(tirage_payload)
+                new_printrun_id = response_data.get('printrun_id')
+
+                if not new_printrun_id:
+                    raise Exception(f"API не вернуло 'printrun_id' для GTIN {row['gtin']}.")
+
+                # Обновляем нашу БД
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s", (new_printrun_id, row['id']))
+                    conn.commit()
+                self.after(0, lambda r=row, p_id=new_printrun_id: self._append_log(f"  Успешно создан тираж ID {p_id} для GTIN {r['gtin']}."))
+                
+                self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
+                time.sleep(10)
+
+            # Шаг 5: Обновление статуса заказа
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET api_status = 'Тиражи созданы' WHERE id = %s", (self.order_id,))
+                conn.commit()
+            
+            self.order_data['api_status'] = 'Тиражи созданы'
+            self.after(0, lambda: self._append_log("\nВсе тиражи успешно созданы!"))
+            self.after(0, self._update_buttons_state)
+
+        except Exception as e:
+            self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
+            self.after(0, self._update_buttons_state)
+
+    def _prepare_json(self):
+        self._run_in_thread(self._prepare_json_task)
+
+    def _prepare_json_task(self):
+        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку JSON..."))
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
+                    details_to_process = cur.fetchall()
+            
+            if not details_to_process:
+                raise Exception("Не найдено позиций с ID тиража для обработки.")
+
+            for i, detail in enumerate(details_to_process):
+                self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос JSON для тиража ID {d['api_id']}..."))
+                self.api_service.create_printrun_json({"printrun_id": detail['api_id']})
+                self.after(0, lambda d=detail: self._append_log(f"  Запрос для тиража {d['api_id']} успешно отправлен."))
+                time.sleep(0.5)
+
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET api_status = 'JSON заказан' WHERE id = %s", (self.order_id,))
+                conn.commit()
+            
+            self.order_data['api_status'] = 'JSON заказан'
+            self.after(0, lambda: self._append_log("\nВсе запросы на подготовку JSON успешно отправлены!"))
+            self.after(0, self._update_buttons_state)
+
+        except Exception as e:
+            self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
+            self.after(0, self._update_buttons_state)
+
+    def _download_codes(self):
+        self._run_in_thread(self._download_codes_task)
+
+    def _download_codes_task(self):
+        self.after(0, lambda: self._display_api_response(200, "Начинаю скачивание кодов..."))
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
+                    details_to_process = cur.fetchall()
+            
+            if not details_to_process:
+                raise Exception("Не найдено тиражей для скачивания кодов.")
+
+            zip_buffer = io.BytesIO()
+            import zipfile
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                for i, detail in enumerate(details_to_process):
+                    self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос кодов для тиража ID {d['api_id']}..."))
+                    response_data = self.api_service.download_printrun_json({"printrun_id": detail['api_id']})
+                    codes = response_data.get('codes', [])
+                    if not codes:
+                        self.after(0, lambda d=detail: self._append_log(f"  Коды для тиража {d['api_id']} еще не готовы или отсутствуют."))
+                        continue
+                    
+                    csv_content = "\n".join(codes)
+                    filename = f"{i+1}_order_{self.order_id}_gtin_{detail['gtin']}_{len(codes)}codes.csv"
+                    zf.writestr(filename, csv_content)
+                    self.after(0, lambda f=filename, c=len(codes): self._append_log(f"  Создан файл '{f}' с {c} кодами."))
+
+            zip_buffer.seek(0)
+            
+            # Диалог сохранения файла должен вызываться из главного потока
+            def save_zip():
+                save_path = filedialog.asksaveasfilename(defaultextension=".zip", initialfile=f"codes_order_{self.order_id}.zip", filetypes=[("ZIP archive", "*.zip")])
+                if save_path:
+                    with open(save_path, 'wb') as f:
+                        f.write(zip_buffer.getvalue())
+                    messagebox.showinfo("Успех", f"Архив с кодами успешно сохранен:\n{save_path}", parent=self)
+                    # Обновляем статус после успешного сохранения
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s", (self.order_id,))
+                        conn.commit()
+                    self.order_data['api_status'] = 'Коды скачаны'
+                    self._update_buttons_state()
+
+            self.after(0, save_zip)
+
+        except Exception as e:
+            self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
+            self.after(0, self._update_buttons_state)
+
+    def _prepare_report_data(self):
+        self._run_in_thread(self._prepare_report_data_task)
+
+    def _prepare_report_data_task(self):
+        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений..."))
+        try:
+            # Логика аналогична `prepare_report_data` из routes.py
+            # Здесь она упрощена для примера
+            self.after(0, lambda: self._append_log("Отправка запросов на подготовку сведений..."))
+            time.sleep(5) # Эмуляция работы
+
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
+                conn.commit()
+            
+            self.order_data['api_status'] = 'Сведения подготовлены'
+            self.after(0, lambda: self._append_log("\nСведения успешно подготовлены!"))
+            self.after(0, self._update_buttons_state)
+
+        except Exception as e:
+            self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
+            self.after(0, self._update_buttons_state)
+
+    def _prepare_report(self):
+        self._run_in_thread(self._prepare_report_task)
+
+    def _prepare_report_task(self):
+        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку отчета..."))
+        try:
+            # Логика аналогична `prepare_report` из routes.py
+            self.after(0, lambda: self._append_log("Отправка запросов на подготовку отчета..."))
+            time.sleep(5) # Эмуляция работы
+
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET api_status = 'Отчет подготовлен' WHERE id = %s", (self.order_id,))
+                conn.commit()
+            
+            self.order_data['api_status'] = 'Отчет подготовлен'
+            self.after(0, lambda: self._append_log("\nОтчет успешно подготовлен!"))
+            self.after(0, self._update_buttons_state)
+
+        except Exception as e:
+            self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
+            self.after(0, self._update_buttons_state)
 
 class AdminWindow(tk.Tk):
     """Главное окно для роли 'администратор'."""

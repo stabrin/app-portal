@@ -70,3 +70,58 @@ class ApiService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при создании запроса на коды: {e}", exc_info=True)
             raise
+
+    def get_order_details(self, api_order_id: int):
+        """Получает детали заказа из API."""
+        logger.info(f"Запрос деталей заказа ID {api_order_id} из API.")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/orders"
+            headers = self._get_auth_headers()
+            # GET-запрос с телом в JSON
+            response = requests.get(url, headers=headers, json={"order_id": api_order_id}, timeout=30)
+            response.raise_for_status()
+            logger.info(f"Детали заказа {api_order_id} успешно получены.")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при получении деталей заказа {api_order_id}: {e}", exc_info=True)
+            raise
+
+    def create_printrun(self, payload: dict):
+        """Создает тираж (printrun) в API."""
+        logger.info(f"Отправка запроса на создание тиража. Payload: {payload}")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/printrun/create"
+            headers = self._get_auth_headers()
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            logger.info(f"Тираж успешно создан. Ответ: {response.json()}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при создании тиража: {e}", exc_info=True)
+            raise
+
+    def create_printrun_json(self, payload: dict):
+        """Запрашивает подготовку JSON-файла с кодами для тиража."""
+        logger.info(f"Отправка запроса на подготовку JSON для тиража. Payload: {payload}")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/printrun/json/create"
+            headers = self._get_auth_headers()
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при запросе JSON для тиража: {e}", exc_info=True)
+            raise
+
+    def download_printrun_json(self, payload: dict):
+        """Скачивает готовый JSON-файл с кодами для тиража."""
+        logger.info(f"Отправка запроса на скачивание кодов для тиража. Payload: {payload}")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/printrun/json/download"
+            headers = self._get_auth_headers()
+            response = requests.get(url, headers=headers, json=payload, timeout=60)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при скачивании кодов для тиража: {e}", exc_info=True)
+            raise
