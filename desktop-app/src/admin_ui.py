@@ -1684,13 +1684,25 @@ class ApiIntegrationDialog(tk.Toplevel):
                     continue
 
                 self.after(0, lambda r=row: self._append_log(f"--- Создаю тираж для GTIN {r['gtin']}..."))
-                tirage_payload = {"order_product_id": int(api_product_id), "qty": int(row['dm_quantity'])}
-                response_data = self.api_service.create_printrun(tirage_payload)
-                new_printrun_id = response_data.get('printrun_id')
+                
+                # --- ИЗМЕНЕНИЕ: Добавляем обработку специфичной ошибки 400 ---
+                try:
+                    tirage_payload = {"order_product_id": int(api_product_id), "qty": int(row['dm_quantity'])}
+                    response_data = self.api_service.create_printrun(tirage_payload)
+                    new_printrun_id = response_data.get('printrun_id')
 
-                if not new_printrun_id:
-                    raise Exception(f"API не вернуло 'printrun_id' для GTIN {row['gtin']}.")
-
+                    if not new_printrun_id:
+                        raise Exception(f"API не вернуло 'printrun_id' для GTIN {row['gtin']}.")
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 400:
+                        # Если это ошибка 400, прерываем цикл и выводим дружелюбное сообщение
+                        self.after(0, lambda: self._append_log("\nAPI вернуло ошибку. Вероятно, система еще обрабатывает предыдущий запрос."))
+                        self.after(0, lambda: self._append_log("Пожалуйста, подождите несколько минут и запустите операцию 'Разбить на тиражи' еще раз."))
+                        self.after(0, self._update_buttons_state)
+                        return # Выходим из функции _split_runs_task
+                    else:
+                        raise # Если другая ошибка, пробрасываем ее дальше
+                
                 # Обновляем нашу БД
                 with self._get_client_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -1762,40 +1774,32 @@ class ApiIntegrationDialog(tk.Toplevel):
             if not details_to_process:
                 raise Exception("Не найдено тиражей для скачивания кодов.")
 
-            zip_buffer = io.BytesIO()
-            import zipfile
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-                for i, detail in enumerate(details_to_process):
-                    self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос кодов для тиража ID {d['api_id']}..."))
-                    response_data = self.api_service.download_printrun_json({"printrun_id": detail['api_id']})
-                    codes = response_data.get('codes', [])
-                    if not codes:
-                        self.after(0, lambda d=detail: self._append_log(f"  Коды для тиража {d['api_id']} еще не готовы или отсутствуют."))
-                        continue
-                    
-                    csv_content = "\n".join(codes)
-                    filename = f"{i+1}_order_{self.order_id}_gtin_{detail['gtin']}_{len(codes)}codes.csv"
-                    zf.writestr(filename, csv_content)
-                    self.after(0, lambda f=filename, c=len(codes): self._append_log(f"  Создан файл '{f}' с {c} кодами."))
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    for i, detail in enumerate(details_to_process):
+                        self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос кодов для тиража ID {d['api_id']}..."))
+                        response_data = self.api_service.download_printrun_json({"printrun_id": detail['api_id']})
+                        codes = response_data.get('codes', [])
+                        if not codes:
+                            self.after(0, lambda d=detail: self._append_log(f"  Коды для тиража {d['api_id']} еще не готовы или отсутствуют."))
+                            continue
+                        
+                        cur.execute(
+                            "UPDATE dmkod_aggregation_details SET api_codes_json = %s WHERE id = %s",
+                            (json.dumps({'codes': codes}), detail['id'])
+                        )
+                        self.after(0, lambda c=len(codes), d_id=detail['id']: self._append_log(f"  Сохранено {c} кодов в БД для строки ID {d_id}."))
 
-            zip_buffer.seek(0)
-            
-            # Диалог сохранения файла должен вызываться из главного потока
-            def save_zip():
-                save_path = filedialog.asksaveasfilename(defaultextension=".zip", initialfile=f"codes_order_{self.order_id}.zip", filetypes=[("ZIP archive", "*.zip")])
-                if save_path:
-                    with open(save_path, 'wb') as f:
-                        f.write(zip_buffer.getvalue())
-                    messagebox.showinfo("Успех", f"Архив с кодами успешно сохранен:\n{save_path}", parent=self)
-                    # Обновляем статус после успешного сохранения
-                    with self._get_client_db_connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s", (self.order_id,))
-                        conn.commit()
-                    self.order_data['api_status'] = 'Коды скачаны'
-                    self._update_buttons_state()
+                conn.commit() # Фиксируем сохранение всех JSON
 
-            self.after(0, save_zip)
+            # Обновляем статус после успешного сохранения
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s", (self.order_id,))
+                conn.commit()
+            self.order_data['api_status'] = 'Коды скачаны'
+            self.after(0, lambda: self._append_log("\nВсе коды успешно сохранены в базу данных."))
+            self.after(0, self._update_buttons_state)
 
         except Exception as e:
             self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
