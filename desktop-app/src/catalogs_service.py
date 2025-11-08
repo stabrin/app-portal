@@ -67,6 +67,10 @@ class CatalogsService:
     def process_product_groups_import(self, df: pd.DataFrame):
         """Обрабатывает импорт товарных групп из DataFrame."""
         with self.get_db_connection() as conn:
+            # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
+            # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
+            df = df.where(pd.notna(df), None)
+
             with conn.cursor() as cur:
                 # Разделяем данные на те, что с ID (для обновления) и без (для вставки)
                 update_df = df[pd.to_numeric(df['id'], errors='coerce').notna()]
