@@ -159,7 +159,7 @@ class SupplyNotificationService:
 
     def create_order_from_notification(self, notification_id: int):
         """
-        Создает заказ в таблице 'orders' на основе данных из уведомления о поставке.
+        Создает или обновляет заказ в таблице 'orders' на основе данных из уведомления о поставке.
         Возвращает кортеж (bool, str) - успех и сообщение.
         """
         with self.get_db_connection() as conn:
@@ -185,16 +185,15 @@ class SupplyNotificationService:
                     msg = f"Разделите это уведомление на {len(product_groups)} и после этого создайте отдельные заказы для каждой товарной группы."
                     return False, msg
 
-                # 3. Проверяем тип сценария
+                # 3. Проверяем тип сценария и формируем статус
                 scenario_data = notification['scenario_data']
                 if scenario_data.get('type') == 'Ручная агрегация':
                     return False, "Создание заказа для сценария 'Ручная агрегация' находится в процессе реализации."
-
-                # 4. Готовим данные и создаем заказ в 'orders'
+                
                 status = 'dmkod' if scenario_data.get('dm_source') == 'Заказ в ДМ.Код' else 'new'
                 product_group_id = product_groups[0].get('id')
 
-                # --- НОВАЯ ЛОГИКА: Проверяем, существует ли уже заказ для этого уведомления ---
+                # 4. Проверяем, существует ли уже заказ для этого уведомления
                 cur.execute("SELECT id FROM orders WHERE notification_id = %s", (notification_id,))
                 existing_order = cur.fetchone()
 
@@ -232,9 +231,9 @@ class SupplyNotificationService:
                     logging.info(f"Создан новый заказ с ID {order_id} из уведомления ID {notification_id}.")
                     message = f"Заказ №{order_id} успешно создан на основе уведомления."
 
-                # 5. Переносим детализацию
+                # 5. Переносим детализацию (общая логика для создания и обновления)
                 cur.execute("""
-                    SELECT gtin, quantity, production_date, expiry_date 
+                    SELECT gtin, quantity, aggregation, production_date, expiry_date 
                     FROM ap_supply_notification_details 
                     WHERE notification_id = %s
                 """, (notification_id,))
@@ -243,11 +242,11 @@ class SupplyNotificationService:
                 if details:
                     from psycopg2.extras import execute_values
                     details_to_insert = [
-                        (order_id, d['gtin'], d['quantity'], d['production_date'], d['expiry_date'])
+                        (order_id, d['gtin'], d['quantity'], d.get('aggregation', 0), d['production_date'], d['expiry_date'])
                         for d in details
                     ]
                     insert_query = """
-                        INSERT INTO dmkod_aggregation_details (order_id, gtin, dm_quantity, production_date, expiry_date)
+                        INSERT INTO dmkod_aggregation_details (order_id, gtin, dm_quantity, aggregation_level, production_date, expiry_date)
                         VALUES %s
                     """
                     execute_values(cur, insert_query, details_to_insert)
