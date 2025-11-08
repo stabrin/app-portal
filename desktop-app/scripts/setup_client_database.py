@@ -147,8 +147,11 @@ def update_client_db_schema(conn):
                                                    api_status VARCHAR(36),
                                                    api_order_id INTEGER,
                                                    participant_id INTEGER,
-                                                   product_group_id INTEGER REFERENCES {pg_table}(id) );
+                                                   product_group_id INTEGER );
         """).format(orders=sql.Identifier(orders_table), pg_table=sql.Identifier(product_groups_table)),
+        # --- ИСПРАВЛЕНИЕ: Отделяем создание внешнего ключа, чтобы избежать ошибок при повторном запуске ---
+        sql.SQL("ALTER TABLE {orders} DROP CONSTRAINT IF EXISTS orders_product_group_id_fkey;").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("ALTER TABLE {orders} ADD CONSTRAINT orders_product_group_id_fkey FOREIGN KEY (product_group_id) REFERENCES {pg_table}(id);").format(orders=sql.Identifier(orders_table), pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_orders_client_name ON {orders}(client_name);").format(orders=sql.Identifier(orders_table)),
 
         sql.SQL("""
