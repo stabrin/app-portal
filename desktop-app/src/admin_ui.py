@@ -1047,6 +1047,404 @@ class AddClientDialog(tk.Toplevel):
         self.result = {'name': name, 'inn': inn if inn else None}
         self.destroy()
 
+class NotificationEditorDialog(tk.Toplevel):
+    """Диалог для создания/редактирования уведомления."""
+    def __init__(self, parent, user_info, notification_id=None):
+        super().__init__(parent)
+        title = f"Редактирование уведомления №{notification_id}" if notification_id else "Новое уведомление о поставке"
+        self.title(title)
+        self.result = None
+        self.user_info = user_info
+        self.notification_id = notification_id
+
+        logging.info(f"Инициализация NotificationEditorDialog. ID: {self.notification_id}")
+
+        from .supply_notification_service import SupplyNotificationService
+        self.on_save_callback = None
+        self.service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
+        from .catalogs_service import CatalogsService
+        self.catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
+
+        self.initial_data = {}
+        if notification_id:
+            logging.info(f"Загрузка данных для уведомления ID: {notification_id}")
+            self.initial_data = self.service.get_notification_by_id(notification_id)
+            logging.info(f"Данные загружены: {self.initial_data}")
+
+        self._create_widgets()
+
+    def _create_widgets(self):
+        logging.info("Начало создания виджетов в NotificationEditorDialog.")
+        paned_window = ttk.PanedWindow(self, orient=tk.VERTICAL)
+        paned_window.pack(fill=tk.BOTH, expand=True)
+
+        top_pane = ttk.Frame(paned_window, padding=10)
+        paned_window.add(top_pane, weight=1)
+
+        header_frame = ttk.LabelFrame(top_pane, text="Основная информация")
+        header_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(header_frame, text="Сценарий маркировки:").pack(anchor="w")
+        self.scenario_var = tk.StringVar()
+        self.scenario_combo = ttk.Combobox(header_frame, textvariable=self.scenario_var, state="readonly")
+        self.scenario_combo.pack(fill=tk.X, pady=2)
+        self._load_scenarios()
+        self.scenario_combo.bind("<<ComboboxSelected>>", self._on_scenario_change)
+
+        client_frame = ttk.Frame(header_frame)
+        client_frame.pack(fill=tk.X, pady=2)
+        ttk.Label(client_frame, text="Клиент:").pack(anchor="w")
+        self.client_var = tk.StringVar()
+        client_inner_frame = ttk.Frame(client_frame)
+        client_inner_frame.pack(fill=tk.X)
+        self.client_combo = ttk.Combobox(client_inner_frame, textvariable=self.client_var, state="readonly")
+        self.client_combo.bind("<Button-1>", self._on_client_combo_click)
+        self.client_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        ttk.Label(header_frame, text="Товарные группы:").pack(anchor="w")
+        self.product_groups_listbox = tk.Listbox(header_frame, selectmode=tk.MULTIPLE, height=3)
+        self.product_groups_listbox.pack(fill=tk.X, pady=2)
+        self._load_product_groups()
+
+        ttk.Label(header_frame, text="Планируемая дата прибытия:").pack(anchor="w")
+        self.arrival_date_var = tk.StringVar()
+        date_frame = ttk.Frame(header_frame)
+        date_frame.pack(fill=tk.X, pady=2)
+        self.arrival_date_entry = ttk.Entry(date_frame, textvariable=self.arrival_date_var)
+        self.arrival_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(date_frame, text="...", width=3, command=self._open_calendar_dialog).pack(side=tk.LEFT, padx=(5,0))
+
+        ttk.Label(header_frame, text="Номер контейнера/автомобиля:").pack(anchor="w")
+        self.vehicle_number_entry = ttk.Entry(header_frame)
+        self.vehicle_number_entry.pack(fill=tk.X, pady=2)
+
+        ttk.Label(header_frame, text="Комментарии:").pack(anchor="w")
+        self.comments_text = tk.Text(header_frame, height=3)
+        self.comments_text.pack(fill=tk.X, pady=2)
+
+        if self.notification_id:
+            docs_frame = ttk.LabelFrame(top_pane, text="Документы от клиента")
+            docs_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+            
+            docs_controls = ttk.Frame(docs_frame)
+            docs_controls.pack(fill=tk.X, pady=2)
+            ttk.Button(docs_controls, text="Загрузить", command=self._upload_client_document).pack(side=tk.LEFT)
+            ttk.Button(docs_controls, text="Скачать", command=self._download_client_document).pack(side=tk.LEFT, padx=5)
+            ttk.Button(docs_controls, text="Удалить", command=self._delete_client_document).pack(side=tk.LEFT)
+
+            self.files_listbox = tk.Listbox(docs_frame, height=3)
+            self.files_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            self._load_notification_files()
+
+        if self.notification_id:
+            bottom_pane = ttk.Frame(paned_window, padding=10)
+            paned_window.add(bottom_pane, weight=2)
+
+            details_frame = ttk.LabelFrame(bottom_pane, text="Детализация уведомления")
+            details_frame.pack(fill=tk.BOTH, expand=True)
+
+            details_controls = ttk.Frame(details_frame)
+            details_controls.pack(fill=tk.X, pady=5)
+            ttk.Button(details_controls, text="Скачать шаблон", command=self._download_details_template).pack(side=tk.LEFT)
+            ttk.Button(details_controls, text="Загрузить из файла", command=self._upload_details_file).pack(side=tk.LEFT, padx=5)
+            ttk.Button(details_controls, text="Сохранить детализацию", command=self._save_details_from_table).pack(side=tk.RIGHT)
+
+            self.details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
+            self.details_tree = ttk.Treeview(details_frame, columns=self.details_cols, show='headings')
+            
+            col_map = {
+                "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "quantity": ("Кол-во", 80, "e"),
+                "aggregation": ("Агрегация", 80, "center"), "production_date": ("Дата произв.", 100, "center"),
+                "shelf_life_months": ("Срок годн. (мес)", 100, "center"), "expiry_date": ("Годен до", 100, "center")
+            }
+            for col, (text, width, anchor) in col_map.items():
+                self.details_tree.heading(col, text=text)
+                self.details_tree.column(col, width=width, anchor=anchor)
+            
+            self.details_tree.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.details_tree.bind("<Double-1>", self._on_details_double_click)
+            self._load_notification_details()
+
+        buttons_frame = ttk.Frame(top_pane)
+        buttons_frame.pack(fill=tk.X, pady=(10,0))
+        ttk.Button(buttons_frame, text="Сохранить", command=self._save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(buttons_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
+
+        if self.initial_data:
+            self._load_initial_values()
+        
+        self._on_scenario_change()
+        logging.info("Создание виджетов в NotificationEditorDialog завершено.")
+
+        if self.notification_id:
+            self.scenario_combo.config(state='disabled')
+            self.client_combo.config(state='disabled')
+
+    def _load_notification_files(self):
+        self.files_listbox.delete(0, tk.END)
+        self.client_files = self.service.get_notification_files(self.notification_id)
+        for f in self.client_files:
+            self.files_listbox.insert(tk.END, f['filename'])
+
+    def _upload_client_document(self):
+        filepath = filedialog.askopenfilename(parent=self)
+        if not filepath: return
+        try:
+            filename = os.path.basename(filepath)
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            self.service.add_notification_file(self.notification_id, filename, file_data, 'client_document')
+            self._load_notification_files()
+            messagebox.showinfo("Успех", "Файл успешно загружен.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить файл: {e}", parent=self)
+
+    def _download_client_document(self):
+        selected_indices = self.files_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Внимание", "Выберите файл для скачивания.", parent=self)
+            return
+        file_id = self.client_files[selected_indices[0]]['id']
+        file_content, filename = self.service.get_file_content(file_id)
+        save_path = filedialog.asksaveasfilename(initialfile=filename, parent=self)
+        if save_path:
+            with open(save_path, 'wb') as f:
+                f.write(file_content)
+            messagebox.showinfo("Успех", "Файл сохранен.", parent=self)
+
+    def _delete_client_document(self):
+        selected_indices = self.files_listbox.curselection()
+        if not selected_indices:
+            messagebox.showwarning("Внимание", "Выберите файл для удаления.", parent=self)
+            return
+        if not messagebox.askyesno("Подтверждение", "Удалить выбранный файл?", parent=self):
+            return
+        file_id = self.client_files[selected_indices[0]]['id']
+        self.service.delete_notification_file(file_id)
+        self._load_notification_files()
+
+    def _load_notification_details(self):
+        for i in self.details_tree.get_children(): self.details_tree.delete(i)
+        details = self.service.get_notification_details(self.notification_id)
+        for item in details:
+            values = [item.get(col, '') for col in self.details_cols]
+            self.details_tree.insert('', 'end', iid=item['id'], values=values)
+
+    def _on_details_double_click(self, event):
+        region = self.details_tree.identify("region", event.x, event.y)
+        if region != "cell": return
+
+        column_id = self.details_tree.identify_column(event.x)
+        column_index = int(column_id.replace('#', '')) - 1
+        item_id = self.details_tree.focus()
+        
+        x, y, width, height = self.details_tree.bbox(item_id, column_id)
+
+        entry_var = tk.StringVar()
+        entry = ttk.Entry(self.details_tree, textvariable=entry_var)
+        entry.place(x=x, y=y, width=width, height=height)
+        
+        current_value = self.details_tree.item(item_id, "values")[column_index]
+        entry_var.set(current_value)
+        entry.focus_set()
+
+        def on_focus_out(event):
+            new_value = entry_var.get()
+            current_values = list(self.details_tree.item(item_id, "values"))
+            current_values[column_index] = new_value
+            self.details_tree.item(item_id, values=tuple(current_values))
+            entry.destroy()
+
+        entry.bind("<FocusOut>", on_focus_out)
+        entry.bind("<Return>", on_focus_out)
+
+    def _download_details_template(self):
+        df = self.service.get_formalization_template()
+        save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], parent=self)
+        if save_path:
+            df.to_excel(save_path, index=False)
+            messagebox.showinfo("Успех", "Шаблон успешно сохранен.", parent=self)
+
+    def _upload_details_file(self):
+        if not messagebox.askyesno("Подтверждение", "Загрузка из файла полностью заменит текущую детализацию. Продолжить?", parent=self):
+            return
+        filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+        if not filepath: return
+        try:
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            rows_processed = self.service.process_formalized_file(self.notification_id, file_data)
+            self._load_notification_details()
+            messagebox.showinfo("Успех", f"Файл успешно обработан. Загружено {rows_processed} строк.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось обработать файл: {e}", parent=self)
+
+    def _save_details_from_table(self):
+        details_to_save = []
+        for item_id in self.details_tree.get_children():
+            raw_values = self.details_tree.item(item_id, "values")
+            processed_values = [
+                int(raw_values[0]) if raw_values[0] else None,
+                raw_values[1] if raw_values[1] else None,
+                int(raw_values[2]) if raw_values[2] else None,
+                int(raw_values[3]) if raw_values[3] else None,
+                raw_values[4] if raw_values[4] else None,
+                int(raw_values[5]) if raw_values[5] else None,
+                raw_values[6] if raw_values[6] else None
+            ]
+            details_to_save.append(tuple(processed_values))
+        try:
+            logging.debug(f"Данные для сохранения детализации: {details_to_save}")
+            self.service.save_notification_details(details_to_save)
+            messagebox.showinfo("Успех", "Изменения в детализации успешно сохранены.", parent=self)
+        except Exception as e:
+            logging.error(f"Ошибка при сохранении детализации: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось сохранить детализацию: {e}", parent=self)
+
+    def _on_client_combo_click(self, event):
+        if not hasattr(self, 'add_client_button'):
+            self.add_client_button = ttk.Button(self.client_combo.master, text="Добавить нового", command=self._add_new_client)
+            self.add_client_button.pack(side=tk.RIGHT, padx=5)
+
+    def _add_new_client(self):
+        dialog = AddClientDialog(self)
+        self.wait_window(dialog)
+        if dialog.result:
+            try:
+                self.catalog_service.upsert_local_client(dialog.result)
+                self._load_clients(source=self.client_source)
+                self.client_var.set(dialog.result['name'])
+                messagebox.showinfo("Успех", f"Клиент '{dialog.result['name']}' успешно добавлен.", parent=self)
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось добавить клиента: {e}", parent=self)
+
+    def _open_calendar_dialog(self):
+        cal_dialog = CalendarDialog(self, initial_date=datetime.strptime(self.arrival_date_var.get(), "%Y-%m-%d") if self.arrival_date_var.get() else datetime.now())
+        self.wait_window(cal_dialog)
+        if cal_dialog.result:
+            self.arrival_date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
+
+    def _on_scenario_change(self, event=None):
+        selected_scenario_name = self.scenario_var.get()
+        if not selected_scenario_name: return
+        selected_scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
+        if not selected_scenario: return
+        scenario_data = selected_scenario.get('scenario_data', {})
+        if scenario_data.get('dm_source') == 'Заказ в ДМ.Код':
+            self._load_clients(source='api')
+        else:
+            self._load_clients(source='local')
+
+    def _load_scenarios(self):
+        scenarios = self.catalog_service.get_marking_scenarios()
+        self.scenarios = scenarios
+        self.scenario_combo['values'] = [s['name'] for s in scenarios]
+        if scenarios:
+            if self.initial_data:
+                initial_scenario = next((s for s in self.scenarios if s['id'] == self.initial_data.get('scenario_id')), None)
+                if initial_scenario:
+                    self.scenario_var.set(initial_scenario['name'])
+            else:
+                self.scenario_var.set(scenarios[0]['name'])
+
+    def _load_clients(self, source='local'):
+        self.client_source = source
+        clients = []
+        try:
+            if source == 'api':
+                clients = self.catalog_service.get_participants_catalog()
+            else:
+                clients = self.catalog_service.get_local_clients()
+        except Exception as e:
+            messagebox.showerror("Ошибка загрузки клиентов", f"Не удалось загрузить список клиентов: {e}", parent=self)
+
+        self.clients = clients
+        self.client_combo['values'] = [c.get('name', '') for c in clients]
+
+        if clients:
+            if self.initial_data:
+                initial_client_name = self.initial_data.get('client_name')
+                if initial_client_name in self.client_combo['values']:
+                    self.client_var.set(initial_client_name)
+                else:
+                    self.client_var.set(clients[0]['name'])
+            else:
+                self.client_var.set(clients[0]['name'])
+        else:
+            self.client_var.set('')
+
+    def _load_product_groups(self):
+        product_groups = self.catalog_service.get_product_groups()
+        self.product_groups = product_groups
+        for pg in product_groups:
+            self.product_groups_listbox.insert(tk.END, pg['display_name'])
+
+    def _load_initial_values(self):
+        data = self.initial_data
+        if not data: return
+        
+        # Сценарий и клиент уже загружаются в _load_scenarios и _load_clients
+        
+        # Товарные группы
+        initial_pg_ids = {pg['id'] for pg in data.get('product_groups', [])}
+        for i, pg in enumerate(self.product_groups):
+            if pg['id'] in initial_pg_ids:
+                self.product_groups_listbox.select_set(i)
+
+        # Дата прибытия
+        if data.get('planned_arrival_date'):
+            self.arrival_date_var.set(str(data['planned_arrival_date']))
+
+        # Номер ТС
+        self.vehicle_number_entry.insert(0, data.get('vehicle_number', ''))
+
+        # Комментарии
+        self.comments_text.insert('1.0', data.get('comments', ''))
+
+    def _save(self):
+        try:
+            # Сбор данных
+            selected_scenario_name = self.scenario_var.get()
+            scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
+            
+            selected_client_name = self.client_var.get()
+            client = next((c for c in self.clients if c['name'] == selected_client_name), None)
+
+            selected_pg_indices = self.product_groups_listbox.curselection()
+            selected_pgs = [self.product_groups[i] for i in selected_pg_indices]
+
+            data = {
+                'scenario_id': scenario['id'],
+                'scenario_name': scenario['name'],
+                'client_name': client['name'],
+                'product_groups': [{'id': pg['id'], 'name': pg['display_name']} for pg in selected_pgs],
+                'planned_arrival_date': self.arrival_date_var.get() or None,
+                'vehicle_number': self.vehicle_number_entry.get(),
+                'comments': self.comments_text.get('1.0', 'end-1c')
+            }
+            
+            if self.client_source == 'api':
+                data['client_api_id'] = client['id']
+                data['client_local_id'] = None
+            else: # local
+                data['client_api_id'] = None
+                data['client_local_id'] = client['id']
+
+            if self.notification_id:
+                self.service.update_notification(self.notification_id, data)
+            else:
+                self.notification_id = self.service.create_notification(data)
+                self.title(f"Редактирование уведомления №{self.notification_id}")
+
+            messagebox.showinfo("Успех", "Уведомление успешно сохранено.", parent=self)
+            if self.on_save_callback:
+                self.on_save_callback()
+            self.destroy()
+
+        except Exception as e:
+            logging.error(f"Ошибка сохранения уведомления: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось сохранить уведомление: {e}", parent=self)
+
 class AdminWindow(tk.Tk):
     """Главное окно для роли 'администратор'."""
     def __init__(self, user_info):
@@ -1279,7 +1677,7 @@ class AdminWindow(tk.Tk):
                 logging.info("Открытие редактора для создания нового уведомления.")
             
             # --- ИСПРАВЛЕНИЕ: Передаем user_info и notification_id в правильный конструктор ---
-            dialog = NotificationEditorDialog(self, user_info=self.user_info, notification_id=notification_id)
+            dialog = NotificationEditorDialog(self, user_info=self.user_info, notification_id=int(notification_id) if notification_id else None)
             # --- ИЗМЕНЕНИЕ: Убираем ожидание, чтобы окно не было модальным ---
             logging.info("Экземпляр NotificationEditorDialog создан.")
             # self.wait_window(dialog) # Убираем блокировку
@@ -2024,276 +2422,8 @@ class NewNotificationDialog(tk.Toplevel):
         self.result = (name, arrival_date)
         self.destroy()
 
-class NotificationEditorDialog(tk.Toplevel):
-    """Диалог для создания/редактирования уведомления."""
-    def __init__(self, parent, initial_date=None):
-        super().__init__(parent)
-        self.title("Выберите дату")
-        self.transient(parent)
-        self.grab_set()
-        self.result = None
-
-        if initial_date:
-            self._current_date = initial_date
-        else:
-            self._current_date = datetime.now()
-
-        self._create_widgets()
-        self._update_calendar()
-
-    def _create_widgets(self):
-        nav_frame = ttk.Frame(self)
-        nav_frame.pack(pady=5)
-        ttk.Button(nav_frame, text="<", command=self._prev_month).pack(side=tk.LEFT)
-        self.month_year_label = ttk.Label(nav_frame, font=("Arial", 12, "bold"), width=20, anchor="center")
-        self.month_year_label.pack(side=tk.LEFT, padx=10)
-        ttk.Button(nav_frame, text=">", command=self._next_month).pack(side=tk.LEFT)
-
-        self.calendar_frame = ttk.Frame(self)
-        self.calendar_frame.pack(padx=10, pady=10)
-
-    def _update_calendar(self):
-        for widget in self.calendar_frame.winfo_children():
-            widget.destroy()
-
-        self.month_year_label.config(text=self._current_date.strftime("%B %Y"))
-
-        days_of_week = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-        for i, day in enumerate(days_of_week):
-            ttk.Label(self.calendar_frame, text=day).grid(row=0, column=i, padx=2, pady=2)
-
-        first_day_of_month = self._current_date.replace(day=1)
-        start_weekday = first_day_of_month.weekday() # 0=Пн, 6=Вс
-
-        import calendar
-        month_days = calendar.monthrange(self._current_date.year, self._current_date.month)[1]
-
-        current_day = 1
-        for row in range(1, 7):
-            for col in range(7):
-                if (row == 1 and col < start_weekday) or current_day > month_days:
-                    continue
-                
-                btn = ttk.Button(self.calendar_frame, text=str(current_day), width=4,
-                                 command=lambda d=current_day: self._select_date(d))
-                btn.grid(row=row, column=col, padx=1, pady=1)
-                current_day += 1
-
-    def _select_date(self, day):
-        self.result = self._current_date.replace(day=day).date()
-        self.destroy()
-
-    def _prev_month(self):
-        self._current_date = self._current_date - pd.DateOffset(months=1)
-        self._update_calendar()
-
-    def _next_month(self):
-        self._current_date = self._current_date + pd.DateOffset(months=1)
-        self._update_calendar()
-
-        notebook = ttk.Notebook(parent_frame)
-        notebook.pack(expand=True, fill="both")
-
-        # --- Вкладка 1: Участники (существующая логика) ---
-        participants_frame = ttk.Frame(notebook, padding="10")
-        notebook.add(participants_frame, text="Участники")
-
-        participants_controls = ttk.Frame(participants_frame)
-        participants_controls.pack(fill=tk.X, pady=5)
-
-        # --- ИЗМЕНЕНИЕ: Обновляем колонки в таблице ---
-        participants_tree = ttk.Treeview(participants_frame, columns=('name', 'inn', 'poa_end'), show='headings')
-        participants_tree.heading('name', text='Наименование')
-        participants_tree.heading('inn', text='Источник (ИНН)')
-        participants_tree.heading('poa_end', text='Окончание доверенности')
-        participants_tree.column('name', width=300)
-        participants_tree.column('inn', width=150, anchor=tk.CENTER)
-        participants_tree.column('poa_end', width=150, anchor=tk.CENTER)
-        participants_tree.pack(expand=True, fill='both')
-
-        def refresh_participants_list():
-            # Очищаем дерево перед обновлением
-            for i in participants_tree.get_children():
-                participants_tree.delete(i)
-            try:
-                participants_list = service.get_participants_catalog()
-                # --- ИЗМЕНЕНИЕ: Заполняем новые колонки ---
-                for n in participants_list:
-                    # Извлекаем дату и обрезаем время
-                    poa_end_date = n.get('poa_validity_end', '')
-                    if poa_end_date and 'T' in poa_end_date:
-                        poa_end_date = poa_end_date.split('T')[0]
-                    participants_tree.insert('', 'end', values=(n.get('name', ''), n.get('inn', ''), poa_end_date))
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось загрузить справочник: {e}", parent=self)
-
-        ttk.Button(participants_controls, text="Обновить", command=refresh_participants_list).pack(side=tk.LEFT, padx=2)
-        refresh_participants_list()
-
-        # --- Вкладка 2: Товарные группы ---
-        product_groups_frame = ttk.Frame(notebook, padding="10")
-        notebook.add(product_groups_frame, text="Товарные группы")
-
-        pg_controls = ttk.Frame(product_groups_frame)
-        pg_controls.pack(fill=tk.X, pady=5)
-
-        pg_tree = ttk.Treeview(product_groups_frame, columns=('id', 'name', 'display_name'), show='headings')
-        pg_tree.heading('id', text='ID')
-        pg_tree.heading('name', text='Системное имя')
-        pg_tree.heading('display_name', text='Отображаемое имя')
-        pg_tree.column('id', width=50, anchor=tk.CENTER)
-        pg_tree.column('name', width=200)
-        pg_tree.column('display_name', width=300)
-        pg_tree.pack(expand=True, fill='both')
-
-        def refresh_product_groups():
-            for i in pg_tree.get_children(): pg_tree.delete(i)
-            try:
-                groups = service.get_product_groups()
-                for group in groups:
-                    pg_tree.insert('', 'end', values=(group['id'], group['group_name'], group['display_name']))
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось загрузить товарные группы: {e}", parent=self)
-
-        ttk.Button(pg_controls, text="Обновить", command=refresh_product_groups).pack(side=tk.LEFT, padx=2)
-        refresh_product_groups()
-
-        # --- Вкладка 3: Товары ---
-        products_frame = ttk.Frame(notebook, padding="10")
-        notebook.add(products_frame, text="Товары")
-
-        products_controls = ttk.Frame(products_frame)
-        products_controls.pack(fill=tk.X, pady=5)
-
-        products_tree = ttk.Treeview(products_frame, columns=('gtin', 'name'), show='headings')
-        products_tree.heading('gtin', text='GTIN')
-        products_tree.heading('name', text='Наименование')
-        products_tree.column('gtin', width=150, anchor=tk.CENTER)
-        products_tree.column('name', width=400)
-        products_tree.pack(expand=True, fill='both')
-
-        def refresh_products():
-            for i in products_tree.get_children(): products_tree.delete(i)
-            try:
-                products = service.get_products()
-                for product in products:
-                    products_tree.insert('', 'end', values=(product['gtin'], product['name']))
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось загрузить товары: {e}", parent=self)
-
-        ttk.Button(products_controls, text="Обновить", command=refresh_products).pack(side=tk.LEFT, padx=2)
-        refresh_products()
-
-    def _create_orders_tab(self, parent_frame):
-        """Создает содержимое для вкладки 'Заказы' с разделением на 'В работе' и 'Архив'."""
-        notebook = ttk.Notebook(parent_frame)
-        notebook.pack(expand=True, fill="both")
-
-        in_progress_frame = ttk.Frame(notebook)
-        archive_frame = ttk.Frame(notebook)
-
-        notebook.add(in_progress_frame, text="В работе")
-        notebook.add(archive_frame, text="Архив")
-
-        def _create_orders_view(parent, is_archive):
-            """Вспомогательная функция для создания представления (таблицы) заказов."""
-            view_frame = ttk.Frame(parent)
-            view_frame.pack(expand=True, fill="both")
-
-            controls_frame = ttk.Frame(view_frame)
-            controls_frame.pack(fill=tk.X, pady=5)
-
-            cols = ('id', 'client', 'date', 'status') # Используем старый набор колонок для простоты
-            tree = ttk.Treeview(view_frame, columns=cols, show='headings')
-
-            tree.heading('id', text='ID')
-            tree.heading('client', text='Клиент')
-            tree.heading('date', text='Дата')
-            tree.heading('status', text='Статус')
-
-            tree.column('id', width=50, anchor=tk.CENTER)
-            tree.column('client', width=300)
-            tree.column('date', width=120)
-            tree.column('status', width=120)
-
-            tree.pack(expand=True, fill="both", side="left")
-
-            scrollbar = ttk.Scrollbar(view_frame, orient="vertical", command=tree.yview)
-            tree.configure(yscrollcommand=scrollbar.set)
-            scrollbar.pack(side="right", fill="y")
-
-            def load_data():
-                for i in tree.get_children():
-                    tree.delete(i)
-                try:
-                    with PrintingService._get_client_db_connection(self.user_info) as conn:
-                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                            status_filter = "status LIKE 'Архив%%'" if is_archive else "status NOT LIKE 'Архив%%'"
-                            query = f"SELECT id, client_name, order_date, status FROM orders WHERE {status_filter} ORDER BY id DESC"
-                            cur.execute(query)
-                            for order in cur.fetchall():
-                                tree.insert('', 'end', iid=order['id'], values=(order['id'], order['client_name'], order['order_date'], order['status']))
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось загрузить заказы: {e}", parent=parent)
-
-            ttk.Button(controls_frame, text="Обновить", command=load_data).pack(side=tk.LEFT)
-            load_data()
-
-        # Создаем обе вкладки
-        _create_orders_view(in_progress_frame, is_archive=False)
-        _create_orders_view(archive_frame, is_archive=True)
-
-    def _open_dm_test_print_dialog(self):
-        """
-        Открывает диалог печати для тестирования DataMatrix.
-        Данные для кода будут получены автоматически сервисом печати
-        согласно источнику данных, указанному в макете.
-        """
-        # Готовим "пустой" набор данных. Сервис печати сам подставит реальные
-        # данные из БД, так как в макете указан источник "items.datamatrix".
-        item_data_for_printing = {
-            "items.datamatrix": None, # Значение будет получено из БД автоматически
-            # Добавляем заглушки для других возможных полей в макете, чтобы избежать ошибок.
-            "QR: Конфигурация сервера": json.dumps({"error": "not applicable"}),
-            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
-            "ap_workplaces.warehouse_name": "Тест DataMatrix (из БД)",
-            "ap_workplaces.workplace_number": "0" # ИСПРАВЛЕНИЕ: Преобразуем в строку, чтобы избежать ошибки 'int' object has no attribute 'isdigit'
-        }
-
-        # Вызываем нашу стандартную процедуру печати с предпросмотром.
-        PrintWorkplaceLabelsDialog(self, self.user_info, "Тестирование DataMatrix", [item_data_for_printing])
-
-
-    def _create_menu(self):
-        menubar = tk.Menu(self)
-        self.config(menu=menubar)
-
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Выход", command=self.quit)
-        menubar.add_cascade(label="Файл", menu=file_menu)
-
-        # Меню для управления устройствами
-        devices_menu = tk.Menu(menubar, tearoff=0)
-        devices_menu.add_command(label="Управление печатью", command=lambda: open_print_management_window(self))
-        devices_menu.add_separator()
-        devices_menu.add_command(label="Тестирование ДМ", command=self._open_dm_test_print_dialog)
-        menubar.add_cascade(label="Устройства", menu=devices_menu)
-
-        # Меню для управления пользователями
-        users_menu = tk.Menu(menubar, tearoff=0)
-        users_menu.add_command(label="Пользователи клиента", command=lambda: open_user_management_window(self, self.user_info))
-        menubar.add_cascade(label="Пользователи", menu=users_menu)
-
-        # Меню для настройки рабочих мест
-        setup_menu = tk.Menu(menubar, tearoff=0)
-        setup_menu.add_command(label="Настройка рабочих мест", command=lambda: open_workplace_setup_window(self, self.user_info))
-        setup_menu.add_separator()
-        setup_menu.add_command(label="Редактор макетов", command=lambda: open_label_editor_window(self, self.user_info))
-        menubar.add_cascade(label="Настройка", menu=setup_menu)
-
 class CalendarDialog(tk.Toplevel):
-    """Диалоговое окно с простым календарем."""
-    def __init__(self, parent, initial_date=None):
+    def __init__(self, parent, initial_date=None): # Переименованный класс
         super().__init__(parent)
         self.title("Выберите дату")
         self.transient(parent)
@@ -2357,78 +2487,3 @@ class CalendarDialog(tk.Toplevel):
     def _next_month(self):
         self._current_date = self._current_date + pd.DateOffset(months=1)
         self._update_calendar()
-
-class NewNotificationDialog(tk.Toplevel):
-    """Диалог для создания/редактирования уведомления."""
-    def __init__(self, parent, title="Новое уведомление", initial_name="", initial_date_str=""):
-        super().__init__(parent)
-        self.title(title)
-        self.transient(parent)
-        self.grab_set()
-        self.result = None
-
-        frame = ttk.Frame(self, padding="15")
-        frame.pack(fill=tk.BOTH, expand=True)
-
-        # Наименование
-        ttk.Label(frame, text="Наименование:").grid(row=0, column=0, sticky="w", pady=2)
-        name_frame = ttk.Frame(frame)
-        name_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
-        self.name_entry = ttk.Entry(name_frame, width=40)
-        self.name_entry.insert(0, initial_name)
-        self.name_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(name_frame, text="Вставить", command=self._paste_name).pack(side=tk.LEFT, padx=(5,0))
-
-        # Дата
-        ttk.Label(frame, text="Планируемая дата прибытия:").grid(row=2, column=0, sticky="w", pady=(10, 2))
-        date_frame = ttk.Frame(frame)
-        date_frame.grid(row=3, column=0, columnspan=2, sticky="ew")
-        self.date_var = tk.StringVar(value=initial_date_str)
-        self.date_entry = ttk.Entry(date_frame, textvariable=self.date_var, width=40)
-        self.date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(date_frame, text="...", width=3, command=self._open_calendar).pack(side=tk.LEFT, padx=(5,0))
-
-        # Кнопки OK/Отмена
-        button_frame = ttk.Frame(frame)
-        button_frame.grid(row=4, column=0, columnspan=2, pady=(20, 0), sticky="e")
-        ttk.Button(button_frame, text="OK", command=self._on_ok).pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.LEFT)
-
-        self.name_entry.focus_set()
-
-    def _paste_name(self):
-        try:
-            clipboard_text = self.clipboard_get()
-            self.name_entry.delete(0, tk.END)
-            self.name_entry.insert(0, clipboard_text)
-        except tk.TclError:
-            messagebox.showwarning("Буфер обмена", "Буфер обмена пуст или содержит нетекстовые данные.", parent=self)
-
-    def _open_calendar(self):
-        try:
-            initial_date = datetime.strptime(self.date_var.get(), "%Y-%m-%d")
-        except ValueError:
-            initial_date = datetime.now()
-        
-        cal_dialog = CalendarDialog(self, initial_date=initial_date)
-        self.wait_window(cal_dialog)
-        if cal_dialog.result:
-            self.date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
-
-    def _on_ok(self):
-        name = self.name_entry.get().strip()
-        if not name:
-            messagebox.showwarning("Внимание", "Наименование не может быть пустым.", parent=self)
-            return
-
-        date_str = self.date_var.get().strip()
-        arrival_date = None
-        if date_str:
-            try:
-                arrival_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-            except ValueError:
-                messagebox.showerror("Ошибка", "Неверный формат даты. Используйте ГГГГ-ММ-ДД или выберите из календаря.", parent=self)
-                return
-
-        self.result = (name, arrival_date)
-        self.destroy()
