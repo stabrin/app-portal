@@ -50,11 +50,6 @@ def update_schema(conn):
 
     # Список команд для обновления схемы
     sql_commands = [
-        # 1. Создание таблицы товарных групп 'dmkod_product_groups'
-        # --- ИЗМЕНЕНИЕ: Удаляем ограничение уникальности для group_name ---
-        # Сначала удаляем существующее ограничение, если оно есть, для обратной совместимости.
-        # Имя ограничения 'dmkod_product_groups_group_name_key' является стандартным для PostgreSQL.
-        sql.SQL("ALTER TABLE {pg_table} DROP CONSTRAINT IF EXISTS dmkod_product_groups_group_name_key;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("""
         CREATE TABLE IF NOT EXISTS {pg_table} (
             id SERIAL PRIMARY KEY,
@@ -69,7 +64,6 @@ def update_schema(conn):
         sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS code_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS dm_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("COMMENT ON COLUMN {pg_table}.dm_template IS 'Шаблон DataMatrix кода';").format(pg_table=sql.Identifier(product_groups_table)),
-        sql.SQL("CREATE INDEX IF NOT EXISTS idx_pg_group_name ON {pg_table}(group_name);").format(pg_table=sql.Identifier(product_groups_table)),
 
         # 2. Модификация таблицы 'orders'
         # Используем ALTER TABLE ... ADD COLUMN IF NOT EXISTS для безопасности

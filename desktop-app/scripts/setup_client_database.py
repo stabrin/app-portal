@@ -96,13 +96,15 @@ def update_client_db_schema(conn):
         # Таблица dmkod_product_groups должна быть создана ДО таблицы orders, т.к. orders на нее ссылается.
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS {pg_table} ( id SERIAL PRIMARY KEY,
-                                                     group_name VARCHAR(100) NOT NULL UNIQUE,
+                                                     group_name VARCHAR(100) NOT NULL,
                                                      display_name VARCHAR(255) NOT NULL,
                                                      fias_required BOOLEAN NOT NULL DEFAULT FALSE,
                                                      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                                                      code_template TEXT,
                                                      dm_template TEXT );
         """).format(pg_table=sql.Identifier(product_groups_table)),
+        # --- ИЗМЕНЕНИЕ: Удаляем ограничение уникальности для group_name для обратной совместимости ---
+        sql.SQL("ALTER TABLE {pg_table} DROP CONSTRAINT IF EXISTS dmkod_product_groups_group_name_key;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_pg_group_name ON {pg_table}(group_name);").format(pg_table=sql.Identifier(product_groups_table)),
 
         # === Блок из datamatrix-app ===
