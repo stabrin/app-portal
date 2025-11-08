@@ -1511,11 +1511,6 @@ class ApiIntegrationDialog(tk.Toplevel):
             self.export_integration_file_btn.pack(side=tk.LEFT, padx=2, pady=2)
             self.import_integration_file_btn = ttk.Button(reports_panel, text="Загрузить интеграционный файл", command=self._import_integration_file)
             self.import_integration_file_btn.pack(side=tk.LEFT, padx=2, pady=2)
-        
-        elif self.post_processing_mode == "Печать через Bartender":
-            self.create_view_btn = ttk.Button(reports_panel, text="Создать/Обновить View", command=self._create_bartender_view)
-            self.create_view_btn.pack(side=tk.LEFT, padx=2, pady=2)
-
 
         self.prepare_report_btn = ttk.Button(reports_panel, text="Подготовить отчет", command=self._prepare_report)
         self.prepare_report_btn.pack(side=tk.LEFT, padx=2, pady=2)
@@ -1874,16 +1869,11 @@ class ApiIntegrationDialog(tk.Toplevel):
         """Заглушка для загрузки интеграционного файла."""
         messagebox.showinfo("В разработке", "Функционал 'Загрузить интеграционный файл' находится в разработке.", parent=self)
 
-    def _create_bartender_view(self):
-        """Заглушка для создания/обновления представления для Bartender."""
-        messagebox.showinfo("В разработке", "Функционал 'Создать/Обновить View' для Bartender находится в разработке.", parent=self)
-
-
 
 
 class OrderEditorDialog(tk.Toplevel):
     """Диалоговое окно для редактирования деталей заказа."""
-    def __init__(self, parent, user_info, order_id):
+    def __init__(self, parent, user_info, order_id, scenario_data=None):
         super().__init__(parent)
         self.title(f"Редактор заказа №{order_id}")
         self.geometry("800x600")
@@ -1892,6 +1882,7 @@ class OrderEditorDialog(tk.Toplevel):
 
         self.user_info = user_info
         self.order_id = order_id
+        self.scenario_data = scenario_data if scenario_data else {}
 
         self._create_widgets()
         self._load_details()
@@ -1908,6 +1899,12 @@ class OrderEditorDialog(tk.Toplevel):
 
         ttk.Button(controls_frame, text="Сохранить изменения", command=self._save_changes).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame, text="Загрузить из файла", command=self._replace_from_file).pack(side=tk.LEFT, padx=2)
+
+        # --- НОВЫЙ БЛОК: Кнопка для Bartender ---
+        post_processing_mode = self.scenario_data.get('post_processing')
+        if post_processing_mode == "Печать через Bartender":
+            ttk.Button(controls_frame, text="Создать/Обновить View", command=self._create_bartender_view).pack(side=tk.LEFT, padx=2)
+
         ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
 
         tree_frame = ttk.Frame(main_frame)
@@ -2004,6 +2001,18 @@ class OrderEditorDialog(tk.Toplevel):
         """Заменяет детализацию из файла (логика из dmkod-integration-app)."""
         messagebox.showinfo("В разработке", "Функционал замены детализации из файла находится в разработке.", parent=self)
         # Здесь будет логика, адаптированная из dmkod-integration-app/app/routes.py, action 'replace_details'
+
+    def _create_bartender_view(self):
+        """Создает/обновляет представления для Bartender."""
+        try:
+            # Используем сервис печати, в который добавим новую функцию
+            result = PrintingService.create_bartender_views(self.user_info, self.order_id)
+            if result.get('success'):
+                messagebox.showinfo("Успех", result.get('message', 'Представления успешно созданы/обновлены.'), parent=self)
+            else:
+                messagebox.showerror("Ошибка", result.get('message', 'Произошла неизвестная ошибка.'), parent=self)
+        except Exception as e:
+            messagebox.showerror("Критическая ошибка", f"Не удалось создать представления: {e}", parent=self)
 
 class AdminWindow(tk.Tk):
     """Главное окно для роли 'администратор'."""
@@ -2653,25 +2662,30 @@ class AdminWindow(tk.Tk):
                 order_status = tree.item(item_id, "values")[2]
 
                 menu = tk.Menu(parent, tearoff=0)
-                # --- ИСПРАВЛЕНИЕ: "Редактировать" всегда открывает OrderEditorDialog ---
-                menu.add_command(label="Редактировать", command=lambda item_id=item_id: OrderEditorDialog(self, self.user_info, item_id))
+                
+                def open_correct_editor(order_id):
+                    """Проверяет сценарий и открывает соответствующий редактор."""
+                    try:
+                        with PrintingService._get_client_db_connection(self.user_info) as conn:
+                            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                                cur.execute("""
+                                    SELECT s.scenario_data FROM orders o
+                                    JOIN ap_marking_scenarios s ON o.scenario_id = s.id
+                                    WHERE o.id = %s
+                                """, (order_id,))
+                                result = cur.fetchone()
+                        scenario_data = result['scenario_data'] if result else {}
+                        # "Редактировать" всегда открывает OrderEditorDialog, передавая ему сценарий
+                        OrderEditorDialog(self, self.user_info, order_id, scenario_data)
+                    except Exception as e:
+                        messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
+
+                # --- ИСПРАВЛЕНИЕ: "Редактировать" теперь вызывает новую функцию ---
+                menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_editor_with_scenario(item_id))
                 menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
 
                 if order_status in ('delta', 'dmkod'):
-                    # --- ИЗМЕНЕНИЕ: Логика определения сценария перенесена сюда, в пункт "АПИ" ---
-                    def open_api_dialog(order_id):
-                        try:
-                            with PrintingService._get_client_db_connection(self.user_info) as conn:
-                                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                                    cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
-                                    result = cur.fetchone()
-                            scenario_data = result['scenario_data'] if result else {}
-                            post_processing_mode = scenario_data.get('post_processing')
-                            ApiIntegrationDialog(self, self.user_info, order_id, post_processing_mode)
-                        except Exception as e:
-                            messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа для API: {e}", parent=self)
-                    
-                    menu.add_command(label="АПИ", command=lambda item_id=item_id: open_api_dialog(item_id))
+                    menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
 
                 if not is_archive:
                     menu.add_separator()
