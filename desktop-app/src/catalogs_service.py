@@ -67,31 +67,30 @@ class CatalogsService:
     def process_product_groups_import(self, df: pd.DataFrame):
         """Обрабатывает импорт товарных групп из DataFrame."""
         with self.get_db_connection() as conn:
-            # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
-            # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
             df = df.where(pd.notna(df), None)
 
             with conn.cursor() as cur:
-                # Разделяем данные на те, что с ID (для обновления) и без (для вставки)
-                update_df = df[pd.to_numeric(df['id'], errors='coerce').notna()].copy()
-                insert_df = df[pd.to_numeric(df['id'], errors='coerce').isna()].copy()
+                # --- НОВАЯ ЛОГИКА: Используем UPSERT для атомарного обновления и вставки ---
+                # Убираем строки без ID, так как для UPSERT по ID они не нужны и вызовут ошибку.
+                df = df[pd.to_numeric(df['id'], errors='coerce').notna()].copy()
+                if df.empty:
+                    logger.warning("Нет данных с 'id' для импорта товарных групп.")
+                    return
 
-                # Обновляем существующие
-                if not update_df.empty:
-                    update_df['id'] = update_df['id'].astype(int)
-                    update_tuples = [tuple(x) for x in update_df[['group_name', 'display_name', 'fias_required', 'code_template', 'dm_template', 'id']].to_numpy()]
-                    update_query = "UPDATE dmkod_product_groups SET group_name=%s, display_name=%s, fias_required=%s, code_template=%s, dm_template=%s WHERE id=%s"
-                    logger.info(f"Подготовлено к обновлению {len(update_tuples)} товарных групп. Первые 5: {update_tuples[:5]}")
-                    cur.executemany(update_query, update_tuples)
-                    logger.info(f"Выполнен executemany для обновления {cur.rowcount} товарных групп.")
-
-                # Вставляем новые
-                if not insert_df.empty:
-                    insert_tuples = [tuple(x) for x in insert_df[['group_name', 'display_name', 'fias_required', 'code_template', 'dm_template']].to_numpy()]
-                    insert_query = "INSERT INTO dmkod_product_groups (group_name, display_name, fias_required, code_template, dm_template) VALUES %s"
-                    logger.info(f"Подготовлено к вставке {len(insert_tuples)} новых товарных групп. Первые 5: {insert_tuples[:5]}")
-                    execute_values(cur, insert_query, insert_tuples)
-                    logger.info(f"Выполнен execute_values для вставки {cur.rowcount} новых товарных групп.")
+                upsert_query = """
+                    INSERT INTO dmkod_product_groups (id, group_name, display_name, fias_required, code_template, dm_template)
+                    VALUES %s
+                    ON CONFLICT (id) DO UPDATE SET
+                        group_name = EXCLUDED.group_name,
+                        display_name = EXCLUDED.display_name,
+                        fias_required = EXCLUDED.fias_required,
+                        code_template = EXCLUDED.code_template,
+                        dm_template = EXCLUDED.dm_template;
+                """
+                data_tuples = [tuple(x) for x in df[['id', 'group_name', 'display_name', 'fias_required', 'code_template', 'dm_template']].to_numpy()]
+                logger.info(f"Подготовлено к импорту (UPSERT) {len(data_tuples)} товарных групп. Первые 5: {data_tuples[:5]}")
+                execute_values(cur, upsert_query, data_tuples)
+                logger.info(f"Выполнен execute_values для импорта {cur.rowcount} товарных групп.")
             conn.commit()
 
     # --- Методы для товаров ---
@@ -149,10 +148,10 @@ class CatalogsService:
                 # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
                 df = df.where(pd.notna(df), None)
 
-                # Готовим данные для execute_values
+                # --- НОВАЯ ЛОГИКА: Используем UPSERT для атомарного обновления и вставки ---
                 data_tuples = [tuple(x) for x in df[['gtin', 'name', 'description_1', 'description_2', 'description_3']].to_numpy()]
                 
-                # Формируем запрос UPSERT
+                # Формируем запрос UPSERT (INSERT ... ON CONFLICT ... DO UPDATE)
                 upsert_query = """
                     INSERT INTO products (gtin, name, description_1, description_2, description_3)
                     VALUES %s
@@ -162,7 +161,9 @@ class CatalogsService:
                         description_2 = EXCLUDED.description_2,
                         description_3 = EXCLUDED.description_3;
                 """
+                logger.info(f"Подготовлено к импорту (UPSERT) {len(data_tuples)} товаров. Первые 5: {data_tuples[:5]}")
                 execute_values(cur, upsert_query, data_tuples)
+                logger.info(f"Выполнен execute_values для импорта {cur.rowcount} товаров.")
             conn.commit()
 
     # --- Методы для сценариев маркировки ---
