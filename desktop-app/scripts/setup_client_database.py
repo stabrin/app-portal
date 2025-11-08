@@ -157,8 +157,6 @@ def update_client_db_schema(conn):
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS scenario_id INTEGER;").format(orders=sql.Identifier(orders_table)),
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS client_api_id INTEGER;").format(orders=sql.Identifier(orders_table)),
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS client_local_id INTEGER;").format(orders=sql.Identifier(orders_table)),
-        # Внешний ключ на ap_supply_notifications добавлять не будем, чтобы избежать циклической зависимости при создании схемы
-
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_orders_client_name ON {orders}(client_name);").format(orders=sql.Identifier(orders_table)),
 
         sql.SQL("""
