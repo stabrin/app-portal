@@ -153,7 +153,6 @@ def open_clients_management_window(parent_widget):
             client_conn = None
             temp_cert_file = None
             try:
-                # --- НОВЫЙ БЛОК: Проверка существования БД клиента ---
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
@@ -162,6 +161,7 @@ def open_clients_management_window(parent_widget):
                 if not db_data: raise ValueError("Не удалось найти данные для подключения к БД клиента.")
                 db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
 
+                # --- НОВЫЙ БЛОК: Проверка существования БД клиента ---
                 ssl_params_check = {}
                 temp_cert_file_check = None
                 if db_ssl_cert:
@@ -195,25 +195,8 @@ def open_clients_management_window(parent_widget):
                         os.remove(temp_cert_file_check)
                 # --- КОНЕЦ НОВОГО БЛОКА ---
 
-                with get_main_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
-                        db_data = cur.fetchone()
-                
-                if not db_data: raise ValueError("Не удалось найти данные для подключения к БД клиента.")
-                db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
-
-                with get_main_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
-                        db_data = cur.fetchone()
-                if not db_data: raise ValueError("Данные клиента не найдены.")
-
-                db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
-
                 ssl_params = {}
                 if db_ssl_cert:
-                    import tempfile
                     with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
                         fp.write(db_ssl_cert)
                         temp_cert_file = fp.name
@@ -400,8 +383,8 @@ def open_clients_management_window(parent_widget):
                         password_hash = cur.fetchone()[0]
                     conn.commit()
                 
-                sync_user_with_client_db(login, password_hash, True, new_status)
-                load_users_for_editor(client_id)
+                if sync_user_with_client_db(login, password_hash, True, new_status):
+                    load_users_for_editor(client_id)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось изменить статус пользователя: {e}", parent=editor_window)
 
