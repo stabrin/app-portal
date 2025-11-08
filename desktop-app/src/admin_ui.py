@@ -7,6 +7,7 @@ from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
 import threading
 import json
+import time
 import pandas as pd
 import io
 import os
@@ -1547,6 +1548,10 @@ class ApiIntegrationDialog(tk.Toplevel):
                     "participant_id": order_info['client_api_id'], "production_order_id": order_info['notes'] or "",
                     "contact_person": self.user_info['name'], "products": products_payload
                 }
+
+                # --- НОВЫЙ БЛОК: Отображаем тело запроса перед отправкой ---
+                self._display_api_response(200, f"Шаг 1/3: Создание заказа в API...\n\nТело запроса:\n{json.dumps(api_payload, indent=2, ensure_ascii=False)}")
+                self.update() # Принудительно обновляем UI
 
                 response_data = self.api_service.create_order(api_payload)
                 api_order_id = response_data.get('order_id')
