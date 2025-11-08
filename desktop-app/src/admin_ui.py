@@ -31,6 +31,7 @@ logging.basicConfig(
 # Импорты для работы с БД и QR-кодами
 from .db_connector import get_main_db_connection
 from .api_service import ApiService
+from .supply_notification_service import SupplyNotificationService
 import bcrypt
 import psycopg2
 import psycopg2.extras
@@ -2097,7 +2098,7 @@ class AdminWindow(tk.Tk):
                 menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
 
                 if order_status in ('delta', 'dmkod'):
-                    menu.add_command(label="АПИ", command=lambda: messagebox.showinfo("Инфо", f"АПИ для заказа {item_id}"))
+                    menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
 
                 if not is_archive:
                     menu.add_separator()
