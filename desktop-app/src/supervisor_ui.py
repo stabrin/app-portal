@@ -191,6 +191,51 @@ def open_clients_management_window(parent_widget):
             temp_cert_file = None
             try:
                 with get_main_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
+                        db_data = cur.fetchone()
+                
+                if not db_data: raise ValueError("Не удалось найти данные для подключения к БД клиента.")
+                
+                # --- НОВЫЙ БЛОК: Проверка существования БД клиента ---
+                db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data.values()
+
+                ssl_params_check = {}
+                if db_ssl_cert:
+                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                        fp.write(db_ssl_cert)
+                        temp_cert_file_check = fp.name
+                    ssl_params_check = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file_check}
+
+                try:
+                    with psycopg2.connect(host=db_host, port=db_port, dbname='postgres', user=db_user, password=db_password, **ssl_params_check) as conn_system:
+                        conn_system.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+                        with conn_system.cursor() as cur:
+                            cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
+                            if not cur.fetchone():
+                                error_message = (
+                                    f"База данных '{db_name}' не найдена на сервере {db_host}.\n\n"
+                                    "Пожалуйста, создайте ее и пользователя с правами на чтение.\n\n"
+                                    "Примерные SQL-команды:\n"
+                                    f"CREATE DATABASE {db_name};\n"
+                                    f"CREATE USER readonly_user WITH PASSWORD 'your_password';\n"
+                                    f"GRANT CONNECT ON DATABASE {db_name} TO readonly_user;\n"
+                                    f"\\c {db_name}\n"
+                                    "GRANT USAGE ON SCHEMA public TO readonly_user;\n"
+                                    "GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly_user;"
+                                )
+                                messagebox.showerror("Ошибка", error_message, parent=editor_window)
+                                return
+                except psycopg2.OperationalError as e:
+                    # Если не удалось подключиться даже к 'postgres', значит проблема с доступом/паролем
+                    messagebox.showerror("Ошибка подключения", f"Не удалось подключиться к серверу PostgreSQL для проверки базы данных. Убедитесь, что учетные данные и SSL-сертификат верны.\n\nОшибка: {e}", parent=editor_window)
+                    return
+                finally:
+                    if 'temp_cert_file_check' in locals() and os.path.exists(temp_cert_file_check):
+                        os.remove(temp_cert_file_check)
+                # --- КОНЕЦ НОВОГО БЛОКА ---
+
+                with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
                         db_data = cur.fetchone()
