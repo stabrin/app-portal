@@ -1451,7 +1451,7 @@ class ApiIntegrationDialog(tk.Toplevel):
     def __init__(self, parent, user_info, order_id):
         super().__init__(parent)
         self.title(f"Интеграция с API для заказа №{order_id}")
-        self.geometry("400x300")
+        self.geometry("600x500")
         self.transient(parent)
         self.grab_set()
 
@@ -1481,88 +1481,115 @@ class ApiIntegrationDialog(tk.Toplevel):
         frame = ttk.Frame(self, padding="15")
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # Кнопка "Создать заказ"
-        self.create_order_btn = ttk.Button(frame, text="Создать заказ в API", command=self._create_order_in_api)
-        self.create_order_btn.pack(fill=tk.X, pady=5)
+        # --- ИЗМЕНЕНИЕ: Одна кнопка для всего процесса ---
+        self.request_codes_btn = ttk.Button(frame, text="Запросить коды", command=self._request_codes_flow)
+        self.request_codes_btn.pack(fill=tk.X, pady=5)
 
-        # Кнопка "Создать запрос"
-        self.create_request_btn = ttk.Button(frame, text="Создать запрос на коды", command=self._create_suborder_request)
-        self.create_request_btn.pack(fill=tk.X, pady=5)
+        # --- НОВЫЙ БЛОК: Поле для вывода ответа от API ---
+        response_frame = ttk.LabelFrame(frame, text="Ответ API")
+        response_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+
+        self.response_text = tk.Text(response_frame, wrap="word", height=10, state="disabled")
+        scrollbar = ttk.Scrollbar(response_frame, orient="vertical", command=self.response_text.yview)
+        self.response_text.configure(yscrollcommand=scrollbar.set)
+        self.response_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Обновляем состояние кнопок на основе данных заказа
         if self.order_data:
-            if self.order_data.get('api_order_id'):
-                self.create_order_btn.config(state="disabled")
-            if not self.order_data.get('api_order_id') or self.order_data.get('api_status'):
-                self.create_request_btn.config(state="disabled")
+            if self.order_data.get('api_status'): # Если у заказа уже есть api_status, блокируем кнопку
+                self.request_codes_btn.config(state="disabled")
 
-    def _create_order_in_api(self):
-        """Логика создания заказа в API, адаптированная из routes.py."""
+    def _display_api_response(self, status_code, body):
+        """Отображает ответ API в текстовом поле."""
+        self.response_text.config(state="normal")
+        self.response_text.delete("1.0", tk.END)
+        response_content = f"Статус: {status_code}\n\nТело ответа:\n{body}"
+        self.response_text.insert(tk.END, response_content)
+        self.response_text.config(state="disabled")
+
+    def _request_codes_flow(self):
+        """
+        Выполняет полную цепочку: создание заказа (если нужно), пауза, создание запроса на коды.
+        """
+        self.request_codes_btn.config(state="disabled") # Блокируем кнопку на время выполнения
+
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("""
-                        SELECT o.participant_id, o.notes, pg.dm_template
-                        FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
-                        WHERE o.id = %s
-                    """, (self.order_id,))
-                    order_info = cur.fetchone()
+            api_order_id = self.order_data.get('api_order_id')
 
-                    cur.execute("SELECT gtin, dm_quantity, production_date FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
-                    products_data = cur.fetchall()
+            # --- Шаг 1: Создание заказа в API, если его еще нет ---
+            if not api_order_id:
+                self._display_api_response(200, "Шаг 1/3: Создание заказа в API...")
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("""
+                            SELECT o.participant_id, o.notes, pg.dm_template
+                            FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
+                            WHERE o.id = %s
+                        """, (self.order_id,))
+                        order_info = cur.fetchone()
+                        cur.execute("SELECT gtin, dm_quantity FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                        products_data = cur.fetchall()
 
-            if not products_data:
-                raise Exception("В заказе нет детализации по продуктам (GTIN).")
+                if not products_data:
+                    raise Exception("В заказе нет детализации по продуктам (GTIN).")
 
-            products_df = pd.DataFrame(products_data)
-            aggregated_df = products_df.groupby('gtin').agg(dm_quantity=('dm_quantity', 'sum'), production_date=('production_date', 'min')).reset_index()
+                products_df = pd.DataFrame(products_data)
+                aggregated_df = products_df.groupby('gtin').agg(dm_quantity=('dm_quantity', 'sum')).reset_index()
 
-            products_payload = [
-                {
-                    "gtin": p['gtin'], "code_template": order_info['dm_template'], "qty": int(p['dm_quantity']),
-                    "unit_type": "UNIT", "release_method": "IMPORT", "payment_type": 2,
-                    "attributes": {"production_date": p['production_date'].strftime('%Y-%m-%d')} if p.get('production_date') else {}
-                } for _, p in aggregated_df.iterrows()
-            ]
-            for p in products_payload:
-                if not p.get("attributes"): del p["attributes"]
+                products_payload = [
+                    {
+                        "gtin": p['gtin'], "code_template": order_info['dm_template'], "qty": int(p['dm_quantity']),
+                        "unit_type": "UNIT", "release_method": "IMPORT", "payment_type": 2
+                    } for _, p in aggregated_df.iterrows()
+                ]
+                api_payload = {
+                    "participant_id": order_info['participant_id'], "production_order_id": order_info['notes'] or "",
+                    "contact_person": self.user_info['name'], "products": products_payload
+                }
 
-            api_payload = {
-                "participant_id": order_info['participant_id'], "production_order_id": order_info['notes'] or "",
-                "contact_person": self.user_info['name'], "products": products_payload
-            }
+                response_data = self.api_service.create_order(api_payload)
+                api_order_id = response_data.get('order_id')
 
-            response_data = self.api_service.create_order(api_payload)
-            api_order_id = response_data.get('order_id')
+                if not api_order_id:
+                    raise Exception(f"API не вернуло ID заказа. Ответ: {response_data}")
 
-            if api_order_id:
+                # Сохраняем полученный ID в нашей БД
                 with self._get_client_db_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, self.order_id))
                     conn.commit()
-                messagebox.showinfo("Успех", f"Заказ в API успешно создан с ID: {api_order_id}.", parent=self)
-                self.destroy()
+                self.order_data['api_order_id'] = api_order_id # Обновляем данные в памяти
+                self._display_api_response(200, f"Заказ в API успешно создан с ID: {api_order_id}")
+            
+            # --- Шаг 2: Пауза ---
+            self._display_api_response(200, f"Шаг 2/3: Заказ ID {api_order_id} существует. Пауза 10 секунд перед созданием запроса...")
+            self.update() # Обновляем UI, чтобы показать сообщение
+            time.sleep(10)
 
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось создать заказ в API: {e}", parent=self)
+            # --- Шаг 3: Создание запроса на коды ---
+            self._display_api_response(200, f"Шаг 3/3: Создание запроса на коды для заказа ID {api_order_id}...")
+            self.update()
 
-    def _create_suborder_request(self):
-        """Логика создания запроса на коды, адаптированная из routes.py."""
-        if not self.order_data or not self.order_data.get('api_order_id'):
-            messagebox.showerror("Ошибка", "Заказ еще не создан в API.", parent=self)
-            return
-        try:
-            api_payload = {"order_id": int(self.order_data['api_order_id'])}
-            self.api_service.create_suborder_request(api_payload)
+            api_payload = {"order_id": int(api_order_id)}
+            response = self.api_service.create_suborder_request(api_payload) # Получаем полный ответ
 
+            # Обновляем статус в нашей БД
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (self.order_id,))
                 conn.commit()
-            messagebox.showinfo("Успех", "Запрос на получение кодов успешно отправлен.", parent=self)
-            self.destroy()
+            
+            # Отображаем финальный ответ от API
+            self._display_api_response(response.status_code, json.dumps(response.json(), indent=2, ensure_ascii=False))
+            
+            # Показываем финальное сообщение пользователю
+            messagebox.showinfo("Успех", "Запрос на получение кодов сформирован. Вам необходимо его подписать на сайте ДМ Код", parent=self)
+
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось создать запрос: {e}", parent=self)
+            error_body = f"ОШИБКА: {e}"
+            self._display_api_response(500, error_body)
+            self.request_codes_btn.config(state="normal") # Разблокируем кнопку в случае ошибки
 
 class AdminWindow(tk.Tk):
     """Главное окно для роли 'администратор'."""
