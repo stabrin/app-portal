@@ -6,6 +6,7 @@ import tempfile
 import textwrap
 from typing import Dict, Any, Optional
 from psycopg2 import sql
+import re
 from psycopg2.extras import RealDictCursor # Явно импортируем RealDictCursor
 
 import psycopg2
@@ -73,6 +74,7 @@ class PrintingService:
         Создает или обновляет представления (VIEW) для Bartender.
         Адаптировано из datamatrix-app/app/services/view_service.py
         """
+        logging.info(f"Начало создания представлений для заказа ID: {order_id}")
         conn = None
         try:
             conn = PrintingService._get_client_db_connection(user_info)
@@ -81,6 +83,7 @@ class PrintingService:
                 cur.execute("SELECT client_name FROM orders WHERE id = %s", (order_id,))
                 order_info = cur.fetchone()
                 if not order_info:
+                    logging.error(f"Заказ с ID {order_id} не найден в БД при создании представлений.")
                     return {"success": False, "message": f"Заказ с ID {order_id} не найден."}
                 client_name = order_info[0]
 
@@ -92,10 +95,13 @@ class PrintingService:
                 base_view_name = sql.Identifier(sanitized_name)
                 sscc_view_name = sql.Identifier(f"{sanitized_name}_sscc")
 
+                logging.debug(f"Сгенерированы имена представлений: {base_view_name.string}, {sscc_view_name.string}")
+
                 # 2. Удаляем старые представления
                 cur.execute(sql.SQL("DROP VIEW IF EXISTS {};").format(sscc_view_name))
                 cur.execute(sql.SQL("DROP VIEW IF EXISTS {};").format(base_view_name))
 
+                logging.debug("Старые представления (если были) удалены.")
                 # 3. Создаем основное представление
                 main_view_query = sql.SQL("""
                 CREATE OR REPLACE VIEW {view_name} AS
@@ -113,15 +119,19 @@ class PrintingService:
                     order_id=sql.Literal(order_id)
                 )
                 cur.execute(main_view_query)
+                logging.debug("Основное представление успешно создано.")
                 
                 # Логика для SSCC view пока не переносится, так как она сложнее
                 # и требует рекурсивных запросов, которые могут быть не нужны на данном этапе.
                 # Создадим простую заглушку.
                 cur.execute(sql.SQL("CREATE OR REPLACE VIEW {} AS SELECT 1 as placeholder;").format(sscc_view_name))
+                logging.debug("Представление-заглушка для SSCC создано.")
 
             conn.commit()
+            logging.info(f"Представления для заказа №{order_id} успешно созданы/обновлены и транзакция закоммичена.")
             return {"success": True, "message": f"Представления для заказа №{order_id} успешно созданы/обновлены."}
         except Exception as e:
+            logging.error(f"Ошибка при создании представлений для заказа {order_id}: {e}", exc_info=True)
             if conn: conn.rollback()
             return {"success": False, "message": f"Ошибка при создании представлений: {e}"}
         finally:
