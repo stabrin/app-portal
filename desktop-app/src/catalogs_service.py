@@ -73,20 +73,25 @@ class CatalogsService:
 
             with conn.cursor() as cur:
                 # Разделяем данные на те, что с ID (для обновления) и без (для вставки)
-                update_df = df[pd.to_numeric(df['id'], errors='coerce').notna()]
-                insert_df = df[pd.to_numeric(df['id'], errors='coerce').isna()]
+                update_df = df[pd.to_numeric(df['id'], errors='coerce').notna()].copy()
+                insert_df = df[pd.to_numeric(df['id'], errors='coerce').isna()].copy()
 
                 # Обновляем существующие
                 if not update_df.empty:
+                    update_df['id'] = update_df['id'].astype(int)
                     update_tuples = [tuple(x) for x in update_df[['group_name', 'display_name', 'fias_required', 'code_template', 'dm_template', 'id']].to_numpy()]
                     update_query = "UPDATE dmkod_product_groups SET group_name=%s, display_name=%s, fias_required=%s, code_template=%s, dm_template=%s WHERE id=%s"
+                    logger.info(f"Подготовлено к обновлению {len(update_tuples)} товарных групп. Первые 5: {update_tuples[:5]}")
                     cur.executemany(update_query, update_tuples)
+                    logger.info(f"Выполнен executemany для обновления {cur.rowcount} товарных групп.")
 
                 # Вставляем новые
                 if not insert_df.empty:
                     insert_tuples = [tuple(x) for x in insert_df[['group_name', 'display_name', 'fias_required', 'code_template', 'dm_template']].to_numpy()]
                     insert_query = "INSERT INTO dmkod_product_groups (group_name, display_name, fias_required, code_template, dm_template) VALUES %s"
+                    logger.info(f"Подготовлено к вставке {len(insert_tuples)} новых товарных групп. Первые 5: {insert_tuples[:5]}")
                     execute_values(cur, insert_query, insert_tuples)
+                    logger.info(f"Выполнен execute_values для вставки {cur.rowcount} новых товарных групп.")
             conn.commit()
 
     # --- Методы для товаров ---
@@ -264,11 +269,27 @@ class CatalogsService:
             # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
             df = df.where(pd.notna(df), None)
 
+            # --- НОВАЯ ЛОГИКА: Разделяем на вставку и обновление для детального логирования ---
             with conn.cursor() as cur:
-                upsert_query = """
-                    INSERT INTO ap_clients (id, name, inn) VALUES %s
-                    ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, inn = EXCLUDED.inn;
-                """
-                data_tuples = [tuple(x) for x in df[['id', 'name', 'inn']].to_numpy()]
-                execute_values(cur, upsert_query, data_tuples)
+                # Разделяем данные на те, что с ID (для обновления) и без (для вставки)
+                update_df = df[pd.to_numeric(df['id'], errors='coerce').notna()].copy()
+                insert_df = df[pd.to_numeric(df['id'], errors='coerce').isna()].copy()
+
+                # Обновляем существующие записи
+                if not update_df.empty:
+                    update_df['id'] = update_df['id'].astype(int) # Приводим ID к целочисленному типу
+                    update_tuples = [tuple(x) for x in update_df[['name', 'inn', 'id']].to_numpy()]
+                    update_query = "UPDATE ap_clients SET name=%s, inn=%s WHERE id=%s"
+                    logger.info(f"Подготовлено к обновлению {len(update_tuples)} записей. Первые 5: {update_tuples[:5]}")
+                    cur.executemany(update_query, update_tuples)
+                    logger.info(f"Выполнен executemany для обновления {cur.rowcount} записей.")
+
+                # Вставляем новые записи
+                if not insert_df.empty:
+                    # Для вставки убираем столбец 'id', так как он будет сгенерирован автоматически
+                    insert_tuples = [tuple(x) for x in insert_df[['name', 'inn']].to_numpy()]
+                    insert_query = "INSERT INTO ap_clients (name, inn) VALUES %s"
+                    logger.info(f"Подготовлено к вставке {len(insert_tuples)} новых записей. Первые 5: {insert_tuples[:5]}")
+                    execute_values(cur, insert_query, insert_tuples)
+                    logger.info(f"Выполнен execute_values для вставки {cur.rowcount} новых записей.")
             conn.commit()
