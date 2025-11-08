@@ -177,10 +177,8 @@ def open_clients_management_window(parent_widget):
                         with conn_system.cursor() as cur:
                             cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
                             if not cur.fetchone():
-                                error_message = (
-                                    f"База данных '{db_name}' не найдена на сервере {db_host}.\n\n"
-                                    "Пожалуйста, создайте ее и пользователя с правами на чтение.\n\n"
-                                    "Примерные SQL-команды:\n"
+                                # --- ИЗМЕНЕНИЕ: Предлагаем сохранить команды в файл ---
+                                sql_commands_to_create = (
                                     f"CREATE DATABASE {db_name};\n"
                                     f"CREATE USER readonly_user WITH PASSWORD 'your_password';\n"
                                     f"GRANT CONNECT ON DATABASE {db_name} TO readonly_user;\n"
@@ -188,7 +186,18 @@ def open_clients_management_window(parent_widget):
                                     "GRANT USAGE ON SCHEMA public TO readonly_user;\n"
                                     "GRANT SELECT ON ALL TABLES IN SCHEMA public TO readonly_user;"
                                 )
-                                messagebox.showerror("Ошибка", error_message, parent=editor_window)
+                                error_message_prompt = (
+                                    f"База данных '{db_name}' не найдена на сервере {db_host}.\n\n"
+                                    "Пожалуйста, создайте ее и пользователя с правами на чтение.\n\n"
+                                    "Хотите сохранить команды для создания в текстовый файл?"
+                                )
+                                if messagebox.askyesno("База данных не найдена", error_message_prompt, parent=editor_window):
+                                    from tkinter import filedialog
+                                    filepath = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")], initialfile=f"create_{db_name}.txt", parent=editor_window)
+                                    if filepath:
+                                        with open(filepath, 'w', encoding='utf-8') as f:
+                                            f.write(sql_commands_to_create)
+                                        messagebox.showinfo("Успех", f"Команды сохранены в файл:\n{filepath}", parent=editor_window)
                                 return # Прерываем выполнение, если БД не найдена
                 finally:
                     if temp_cert_file_check and os.path.exists(temp_cert_file_check):
