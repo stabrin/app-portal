@@ -260,6 +260,10 @@ class CatalogsService:
     def process_local_clients_import(self, df: pd.DataFrame):
         """Обрабатывает импорт локальных клиентов из DataFrame."""
         with self.get_db_connection() as conn:
+            # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
+            # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
+            df = df.where(pd.notna(df), None)
+
             with conn.cursor() as cur:
                 upsert_query = """
                     INSERT INTO ap_clients (id, name, inn) VALUES %s
