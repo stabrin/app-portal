@@ -388,22 +388,33 @@ def update_client_db_schema(conn):
         sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS expiry_date DATE;"),
 
         # Фаза 3: Добавление ограничений (UNIQUE, FOREIGN KEY)
-        sql.SQL("ALTER TABLE ap_workplaces ADD CONSTRAINT uq_warehouse_workplace UNIQUE (warehouse_name, workplace_number) ON CONFLICT DO NOTHING;"),
+        # --- ИСПРАВЛЕНИЕ: Используем идемпотентный подход DROP IF EXISTS + ADD ---
+        # Это более совместимый способ, чем ADD IF NOT EXISTS (PostgreSQL 15+)
+        sql.SQL("ALTER TABLE ap_workplaces DROP CONSTRAINT IF EXISTS uq_warehouse_workplace;"),
+        sql.SQL("ALTER TABLE ap_workplaces ADD CONSTRAINT uq_warehouse_workplace UNIQUE (warehouse_name, workplace_number);"),
 
-        sql.SQL("ALTER TABLE label_templates ADD CONSTRAINT uq_label_template_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE label_templates DROP CONSTRAINT IF EXISTS uq_label_template_name;"),
+        sql.SQL("ALTER TABLE label_templates ADD CONSTRAINT uq_label_template_name UNIQUE (name);"),
 
-        sql.SQL("ALTER TABLE ap_images ADD CONSTRAINT uq_image_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE ap_images DROP CONSTRAINT IF EXISTS uq_image_name;"),
+        sql.SQL("ALTER TABLE ap_images ADD CONSTRAINT uq_image_name UNIQUE (name);"),
 
-        sql.SQL("ALTER TABLE ap_clients ADD CONSTRAINT uq_client_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE ap_clients DROP CONSTRAINT IF EXISTS uq_client_name;"),
+        sql.SQL("ALTER TABLE ap_clients ADD CONSTRAINT uq_client_name UNIQUE (name);"),
 
-        sql.SQL("ALTER TABLE ap_marking_scenarios ADD CONSTRAINT uq_marking_scenario_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE ap_marking_scenarios DROP CONSTRAINT IF EXISTS uq_marking_scenario_name;"),
+        sql.SQL("ALTER TABLE ap_marking_scenarios ADD CONSTRAINT uq_marking_scenario_name UNIQUE (name);"),
 
-        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_scenario FOREIGN KEY (scenario_id) REFERENCES ap_marking_scenarios(id) ON CONFLICT DO NOTHING;"),
-        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_client_local FOREIGN KEY (client_local_id) REFERENCES ap_clients(id) ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications DROP CONSTRAINT IF EXISTS fk_scenario;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_scenario FOREIGN KEY (scenario_id) REFERENCES ap_marking_scenarios(id);"),
+        sql.SQL("ALTER TABLE ap_supply_notifications DROP CONSTRAINT IF EXISTS fk_client_local;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_client_local FOREIGN KEY (client_local_id) REFERENCES ap_clients(id);"),
 
-        sql.SQL("ALTER TABLE ap_supply_notification_files ADD CONSTRAINT fk_notification_file FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_files DROP CONSTRAINT IF EXISTS fk_notification_file;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_files ADD CONSTRAINT fk_notification_file FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE;"),
 
-        sql.SQL("ALTER TABLE ap_supply_notification_details ADD CONSTRAINT fk_notification_detail FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_details DROP CONSTRAINT IF EXISTS fk_notification_detail;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_details ADD CONSTRAINT fk_notification_detail FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE;"),
 
         # Триггер для ap_marking_scenarios (оставляем как есть, т.к. он использует CREATE OR REPLACE FUNCTION и DROP/CREATE TRIGGER)
         sql.SQL("""
@@ -451,9 +462,7 @@ def update_client_db_schema(conn):
                 except psycopg2.Error as e:
                     # Логируем ошибку, но не прерываем выполнение, т.к. некоторые ошибки могут быть ожидаемы
                     # (например, попытка удалить несуществующий constraint)
-                    logging.warning(f"Не удалось выполнить команду {i+1}. Ошибка: {e}. Продолжаю выполнение...")
-                    # Важно откатить транзакцию, чтобы можно было продолжить
-                    conn.rollback()
+                    logging.warning(f"Не удалось выполнить команду {i+1}. Ошибка: {e}. Продолжаю выполнение...") # Убираем conn.rollback()
             
             logging.info("Обновление схемы базы данных клиента успешно завершено.")
         conn.commit()
