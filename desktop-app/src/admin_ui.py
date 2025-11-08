@@ -2100,6 +2100,31 @@ class AdminWindow(tk.Tk):
                 if order_status in ('delta', 'dmkod'):
                     menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
 
+                if not is_archive:
+                    menu.add_separator()
+                    menu.add_command(label="Перенести в архив", command=lambda: move_to_archive(item_id, order_status))
+                
+                menu.post(event.x_root, event.y_root)
+
+            tree.bind("<Button-3>", show_context_menu)
+            ttk.Button(controls_frame, text="Обновить", command=load_data).pack(side=tk.LEFT)
+            
+            # Первоначальная загрузка
+            load_data()
+            return load_data # Возвращаем функцию обновления для использования в других местах
+
+        # Создаем обе вкладки
+        refresh_in_progress = _create_orders_view(in_progress_frame, is_archive=False)
+        refresh_archive = _create_orders_view(archive_frame, is_archive=True)
+
+        # При переключении вкладок можно добавить автообновление
+        def on_tab_change(event):
+            if notebook.index(notebook.select()) == 0:
+                refresh_in_progress()
+            else:
+                refresh_archive()
+        notebook.bind("<<NotebookTabChanged>>", on_tab_change)
+
 class ApiIntegrationDialog(tk.Toplevel):
     """Диалоговое окно для интеграции с API ДМкод."""
     def __init__(self, parent, user_info, order_id):
@@ -2217,31 +2242,6 @@ class ApiIntegrationDialog(tk.Toplevel):
             self.destroy()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось создать запрос: {e}", parent=self)
-
-                if not is_archive:
-                    menu.add_separator()
-                    menu.add_command(label="Перенести в архив", command=lambda: move_to_archive(item_id, order_status))
-                
-                menu.post(event.x_root, event.y_root)
-
-            tree.bind("<Button-3>", show_context_menu)
-            ttk.Button(controls_frame, text="Обновить", command=load_data).pack(side=tk.LEFT)
-            
-            # Первоначальная загрузка
-            load_data()
-            return load_data # Возвращаем функцию обновления для использования в других местах
-
-        # Создаем обе вкладки
-        refresh_in_progress = _create_orders_view(in_progress_frame, is_archive=False)
-        refresh_archive = _create_orders_view(archive_frame, is_archive=True)
-
-        # При переключении вкладок можно добавить автообновление
-        def on_tab_change(event):
-            if notebook.index(notebook.select()) == 0:
-                refresh_in_progress()
-            else:
-                refresh_archive()
-        notebook.bind("<<NotebookTabChanged>>", on_tab_change)
 
     def _open_dm_test_print_dialog(self):
         """
