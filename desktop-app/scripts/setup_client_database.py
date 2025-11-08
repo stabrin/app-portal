@@ -95,14 +95,16 @@ def update_client_db_schema(conn):
         # === Блок из dmkod-integration-app (независимые таблицы) ===
         # Таблица dmkod_product_groups должна быть создана ДО таблицы orders, т.к. orders на нее ссылается.
         sql.SQL("""
-            CREATE TABLE IF NOT EXISTS {pg_table} ( id SERIAL PRIMARY KEY,
-                                                     group_name VARCHAR(100) NOT NULL,
-                                                     display_name VARCHAR(255) NOT NULL,
-                                                     fias_required BOOLEAN NOT NULL DEFAULT FALSE,
-                                                     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                                                     code_template TEXT,
-                                                     dm_template TEXT );
+            CREATE TABLE IF NOT EXISTS {pg_table} (
+                id SERIAL PRIMARY KEY,
+                group_name VARCHAR(100) NOT NULL,
+                display_name VARCHAR(255) NOT NULL,
+                fias_required BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
         """).format(pg_table=sql.Identifier(product_groups_table)),
+        sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS code_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
+        sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS dm_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
         # --- ИЗМЕНЕНИЕ: Удаляем ограничение уникальности для group_name для обратной совместимости ---
         sql.SQL("ALTER TABLE {pg_table} DROP CONSTRAINT IF EXISTS dmkod_product_groups_group_name_key;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_pg_group_name ON {pg_table}(group_name);").format(pg_table=sql.Identifier(product_groups_table)),
@@ -383,22 +385,22 @@ def update_client_db_schema(conn):
         sql.SQL("ALTER TABLE ap_supply_notification_details ADD COLUMN IF NOT EXISTS expiry_date DATE;"),
 
         # Фаза 3: Добавление ограничений (UNIQUE, FOREIGN KEY)
-        sql.SQL("ALTER TABLE ap_workplaces ADD CONSTRAINT uq_warehouse_workplace UNIQUE (warehouse_name, workplace_number);"),
+        sql.SQL("ALTER TABLE ap_workplaces ADD CONSTRAINT uq_warehouse_workplace UNIQUE (warehouse_name, workplace_number) ON CONFLICT DO NOTHING;"),
 
-        sql.SQL("ALTER TABLE label_templates ADD CONSTRAINT uq_label_template_name UNIQUE (name);"),
+        sql.SQL("ALTER TABLE label_templates ADD CONSTRAINT uq_label_template_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
 
-        sql.SQL("ALTER TABLE ap_images ADD CONSTRAINT uq_image_name UNIQUE (name);"),
+        sql.SQL("ALTER TABLE ap_images ADD CONSTRAINT uq_image_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
 
-        sql.SQL("ALTER TABLE ap_clients ADD CONSTRAINT uq_client_name UNIQUE (name);"),
+        sql.SQL("ALTER TABLE ap_clients ADD CONSTRAINT uq_client_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
 
-        sql.SQL("ALTER TABLE ap_marking_scenarios ADD CONSTRAINT uq_marking_scenario_name UNIQUE (name);"),
+        sql.SQL("ALTER TABLE ap_marking_scenarios ADD CONSTRAINT uq_marking_scenario_name UNIQUE (name) ON CONFLICT DO NOTHING;"),
 
-        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_scenario FOREIGN KEY (scenario_id) REFERENCES ap_marking_scenarios(id);"),
-        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_client_local FOREIGN KEY (client_local_id) REFERENCES ap_clients(id);"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_scenario FOREIGN KEY (scenario_id) REFERENCES ap_marking_scenarios(id) ON CONFLICT DO NOTHING;"),
+        sql.SQL("ALTER TABLE ap_supply_notifications ADD CONSTRAINT fk_client_local FOREIGN KEY (client_local_id) REFERENCES ap_clients(id) ON CONFLICT DO NOTHING;"),
 
-        sql.SQL("ALTER TABLE ap_supply_notification_files ADD CONSTRAINT fk_notification_file FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_files ADD CONSTRAINT fk_notification_file FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE ON CONFLICT DO NOTHING;"),
 
-        sql.SQL("ALTER TABLE ap_supply_notification_details ADD CONSTRAINT fk_notification_detail FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE;"),
+        sql.SQL("ALTER TABLE ap_supply_notification_details ADD CONSTRAINT fk_notification_detail FOREIGN KEY (notification_id) REFERENCES ap_supply_notifications(id) ON DELETE CASCADE ON CONFLICT DO NOTHING;"),
 
         # Триггер для ap_marking_scenarios (оставляем как есть, т.к. он использует CREATE OR REPLACE FUNCTION и DROP/CREATE TRIGGER)
         sql.SQL("""
