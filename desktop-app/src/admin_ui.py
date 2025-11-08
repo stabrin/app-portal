@@ -1852,6 +1852,130 @@ class ApiIntegrationDialog(tk.Toplevel):
             self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
             self.after(0, self._update_buttons_state)
 
+class OrderEditorDialog(tk.Toplevel):
+    """Диалоговое окно для редактирования деталей заказа."""
+    def __init__(self, parent, user_info, order_id):
+        super().__init__(parent)
+        self.title(f"Редактор заказа №{order_id}")
+        self.geometry("800x600")
+        self.transient(parent)
+        self.grab_set()
+
+        self.user_info = user_info
+        self.order_id = order_id
+
+        self._create_widgets()
+        self._load_details()
+
+    def _get_client_db_connection(self):
+        return PrintingService._get_client_db_connection(self.user_info)
+
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        controls_frame = ttk.Frame(main_frame)
+        controls_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Button(controls_frame, text="Сохранить изменения", command=self._save_changes).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame, text="Загрузить из файла", command=self._replace_from_file).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+
+        tree_frame = ttk.Frame(main_frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+
+        self.details_cols = ["id", "gtin", "dm_quantity", "aggregation_level", "production_date", "expiry_date"]
+        self.details_tree = ttk.Treeview(tree_frame, columns=self.details_cols, show='headings')
+
+        col_map = {
+            "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "dm_quantity": ("Кол-во", 80, "e"),
+            "aggregation_level": ("Агрегация", 80, "center"), "production_date": ("Дата произв.", 100, "center"),
+            "expiry_date": ("Годен до", 100, "center")
+        }
+        for col, (text, width, anchor) in col_map.items():
+            self.details_tree.heading(col, text=text)
+            self.details_tree.column(col, width=width, anchor=anchor)
+
+        self.details_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.details_tree.yview)
+        self.details_tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        self.details_tree.bind("<Double-1>", self._on_details_double_click)
+
+    def _load_details(self):
+        for i in self.details_tree.get_children(): self.details_tree.delete(i)
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM dmkod_aggregation_details WHERE order_id = %s ORDER BY id", (self.order_id,))
+                    details = cur.fetchall()
+            for item in details:
+                values = [item.get(col, '') for col in self.details_cols]
+                self.details_tree.insert('', 'end', iid=item['id'], values=values)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить детали заказа: {e}", parent=self)
+
+    def _on_details_double_click(self, event):
+        """Обработчик двойного клика для редактирования ячейки."""
+        region = self.details_tree.identify("region", event.x, event.y)
+        if region != "cell": return
+
+        column_id = self.details_tree.identify_column(event.x)
+        column_index = int(column_id.replace('#', '')) - 1
+        item_id = self.details_tree.focus()
+        
+        x, y, width, height = self.details_tree.bbox(item_id, column_id)
+
+        entry_var = tk.StringVar()
+        entry = ttk.Entry(self.details_tree, textvariable=entry_var)
+        entry.place(x=x, y=y, width=width, height=height)
+        
+        current_value = self.details_tree.item(item_id, "values")[column_index]
+        entry_var.set(current_value)
+        entry.focus_set()
+
+        def on_focus_out(event):
+            new_value = entry_var.get()
+            current_values = list(self.details_tree.item(item_id, "values"))
+            current_values[column_index] = new_value
+            self.details_tree.item(item_id, values=tuple(current_values))
+            entry.destroy()
+
+        entry.bind("<FocusOut>", on_focus_out)
+        entry.bind("<Return>", on_focus_out)
+
+    def _save_changes(self):
+        """Собирает данные из Treeview и сохраняет их в БД."""
+        updates = []
+        for item_id in self.details_tree.get_children():
+            values = self.details_tree.item(item_id, "values")
+            updates.append(dict(zip(self.details_cols, values)))
+        
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    for item in updates:
+                        cur.execute("""
+                            UPDATE dmkod_aggregation_details SET
+                                gtin = %s, dm_quantity = %s, aggregation_level = %s,
+                                production_date = %s, expiry_date = %s
+                            WHERE id = %s
+                        """, (
+                            item['gtin'], item['dm_quantity'], item['aggregation_level'],
+                            item['production_date'] or None, item['expiry_date'] or None,
+                            item['id']
+                        ))
+                conn.commit()
+            messagebox.showinfo("Успех", "Изменения успешно сохранены.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить изменения: {e}", parent=self)
+
+    def _replace_from_file(self):
+        """Заменяет детализацию из файла (логика из dmkod-integration-app)."""
+        messagebox.showinfo("В разработке", "Функционал замены детализации из файла находится в разработке.", parent=self)
+        # Здесь будет логика, адаптированная из dmkod-integration-app/app/routes.py, action 'replace_details'
+
 class AdminWindow(tk.Tk):
     """Главное окно для роли 'администратор'."""
     def __init__(self, user_info):
@@ -2500,7 +2624,7 @@ class AdminWindow(tk.Tk):
                 order_status = tree.item(item_id, "values")[2]
 
                 menu = tk.Menu(parent, tearoff=0)
-                menu.add_command(label="Редактировать", command=lambda: messagebox.showinfo("Инфо", f"Редактировать заказ {item_id}"))
+                menu.add_command(label="Редактировать", command=lambda item_id=item_id: OrderEditorDialog(self, self.user_info, item_id))
                 menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
 
                 if order_status in ('delta', 'dmkod'):
