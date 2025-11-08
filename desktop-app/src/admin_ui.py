@@ -2653,33 +2653,25 @@ class AdminWindow(tk.Tk):
                 order_status = tree.item(item_id, "values")[2]
 
                 menu = tk.Menu(parent, tearoff=0)
-                
-                def open_correct_editor(order_id):
-                    """Проверяет сценарий и открывает соответствующий редактор."""
-                    try:
-                        with PrintingService._get_client_db_connection(self.user_info) as conn:
-                            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                                cur.execute("""
-                                    SELECT s.scenario_data FROM orders o
-                                    JOIN ap_marking_scenarios s ON o.scenario_id = s.id
-                                    WHERE o.id = %s
-                                """, (order_id,))
-                                result = cur.fetchone()
-                        
-                        scenario_data = result['scenario_data'] if result else {}
-                        if scenario_data.get('type') == 'Маркировка' and scenario_data.get('dm_source') == 'Заказ в ДМ.Код':
-                            post_processing_mode = scenario_data.get('post_processing')
-                            ApiIntegrationDialog(self, self.user_info, order_id, post_processing_mode)
-                        else:
-                            OrderEditorDialog(self, self.user_info, order_id)
-                    except Exception as e:
-                        messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
-
-                menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_correct_editor(item_id))
+                # --- ИСПРАВЛЕНИЕ: "Редактировать" всегда открывает OrderEditorDialog ---
+                menu.add_command(label="Редактировать", command=lambda item_id=item_id: OrderEditorDialog(self, self.user_info, item_id))
                 menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
 
                 if order_status in ('delta', 'dmkod'):
-                    menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
+                    # --- ИЗМЕНЕНИЕ: Логика определения сценария перенесена сюда, в пункт "АПИ" ---
+                    def open_api_dialog(order_id):
+                        try:
+                            with PrintingService._get_client_db_connection(self.user_info) as conn:
+                                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                                    cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
+                                    result = cur.fetchone()
+                            scenario_data = result['scenario_data'] if result else {}
+                            post_processing_mode = scenario_data.get('post_processing')
+                            ApiIntegrationDialog(self, self.user_info, order_id, post_processing_mode)
+                        except Exception as e:
+                            messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа для API: {e}", parent=self)
+                    
+                    menu.add_command(label="АПИ", command=lambda item_id=item_id: open_api_dialog(item_id))
 
                 if not is_archive:
                     menu.add_separator()
