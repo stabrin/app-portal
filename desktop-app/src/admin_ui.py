@@ -2100,6 +2100,124 @@ class AdminWindow(tk.Tk):
                 if order_status in ('delta', 'dmkod'):
                     menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
 
+class ApiIntegrationDialog(tk.Toplevel):
+    """Диалоговое окно для интеграции с API ДМкод."""
+    def __init__(self, parent, user_info, order_id):
+        super().__init__(parent)
+        self.title(f"Интеграция с API для заказа №{order_id}")
+        self.geometry("400x300")
+        self.transient(parent)
+        self.grab_set()
+
+        self.user_info = user_info
+        self.order_id = order_id
+        self.api_service = ApiService(user_info)
+        self.order_data = None
+
+        self._load_order_data()
+        self._create_widgets()
+
+    def _get_client_db_connection(self):
+        return PrintingService._get_client_db_connection(self.user_info)
+
+    def _load_order_data(self):
+        """Загружает данные заказа для определения состояния кнопок."""
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM orders WHERE id = %s", (self.order_id,))
+                    self.order_data = cur.fetchone()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить данные заказа: {e}", parent=self)
+            self.destroy()
+
+    def _create_widgets(self):
+        frame = ttk.Frame(self, padding="15")
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        # Кнопка "Создать заказ"
+        self.create_order_btn = ttk.Button(frame, text="Создать заказ в API", command=self._create_order_in_api)
+        self.create_order_btn.pack(fill=tk.X, pady=5)
+
+        # Кнопка "Создать запрос"
+        self.create_request_btn = ttk.Button(frame, text="Создать запрос на коды", command=self._create_suborder_request)
+        self.create_request_btn.pack(fill=tk.X, pady=5)
+
+        # Обновляем состояние кнопок на основе данных заказа
+        if self.order_data:
+            if self.order_data.get('api_order_id'):
+                self.create_order_btn.config(state="disabled")
+            if not self.order_data.get('api_order_id') or self.order_data.get('api_status'):
+                self.create_request_btn.config(state="disabled")
+
+    def _create_order_in_api(self):
+        """Логика создания заказа в API, адаптированная из routes.py."""
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT o.participant_id, o.notes, pg.dm_template
+                        FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
+                        WHERE o.id = %s
+                    """, (self.order_id,))
+                    order_info = cur.fetchone()
+
+                    cur.execute("SELECT gtin, dm_quantity, production_date FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                    products_data = cur.fetchall()
+
+            if not products_data:
+                raise Exception("В заказе нет детализации по продуктам (GTIN).")
+
+            products_df = pd.DataFrame(products_data)
+            aggregated_df = products_df.groupby('gtin').agg(dm_quantity=('dm_quantity', 'sum'), production_date=('production_date', 'min')).reset_index()
+
+            products_payload = [
+                {
+                    "gtin": p['gtin'], "code_template": order_info['dm_template'], "qty": int(p['dm_quantity']),
+                    "unit_type": "UNIT", "release_method": "IMPORT", "payment_type": 2,
+                    "attributes": {"production_date": p['production_date'].strftime('%Y-%m-%d')} if p.get('production_date') else {}
+                } for _, p in aggregated_df.iterrows()
+            ]
+            for p in products_payload:
+                if not p.get("attributes"): del p["attributes"]
+
+            api_payload = {
+                "participant_id": order_info['participant_id'], "production_order_id": order_info['notes'] or "",
+                "contact_person": self.user_info['name'], "products": products_payload
+            }
+
+            response_data = self.api_service.create_order(api_payload)
+            api_order_id = response_data.get('order_id')
+
+            if api_order_id:
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, self.order_id))
+                    conn.commit()
+                messagebox.showinfo("Успех", f"Заказ в API успешно создан с ID: {api_order_id}.", parent=self)
+                self.destroy()
+
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать заказ в API: {e}", parent=self)
+
+    def _create_suborder_request(self):
+        """Логика создания запроса на коды, адаптированная из routes.py."""
+        if not self.order_data or not self.order_data.get('api_order_id'):
+            messagebox.showerror("Ошибка", "Заказ еще не создан в API.", parent=self)
+            return
+        try:
+            api_payload = {"order_id": int(self.order_data['api_order_id'])}
+            self.api_service.create_suborder_request(api_payload)
+
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (self.order_id,))
+                conn.commit()
+            messagebox.showinfo("Успех", "Запрос на получение кодов успешно отправлен.", parent=self)
+            self.destroy()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать запрос: {e}", parent=self)
+
                 if not is_archive:
                     menu.add_separator()
                     menu.add_command(label="Перенести в архив", command=lambda: move_to_archive(item_id, order_status))
