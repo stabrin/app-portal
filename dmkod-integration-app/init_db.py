@@ -81,6 +81,13 @@ def update_schema(conn):
 
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS product_group_id INTEGER REFERENCES {pg_table}(id);").format(orders=sql.Identifier(orders_table), pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("COMMENT ON COLUMN {orders}.product_group_id IS 'ID товарной группы из справочника dmkod_product_groups';").format(orders=sql.Identifier(orders_table)),
+        # --- НОВЫЕ ПОЛЯ ДЛЯ СВЯЗИ С УВЕДОМЛЕНИЕМ О ПОСТАВКЕ ---
+        sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS notification_id INTEGER;").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("COMMENT ON COLUMN {orders}.notification_id IS 'ID связанного уведомления о поставке из таблицы ap_supply_notifications';").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS scenario_id INTEGER;").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("COMMENT ON COLUMN {orders}.scenario_id IS 'ID сценария маркировки';").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS client_api_id INTEGER;").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS client_local_id INTEGER;").format(orders=sql.Identifier(orders_table)),
         
         # 3. Создание новой таблицы 'dmkod_aggregation_details'
         sql.SQL("""
