@@ -136,6 +136,10 @@ class CatalogsService:
         """Обрабатывает импорт товаров из DataFrame в режиме UPSERT."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
+                # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
+                # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
+                df = df.where(pd.notna(df), None)
+
                 # Готовим данные для execute_values
                 data_tuples = [tuple(x) for x in df[['gtin', 'name', 'description_1', 'description_2', 'description_3']].to_numpy()]
                 

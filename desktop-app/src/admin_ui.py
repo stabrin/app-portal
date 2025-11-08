@@ -1552,15 +1552,11 @@ class AdminWindow(tk.Tk):
                 # Это предотвращает потерю ведущих нулей в GTIN.
                 # Остальные поля пусть pandas определяет автоматически.
                 df = pd.read_excel(filepath, dtype={pk_field: str})
-                df = df.where(pd.notna(df), None) # Заменяем NaN на None
                 
                 logger.debug(f"Прочитано {len(df)} строк из Excel файла.")
                 
-                data_to_import = df.to_dict('records')
-                logger.debug(f"Данные для импорта (первые 2 записи): {data_to_import[:2]}")
+                service_methods['import'](df) # Передаем DataFrame напрямую
 
-                service_methods['import'](data_to_import)
-                
                 logger.info(f"Импорт для '{title}' успешно завершен. Обновление таблицы...")
                 refresh_data()
                 messagebox.showinfo("Успех", "Данные успешно импортированы.", parent=self)
