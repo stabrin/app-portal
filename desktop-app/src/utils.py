@@ -1,6 +1,10 @@
 # src/utils.py
 import sys
 import os
+import pandas as pd
+from psycopg2 import sql
+from psycopg2.extras import execute_values
+
 
 def resource_path(relative_path):
     """
@@ -16,3 +20,37 @@ def resource_path(relative_path):
         base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 
     return os.path.join(base_path, relative_path)
+
+def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_column: str):
+    """
+    Универсальная функция для UPSERT данных в любую таблицу.
+    Адаптировано из datamatrix-app.
+    """
+    if dataframe.empty:
+        return
+
+    columns = dataframe.columns.tolist()
+    
+    # --- ИСПРАВЛЕНИЕ: Обработка как строки, так и списка для pk_column ---
+    if isinstance(pk_column, list):
+        conflict_target = sql.SQL(', ').join(map(sql.Identifier, pk_column))
+        pk_list = pk_column
+    else:
+        conflict_target = sql.Identifier(pk_column)
+        pk_list = [pk_column]
+
+    update_columns = [col for col in columns if col not in pk_list]
+    
+    set_clause = sql.SQL(', ').join(
+        sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col)) for col in update_columns
+    )
+
+    query = sql.SQL("INSERT INTO {table} ({cols}) VALUES %s ON CONFLICT ({pk}) DO UPDATE SET {set_clause}").format(
+        table=sql.Identifier(table_name),
+        cols=sql.SQL(', ').join(map(sql.Identifier, columns)),
+        pk=conflict_target,
+        set_clause=set_clause
+    )
+    df_prepared = dataframe.where(pd.notna(dataframe), None)
+    data_tuples = [tuple(x) for x in df_prepared.itertuples(index=False)]
+    execute_values(cursor, query, data_tuples, page_size=1000)

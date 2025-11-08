@@ -1,6 +1,11 @@
 import os
 import re
 from typing import Optional
+import pandas as pd
+from psycopg2.extras import RealDictCursor
+
+from .printing_service import PrintingService # Для получения подключения к БД
+from .utils import upsert_data_to_db # Импортируем утилиту
 
 # Константа-разделитель для кодов DataMatrix
 GS_SEPARATOR = '\x1d'
@@ -111,3 +116,108 @@ def read_and_increment_counter(cursor, counter_name: str, increment_by: int = 1)
     )
     
     return new_value, warning_message, gcp_to_use
+
+def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
+    """
+    Выполняет импорт кодов из JSON-поля в dmkod_aggregation_details и их агрегацию.
+    Адаптировано из datamatrix-app.
+    """
+    logs = [f"Запуск импорта кодов из БД для Заказа №{order_id}..."]
+    conn = None
+
+    try:
+        conn = PrintingService._get_client_db_connection(user_info)
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # 1. Получаем все строки детализации с кодами для этого заказа
+            cur.execute("""
+                SELECT gtin, api_codes_json, aggregation_level, api_id
+                FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL
+            """, (order_id,))
+            all_details_with_codes = cur.fetchall()
+
+            if not all_details_with_codes:
+                raise ValueError("Не найдено кодов для импорта в базе данных.")
+
+            # --- НОВАЯ ЛОГИКА: Обрабатываем каждый тираж отдельно ---
+            for detail in all_details_with_codes:
+                api_id = detail['api_id']
+                gtin = detail['gtin']
+                aggregation_level = detail['aggregation_level']
+                codes_from_json = detail.get('api_codes_json', {}).get('codes', [])
+
+                logs.append(f"\n--- Обработка тиража ID: {api_id} (GTIN: {gtin}) ---")
+
+                if not codes_from_json:
+                    logs.append("  -> В записи нет кодов для обработки. Пропускаю.")
+                    continue
+
+                # Проверяем, существуют ли коды из ЭТОГО тиража в таблице items
+                cur.execute("SELECT 1 FROM items WHERE datamatrix = ANY(%s) LIMIT 1", (codes_from_json,))
+                if cur.fetchone():
+                    logs.append("  -> ИНФО: Коды из этого тиража уже были загружены ранее. Пропускаю.")
+                    continue
+
+                # Собираем данные для DataFrame только для текущего тиража
+                current_tirage_dm_data = []
+                for dm_string in codes_from_json:
+                    parsed_data = parse_datamatrix(dm_string)
+                    if not parsed_data.get('gtin'):
+                        logs.append(f"  -> Пропущен код: не удалось распознать GTIN в '{dm_string[:30]}...'.")
+                        continue
+                    parsed_data['order_id'] = order_id
+                    parsed_data['tirage_number'] = str(api_id)
+                    current_tirage_dm_data.append(parsed_data)
+
+                if not current_tirage_dm_data:
+                    logs.append("  -> В тираже не найдено корректных кодов DataMatrix для обработки.")
+                    continue
+
+                items_df = pd.DataFrame(current_tirage_dm_data)
+                logs.append(f"  -> Подготовлено к загрузке {len(items_df)} кодов.")
+
+                # Проверка и создание GTIN в справочнике
+                cur.execute("SELECT gtin FROM products WHERE gtin = %s", (gtin,))
+                if not cur.fetchone():
+                    logs.append(f"  -> GTIN {gtin} не найден в справочнике. Создаю заглушку...")
+                    new_products_df = pd.DataFrame([{'gtin': gtin, 'name': f'Товар (GTIN: {gtin})'}])
+                    upsert_data_to_db(cur, 'products', new_products_df, 'gtin')
+
+                # Агрегация
+                all_packages = []
+                items_df['package_id'] = None
+                agg_level_int = int(aggregation_level) if pd.notna(aggregation_level) else 0
+
+                if agg_level_int > 0:
+                    logs.append(f"  -> Начинаю агрегацию с шагом {agg_level_int} шт. в коробе.")
+                    item_indices = items_df.index.tolist()
+                    step = agg_level_int
+                    for i in range(0, len(item_indices), step):
+                        chunk_indices = item_indices[i:i + step]
+                        box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
+                        if warning and warning not in logs: logs.append(warning)
+                        items_df.loc[chunk_indices, 'package_id'] = box_id
+                        _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
+                        all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 1, 'parent_id': None})
+                else:
+                    logs.append("  -> Агрегация для тиража пропущена, т.к. кол-во в коробе не задано.")
+
+                # Сохранение результатов для текущего тиража
+                if all_packages:
+                    packages_df = pd.DataFrame(all_packages)
+                    logs.append(f"  -> Загружаю {len(packages_df)} упаковок...")
+                    upsert_data_to_db(cur, 'packages', packages_df, 'id')
+
+                logs.append(f"  -> Загружаю {len(items_df)} товаров...")
+                upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
+
+            conn.commit()
+
+        logs.append("\nПроцесс импорта и агрегации успешно завершен!")
+    except Exception as e:
+        if conn: conn.rollback()
+        logs.append(f"\nКРИТИЧЕСКАЯ ОШИБКА: {e}")
+        logs.append("Все изменения в базе данных отменены.")
+    finally:
+        if conn: conn.close()
+
+    return logs
