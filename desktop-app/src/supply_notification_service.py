@@ -194,19 +194,43 @@ class SupplyNotificationService:
                 status = 'dmkod' if scenario_data.get('dm_source') == 'Заказ в ДМ.Код' else 'new'
                 product_group_id = product_groups[0].get('id')
 
-                cur.execute("""
-                    INSERT INTO orders (
-                        client_api_id, client_local_id, client_name, scenario_id, notification_id, 
-                        order_date, notes, status, product_group_id
-                    ) VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s)
-                    RETURNING id;
-                """, (
-                    notification['client_api_id'], notification['client_local_id'], notification['client_name'],
-                    notification['scenario_id'], notification['id'], notification['vehicle_number'],
-                    status, product_group_id
-                ))
-                new_order_id = cur.fetchone()['id']
-                logging.info(f"Создан новый заказ с ID {new_order_id} из уведомления ID {notification_id}.")
+                # --- НОВАЯ ЛОГИКА: Проверяем, существует ли уже заказ для этого уведомления ---
+                cur.execute("SELECT id FROM orders WHERE notification_id = %s", (notification_id,))
+                existing_order = cur.fetchone()
+
+                if existing_order:
+                    # ОБНОВЛЕНИЕ СУЩЕСТВУЮЩЕГО ЗАКАЗА
+                    order_id = existing_order['id']
+                    cur.execute("""
+                        UPDATE orders SET
+                            client_api_id = %s, client_local_id = %s, client_name = %s, scenario_id = %s,
+                            order_date = CURRENT_DATE, notes = %s, status = %s, product_group_id = %s
+                        WHERE id = %s;
+                    """, (
+                        notification['client_api_id'], notification['client_local_id'], notification['client_name'],
+                        notification['scenario_id'], notification['vehicle_number'], status, product_group_id,
+                        order_id
+                    ))
+                    # Удаляем старую детализацию перед вставкой новой
+                    cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
+                    logging.info(f"Обновлен существующий заказ ID {order_id} из уведомления ID {notification_id}. Старая детализация удалена.")
+                    message = f"Заказ №{order_id} успешно обновлен на основе уведомления."
+                else:
+                    # СОЗДАНИЕ НОВОГО ЗАКАЗА
+                    cur.execute("""
+                        INSERT INTO orders (
+                            client_api_id, client_local_id, client_name, scenario_id, notification_id, 
+                            order_date, notes, status, product_group_id
+                        ) VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s)
+                        RETURNING id;
+                    """, (
+                        notification['client_api_id'], notification['client_local_id'], notification['client_name'],
+                        notification['scenario_id'], notification['id'], notification['vehicle_number'],
+                        status, product_group_id
+                    ))
+                    order_id = cur.fetchone()['id']
+                    logging.info(f"Создан новый заказ с ID {order_id} из уведомления ID {notification_id}.")
+                    message = f"Заказ №{order_id} успешно создан на основе уведомления."
 
                 # 5. Переносим детализацию
                 cur.execute("""
@@ -219,7 +243,7 @@ class SupplyNotificationService:
                 if details:
                     from psycopg2.extras import execute_values
                     details_to_insert = [
-                        (new_order_id, d['gtin'], d['quantity'], d['production_date'], d['expiry_date'])
+                        (order_id, d['gtin'], d['quantity'], d['production_date'], d['expiry_date'])
                         for d in details
                     ]
                     insert_query = """
@@ -227,10 +251,10 @@ class SupplyNotificationService:
                         VALUES %s
                     """
                     execute_values(cur, insert_query, details_to_insert)
-                    logging.info(f"Перенесено {len(details_to_insert)} строк детализации в заказ ID {new_order_id}.")
+                    logging.info(f"Перенесено {len(details_to_insert)} строк детализации в заказ ID {order_id}.")
 
             conn.commit()
-            return True, f"Заказ №{new_order_id} успешно создан на основе уведомления."
+            return True, message
 
     def get_notification_by_id(self, notification_id):
         """Получает одно уведомление по ID."""
