@@ -107,7 +107,7 @@ def read_and_increment_counter(cursor, counter_name: str, increment_by: int = 1)
         "SELECT current_value FROM system_counters WHERE counter_name = %s FOR UPDATE;",
         (counter_name,)
     )
-    current_value = cursor.fetchone()[0]
+    current_value = cursor.fetchone()['current_value']
     new_value = current_value + increment_by
     
     warning_message = None
