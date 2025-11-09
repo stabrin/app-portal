@@ -1900,16 +1900,22 @@ class OrderEditorDialog(tk.Toplevel):
         ttk.Button(controls_frame, text="Сохранить изменения", command=self._save_changes).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame, text="Выгрузить в Excel", command=self._export_details_to_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame, text="Загрузить из Excel", command=self._import_details_from_excel).pack(side=tk.LEFT, padx=2)
-        # --- НОВЫЙ БЛОК: Кнопки для экспорта/импорта товаров ---
-        ttk.Separator(controls_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
-        ttk.Button(controls_frame, text="Экспорт товаров", command=self._export_products_to_excel).pack(side=tk.LEFT, padx=2)
-        ttk.Button(controls_frame, text="Импорт товаров", command=self._import_products_from_excel).pack(side=tk.LEFT, padx=2)
 
-        # --- НОВЫЙ БЛОК: Кнопка для Bartender ---
+        # --- ИЗМЕНЕНИЕ: Разделяем логику кнопок в зависимости от сценария ---
         post_processing_mode = self.scenario_data.get('post_processing')
+
         if post_processing_mode == "Печать через Bartender":
+            # Кнопки для работы со справочником товаров и Bartender View
             ttk.Separator(controls_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+            ttk.Button(controls_frame, text="Экспорт товаров", command=self._export_products_to_excel).pack(side=tk.LEFT, padx=2)
+            ttk.Button(controls_frame, text="Импорт товаров", command=self._import_products_from_excel).pack(side=tk.LEFT, padx=2)
             ttk.Button(controls_frame, text="Создать/Обновить View", command=self._create_bartender_view).pack(side=tk.LEFT, padx=2)
+
+        elif post_processing_mode == "Внешнее ПО":
+            # Кнопки для выгрузки/загрузки данных для внешнего ПО
+            ttk.Separator(controls_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+            ttk.Button(controls_frame, text="Экспорт данных", command=self._export_data_for_external_sw).pack(side=tk.LEFT, padx=2)
+            ttk.Button(controls_frame, text="Импорт данных", command=self._import_data_for_external_sw).pack(side=tk.LEFT, padx=2)
 
         ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
 
@@ -2122,6 +2128,212 @@ class OrderEditorDialog(tk.Toplevel):
         except Exception as e:
             logging.error(f"Ошибка при импорте товаров: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось импортировать товары: {e}", parent=self)
+
+    def _export_data_for_external_sw(self):
+        """Выгружает данные в формате 'Дельта' для внешнего ПО."""
+        logging.info(f"Запуск экспорта данных в формате 'Дельта' для заказа ID: {self.order_id}")
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT api_codes_json, production_date, expiry_date
+                        FROM dmkod_aggregation_details
+                        WHERE order_id = %s AND api_codes_json IS NOT NULL
+                        """,
+                        (self.order_id,)
+                    )
+                    details_to_process = cur.fetchall()
+
+                if not details_to_process:
+                    messagebox.showwarning("Нет данных", "В заказе нет скачанных кодов для выгрузки.", parent=self)
+                    return
+
+                all_rows = []
+                from dateutil.relativedelta import relativedelta
+
+                for detail in details_to_process:
+                    codes = detail.get('api_codes_json', {}).get('codes', [])
+                    prod_date = detail.get('production_date')
+                    exp_date = detail.get('expiry_date')
+
+                    life_time_months = ''
+                    if prod_date and exp_date:
+                        delta = relativedelta(exp_date, prod_date)
+                        life_time_months = delta.years * 12 + delta.months
+
+                    for code in codes:
+                        if not code or len(code) < 16: continue
+                        all_rows.append({
+                            'DataMatrix': code,
+                            'DataMatrixCode': '',
+                            'Barcode': code[2:16], # Извлекаем GTIN
+                            'LifeTime': life_time_months
+                        })
+
+                if not all_rows:
+                    messagebox.showwarning("Нет данных", "Не найдено корректных кодов для выгрузки.", parent=self)
+                    return
+
+                df = pd.DataFrame(all_rows)
+                filepath = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV (Tab-separated)", "*.csv")], initialfile=f"delta_export_order_{self.order_id}.csv", parent=self)
+                if not filepath: return
+
+                df.to_csv(filepath, sep='\t', index=False, encoding='utf-8', line_terminator='\r\n')
+
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET status = 'delta' WHERE id = %s", (self.order_id,))
+                conn.commit()
+
+                messagebox.showinfo("Успех", f"Данные успешно выгружены в файл:\n{filepath}\n\nСтатус заказа обновлен на 'delta'.", parent=self)
+        except Exception as e:
+            logging.error(f"Ошибка при экспорте данных для внешнего ПО (заказ {self.order_id}): {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось экспортировать данные: {e}", parent=self)
+
+    def _import_data_for_external_sw(self):
+        """
+        Обрабатывает CSV-файл от 'Дельта', создает упаковки, товары и готовит данные для API.
+        Адаптировано из dmkod-integration-app/app/routes.py, action 'upload_delta_csv'.
+        """
+        logging.info(f"[Delta Import] Запуск импорта данных из CSV для заказа ID: {self.order_id}")
+
+        filepath = filedialog.askopenfilename(
+            title="Выберите CSV-файл от 'Дельта'",
+            filetypes=[("CSV files", "*.csv")],
+            parent=self
+        )
+        if not filepath:
+            logging.info("[Delta Import] Импорт отменен пользователем.")
+            return
+
+        # 1. Валидация имени файла
+        expected_filename_part = f"order_{self.order_id}.csv"
+        if expected_filename_part not in os.path.basename(filepath):
+            messagebox.showerror("Ошибка", f'Имя файла должно содержать "{expected_filename_part}".', parent=self)
+            return
+
+        conn = None
+        try:
+            # 2. Чтение и валидация CSV
+            df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str})
+            df.columns = df.columns.str.strip()
+            required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
+            if not all(col in df.columns for col in required_columns):
+                raise ValueError(f'В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.')
+
+            df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
+            df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
+            df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+            df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+
+            conn = self._get_client_db_connection()
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                from .utils import upsert_data_to_db
+                
+                # 3. Создание упаковок (короба и паллеты)
+                unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
+                unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
+                
+                packages_to_insert = []
+                if not unique_boxes.empty:
+                    unique_boxes['level'] = 1
+                    packages_to_insert.append(unique_boxes)
+                if not unique_pallets.empty:
+                    unique_pallets['level'] = 2
+                    packages_to_insert.append(unique_pallets)
+
+                if packages_to_insert:
+                    all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
+                    all_packages_df['owner'] = 'delta'
+                    
+                    # Устанавливаем связи "короб-паллета"
+                    box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
+                    box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
+                    
+                    def find_parent_sscc(row):
+                        if row['level'] == 1: return box_to_pallet_sscc_map.get(row['sscc'])
+                        return None
+                    all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
+
+                    # Используем UPSERT для безопасной вставки
+                    upsert_data_to_db(cur, 'packages', all_packages_df, 'sscc')
+                    logging.info(f"[Delta Import] Загружено/обновлено {len(all_packages_df)} упаковок.")
+
+                    # Обновляем parent_id после вставки
+                    cur.execute("""
+                        UPDATE packages p_child SET parent_id = p_parent.id
+                        FROM packages AS p_parent
+                        WHERE p_child.parent_sscc = p_parent.sscc AND p_child.parent_sscc IS NOT NULL;
+                    """)
+                    cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
+                    logging.info("[Delta Import] Связи 'короб-паллета' обновлены.")
+
+                # 4. Создание товаров (items)
+                from .aggregation_service import parse_datamatrix
+                parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
+                items_df = pd.DataFrame(parsed_dm_data)
+                items_df['order_id'] = self.order_id
+                items_df['BoxSSCC'] = df['BoxSSCC']
+
+                # Получаем ID коробов для привязки
+                box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
+                sscc_to_id_map = {}
+                if box_ssccs_tuple:
+                    cur.execute("SELECT sscc, id FROM packages WHERE sscc IN %s", (box_ssccs_tuple,))
+                    sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+                
+                items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
+                
+                columns_to_save = ['datamatrix', 'gtin', 'serial', 'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 'order_id', 'package_id']
+                items_to_upload = items_df[columns_to_save]
+                upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
+                logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
+
+                # 5. Подготовка данных для delta_result
+                df_for_json = df.copy()
+                df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
+                
+                cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
+                gtin_to_printrun_map = {row['gtin']: row['api_id'] for row in cur.fetchall()}
+                if not gtin_to_printrun_map:
+                    raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
+
+                df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
+                
+                grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
+
+                def create_payload(row):
+                    cleaned_codes = [code.replace('\x1d', '') for code in row['DataMatrix']]
+                    return json.dumps({
+                        "include": [{"code": c} for c in cleaned_codes],
+                        "attributes": {
+                            "production_date": str(row['production_date']),
+                            "expiration_date": str(row['expiration_date'])
+                        }
+                    })
+
+                grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
+                grouped_for_api['order_id'] = self.order_id
+                grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
+                grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
+
+                delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
+                upsert_data_to_db(cur, 'delta_result', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
+                logging.info(f"[Delta Import] Сохранено {len(delta_result_df)} сгруппированных записей в 'delta_result'.")
+
+                # 6. Обновление статуса заказа
+                cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
+            
+            conn.commit()
+            messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
+
+        except Exception as e:
+            if conn: conn.rollback()
+            logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
+        finally:
+            if conn: conn.close()
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""

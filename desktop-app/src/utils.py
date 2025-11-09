@@ -26,7 +26,8 @@ def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_colum
     Универсальная функция для UPSERT данных в любую таблицу.
     Адаптировано из datamatrix-app.
     """
-    if dataframe.empty:
+    # --- ИЗМЕНЕНИЕ: Проверяем, что dataframe не None и не пустой ---
+    if dataframe is None or dataframe.empty:
         return
 
     columns = dataframe.columns.tolist()
