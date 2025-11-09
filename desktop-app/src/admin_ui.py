@@ -1917,6 +1917,11 @@ class OrderEditorDialog(tk.Toplevel):
             ttk.Button(controls_frame, text="Экспорт данных", command=self._export_data_for_external_sw).pack(side=tk.LEFT, padx=2)
             ttk.Button(controls_frame, text="Импорт данных", command=self._import_data_for_external_sw).pack(side=tk.LEFT, padx=2)
 
+        # --- НОВЫЙ БЛОК: Кнопка для отчета декларанта (не зависит от сценария) ---
+        ttk.Separator(controls_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        ttk.Button(controls_frame, text="Скачать отчет декларанта", command=self._download_declarator_report).pack(side=tk.LEFT, padx=2)
+
+
         ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
 
         tree_frame = ttk.Frame(main_frame)
@@ -2128,6 +2133,85 @@ class OrderEditorDialog(tk.Toplevel):
         except Exception as e:
             logging.error(f"Ошибка при импорте товаров: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось импортировать товары: {e}", parent=self)
+
+    def _download_declarator_report(self):
+        """
+        Формирует и выгружает отчет для декларанта напрямую из БД, не создавая представлений.
+        Адаптировано из datamatrix-app/app/services/view_service.py.
+        """
+        logging.info(f"Запуск формирования отчета декларанта для заказа ID: {self.order_id}")
+        try:
+            with self._get_client_db_connection() as conn:
+                # Этот запрос объединяет логику создания base_view и sscc_view в один
+                query = """
+                WITH base_data AS (
+                    SELECT
+                        i.datamatrix, i.gtin, i.package_id,
+                        p.name AS product_name, p.description_1, p.description_2, p.description_3
+                    FROM items i
+                    LEFT JOIN products p ON i.gtin = p.gtin
+                    WHERE i.order_id = %(order_id)s
+                ),
+                package_hierarchy AS (
+                    SELECT
+                        p.id as base_box_id, p.id as package_id, p.level, p.sscc, p.parent_id
+                    FROM packages p
+                    WHERE p.level = 1 AND p.id IN (SELECT DISTINCT package_id FROM base_data WHERE package_id IS NOT NULL)
+                    UNION ALL
+                    SELECT ph.base_box_id, p_parent.id as package_id, p_parent.level, p_parent.sscc, p_parent.parent_id
+                    FROM package_hierarchy ph JOIN packages p_parent ON ph.parent_id = p_parent.id
+                ),
+                sscc_data AS (
+                    SELECT
+                        base_box_id AS id_level_1,
+                        MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1,
+                        MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2,
+                        MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
+                    FROM package_hierarchy
+                    GROUP BY base_box_id
+                )
+                SELECT
+                    b.datamatrix,
+                    b.gtin,
+                    SUBSTRING(b.datamatrix for 24) AS dm_part_24,
+                    SUBSTRING(b.datamatrix for 31) AS dm_part_31,
+                    s.sscc_level_1,
+                    s.sscc_level_2,
+                    s.sscc_level_3,
+                    b.product_name,
+                    b.description_1,
+                    b.description_2,
+                    b.description_3
+                FROM base_data b
+                LEFT JOIN sscc_data s ON b.package_id = s.id_level_1
+                ORDER BY b.datamatrix;
+                """
+                df = pd.read_sql(query, conn, params={'order_id': self.order_id})
+
+            if df.empty:
+                messagebox.showwarning("Нет данных", "Не найдено данных для формирования отчета.", parent=self)
+                return
+
+            # Очистка данных от недопустимых для Excel символов
+            def clean_illegal_chars(val):
+                if isinstance(val, str):
+                    return val.replace('\x1d', ' ') # Заменяем символ GS на пробел
+                return val
+            df = df.applymap(clean_illegal_chars)
+
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+                initialfile=f"declarator_report_order_{self.order_id}.xlsx",
+                parent=self
+            )
+            if filepath:
+                df.to_excel(filepath, index=False)
+                messagebox.showinfo("Успех", f"Отчет декларанта успешно сохранен в файл:\n{filepath}", parent=self)
+
+        except Exception as e:
+            logging.error(f"Ошибка при формировании отчета декларанта для заказа {self.order_id}: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось сформировать отчет: {e}", parent=self)
 
     def _export_data_for_external_sw(self):
         """Выгружает данные в формате 'Дельта' для внешнего ПО."""
