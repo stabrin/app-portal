@@ -2280,6 +2280,7 @@ class AdminWindow(tk.Tk):
         # Настройка тегов для подсветки строк
         tree.tag_configure('Проект', background='light yellow')
         tree.tag_configure('Ожидание', background='light green')
+        tree.tag_configure('Заказ создан', background='lightpink')
 
         # --- ИЗМЕНЕНИЕ: Создаем многоуровневые заголовки для сводки ---
         # 1. Фрейм для верхних заголовков (даты)

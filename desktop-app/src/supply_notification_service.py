@@ -252,6 +252,10 @@ class SupplyNotificationService:
                     execute_values(cur, insert_query, details_to_insert)
                     logging.info(f"Перенесено {len(details_to_insert)} строк детализации в заказ ID {order_id}.")
 
+                # 6. Обновляем статус самого уведомления
+                cur.execute("UPDATE ap_supply_notifications SET status = 'Заказ создан' WHERE id = %s", (notification_id,))
+                logging.info(f"Статус уведомления ID {notification_id} обновлен на 'Заказ создан'.")
+
             conn.commit()
             return True, message
 
