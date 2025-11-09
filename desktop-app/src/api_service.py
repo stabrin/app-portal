@@ -125,3 +125,24 @@ class ApiService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при скачивании кодов для тиража: {e}", exc_info=True)
             raise
+
+    def upload_utilisation_data(self, payload: dict):
+        """
+        Отправляет сведения об использовании кодов (атрибуция, агрегация).
+        Адаптировано из dmkod-integration-app.
+        """
+        logger.info(f"Отправка сведений об использовании. Payload: {payload}")
+        try:
+            # Определяем URL в зависимости от наличия атрибутов в payload
+            if 'attributes' in payload:
+                url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload"
+            else:
+                url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/include"
+            
+            headers = self._get_auth_headers()
+            response = requests.post(url, headers=headers, json=payload, timeout=240) # Увеличенный таймаут
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при отправке сведений об использовании: {e}", exc_info=True)
+            raise
