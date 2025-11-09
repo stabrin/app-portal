@@ -6,6 +6,7 @@ import logging
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
 import threading
+import re
 import json
 import time
 import pandas as pd
