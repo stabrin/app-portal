@@ -2179,7 +2179,7 @@ class OrderEditorDialog(tk.Toplevel):
                 filepath = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV (Tab-separated)", "*.csv")], initialfile=f"delta_export_order_{self.order_id}.csv", parent=self)
                 if not filepath: return
 
-                df.to_csv(filepath, sep='\t', index=False, encoding='utf-8', line_terminator='\r\n')
+                df.to_csv(filepath, sep='\t', index=False, encoding='utf-8', lineterminator='\r\n')
 
                 with conn.cursor() as cur:
                     cur.execute("UPDATE orders SET status = 'delta' WHERE id = %s", (self.order_id,))
