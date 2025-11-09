@@ -147,7 +147,7 @@ class ApiService:
             headers = self._get_auth_headers() # Получаем базовые заголовки
             headers['Content-Type'] = 'application/json' # Явно указываем Content-Type
             
-            # --- ИСПРАВЛЕНИЕ: Используем параметр `json` вместо `data` ---
+            # --- ИСПРАВЛЕНИЕ 2: Используем параметр `json` вместо `data` и правильное имя переменной ---
             # `requests` сам корректно обработает и словарь, и JSON-строку,
             # а также установит правильный Content-Type и кодировку.
             # Это решает проблему "can only concatenate str (not "int") to str".
