@@ -2140,8 +2140,23 @@ class OrderEditorDialog(tk.Toplevel):
         Адаптировано из datamatrix-app/app/services/view_service.py.
         """
         logging.info(f"Запуск формирования отчета декларанта для заказа ID: {self.order_id}")
+
+        def sanitize_filename_part(text):
+            """Очищает строку для безопасного использования в имени файла."""
+            if not isinstance(text, str) or not text.strip():
+                return "declarator_report"
+            # Удаляем недопустимые символы
+            sanitized = re.sub(r'[\\/*?:"<>|]', "", text)
+            # Заменяем пробелы и прочие разделители на подчеркивание
+            sanitized = re.sub(r'[\s\.]+', '_', sanitized)
+            return sanitized.strip('_')
+
         try:
             with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT notes FROM orders WHERE id = %s", (self.order_id,))
+                    order_info = cur.fetchone()
+                
                 # Этот запрос объединяет логику создания base_view и sscc_view в один
                 query = """
                 WITH RECURSIVE base_data AS (
@@ -2199,10 +2214,12 @@ class OrderEditorDialog(tk.Toplevel):
                 return val
             df = df.applymap(clean_illegal_chars)
 
+            report_name = sanitize_filename_part(order_info.get('notes') if order_info else '')
+
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
                 filetypes=[("Excel", "*.xlsx")],
-                initialfile=f"declarator_report_order_{self.order_id}.xlsx",
+                initialfile=f"{report_name}_order_{self.order_id}.xlsx",
                 parent=self
             )
             if filepath:
