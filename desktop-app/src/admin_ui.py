@@ -1819,132 +1819,96 @@ class ApiIntegrationDialog(tk.Toplevel):
         self._run_in_thread(self._prepare_report_data_task)
 
     def _prepare_report_data_task(self):
-        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений..."))
-        conn = None
+        """Задача для подготовки сведений для отчета."""
+        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений для отчета..."))
         try:
-            conn = self._get_client_db_connection()
             order_status = self.order_data.get('status')
+            self.after(0, lambda: self._append_log(f"Статус заказа: {order_status}"))
 
-            # Сценарий 1: Заказ пришел от "Дельты"
             if order_status == 'delta':
-                self.after(0, lambda: self._append_log("Статус заказа 'delta'. Обработка данных из таблицы 'delta_result'."))
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute(
-                        "SELECT id, printrun_id, codes_json FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NULL",
-                        (self.order_id,)
-                    )
-                    results_to_process = cur.fetchall()
+                # Логика для статуса 'delta'
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("SELECT id, printrun_id, codes_json FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NULL", (self.order_id,))
+                        results_to_process = cur.fetchall()
 
                 if not results_to_process:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT EXISTS (SELECT 1 FROM delta_result WHERE order_id = %s)", (self.order_id,))
-                        has_any_results = cur.fetchone()[0]
-                    message = "Все ранее загруженные сведения от 'Дельта' уже подготовлены." if has_any_results else "Нет данных от 'Дельта' для подготовки сведений."
-                    self.after(0, lambda msg=message: self._append_log(msg))
+                    self.after(0, lambda: self._append_log("Нет новых данных от 'Дельта' для отправки."))
                     return
 
                 self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
-                
-                with conn.cursor() as cur:
-                    for i, result in enumerate(results_to_process):
-                        # --- ИСПРАВЛЕНИЕ: Используем JSON-строку из БД напрямую ---
-                        payload = result['codes_json']
 
-                        self.after(0, lambda i=i, p_id=result['printrun_id']: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {p_id} ---"))
-                        
-                        # --- ДОБАВЛЕНО: Логирование тела запроса ---
-                        # Пытаемся красиво отформатировать для лога, если это валидный JSON
-                        try:
-                            pretty_payload = json.dumps(json.loads(payload), indent=2, ensure_ascii=False)
-                        except:
-                            pretty_payload = payload # Если не получилось, показываем как есть
-                        self.after(0, lambda p=pretty_payload: self._append_log(f"  Тело запроса (payload):\n{p}"))
-                        
-                        self.api_service.upload_utilisation_data(payload)
-                        
-                        generated_upload_id = (self.order_id * 1000) + (i + 1)
-                        cur.execute(
-                            "UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s",
-                            (generated_upload_id, result['id'])
-                        )
-                        self.after(0, lambda r_id=result['id'], u_id=generated_upload_id: self._append_log(f"  Записи ID {r_id} присвоен ID загрузки: {u_id}"))
-                        
-                        # --- ДОБАВЛЕНО: Пауза между запросами ---
-                        if i < len(results_to_process) - 1:
-                            self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
-                            time.sleep(10)
-                
-                conn.commit()
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        for i, result in enumerate(results_to_process):
+                            payload = result['codes_json']
+                            self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
+                            
+                            # Вызов API
+                            response_data = self.api_service.upload_utilisation_data(payload)
+                            
+                            # Генерируем ID для отслеживания
+                            generated_upload_id = (self.order_id * 1000) + (i + 1)
+                            cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (generated_upload_id, result['id']))
+                            
+                            self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
+                            self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
+                            time.sleep(5)
+                    conn.commit()
 
-            # Сценарий 2: Стандартный заказ (статус 'dmkod' и другие)
-            else:
-                self.after(0, lambda: self._append_log("Стандартный сценарий. Обработка данных из 'dmkod_aggregation_details'."))
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute(
-                        """
-                        SELECT d.id as detail_id, d.api_id, d.gtin, d.production_date, d.expiry_date, o.fias_code
-                        FROM dmkod_aggregation_details d
-                        JOIN orders o ON d.order_id = o.id
-                        WHERE d.order_id = %s AND d.api_id IS NOT NULL AND d.utilisation_upload_id IS NULL
-                        ORDER BY d.id
-                        """,
-                        (self.order_id,)
-                    )
-                    details_to_process = cur.fetchall()
+            elif order_status == 'dmkod':
+                # Логика для статуса 'dmkod'
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("""
+                            SELECT d.api_id, d.production_date, d.expiry_date, d.id as detail_id
+                            FROM dmkod_aggregation_details d
+                            WHERE d.order_id = %s AND d.api_id IS NOT NULL AND d.utilisation_upload_id IS NULL
+                        """, (self.order_id,))
+                        details_to_process = cur.fetchall()
 
                 if not details_to_process:
-                    self.after(0, lambda: self._append_log("Все сведения для данного заказа уже были подготовлены."))
+                    self.after(0, lambda: self._append_log("Нет новых тиражей для отправки сведений."))
                     return
 
-                self.after(0, lambda: self._append_log(f"Найдено {len(details_to_process)} позиций для подготовки сведений."))
+                self.after(0, lambda: self._append_log(f"Найдено {len(details_to_process)} тиражей для обработки."))
 
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        for i, detail in enumerate(details_to_process):
+                            attributes = {}
+                            if detail.get('production_date'):
+                                attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
+                            if detail.get('expiry_date'):
+                                attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
+
+                            payload = {"all_from_printrun": detail['api_id']}
+                            if attributes:
+                                payload['attributes'] = attributes
+
+                            self.after(0, lambda i=i, p=payload: self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка данных: {json.dumps(p)} ---"))
+                            
+                            response_data = self.api_service.upload_utilisation_data(payload)
+                            
+                            generated_upload_id = (self.order_id * 1000) + (i + 1)
+                            cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (generated_upload_id, detail['detail_id']))
+
+                            self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
+                            self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
+                            time.sleep(5)
+                    conn.commit()
+
+            # Обновляем статус заказа после успешной обработки
+            with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
-                    for i, detail in enumerate(details_to_process):
-                        attributes = {}
-                        if detail.get('production_date'):
-                            attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
-                        if detail.get('expiry_date'):
-                            attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
-                        if detail.get('fias_code'):
-                            attributes['fias_id'] = detail['fias_code']
-
-                        payload = {"all_from_printrun": detail['api_id']}
-                        if attributes:
-                            payload['attributes'] = attributes
-
-                        self.after(0, lambda i=i, gtin=detail['gtin'], p_id=detail['api_id']: self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка для GTIN {gtin} (Тираж ID: {p_id}) ---"))
-                        
-                        self.api_service.upload_utilisation_data(payload)
-                        
-                        generated_upload_id = (self.order_id * 1000) + (i + 1)
-                        cur.execute(
-                            "UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s",
-                            (generated_upload_id, detail['detail_id'])
-                        )
-                        self.after(0, lambda d_id=detail['detail_id'], u_id=generated_upload_id: self._append_log(f"  Записи детализации ID {d_id} присвоен ID загрузки: {u_id}"))
-
-                        # --- ДОБАВЛЕНО: Пауза между запросами ---
-                        if i < len(details_to_process) - 1:
-                            self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
-                            time.sleep(10)
-                
-                conn.commit()
-
-            # Общий финал для обоих сценариев
-            with conn.cursor() as cur:
                     cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
-            conn.commit()
-            
+                conn.commit()
             self.order_data['api_status'] = 'Сведения подготовлены'
-            self.after(0, lambda: self._append_log("\nСведения успешно подготовлены!"))
-            self.after(0, self._update_buttons_state)
-
+            self.after(0, lambda: self._append_log("\nВсе сведения успешно отправлены!"))
         except Exception as e:
-            if conn: conn.rollback()
-            self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
-            self.after(0, self._update_buttons_state)
+            self.after(0, lambda err=e: self._display_api_response(500, f"КРИТИЧЕСКАЯ ОШИБКА: {err}\n\n{traceback.format_exc()}"))
         finally:
-            if conn: conn.close()
+            self.after(0, self._update_buttons_state)
 
     def _prepare_report(self):
         self._run_in_thread(self._prepare_report_task)
