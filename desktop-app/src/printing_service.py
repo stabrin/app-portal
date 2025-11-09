@@ -121,11 +121,74 @@ class PrintingService:
                 cur.execute(main_view_query)
                 logging.debug("Основное представление успешно создано.")
                 
-                # Логика для SSCC view пока не переносится, так как она сложнее
-                # и требует рекурсивных запросов, которые могут быть не нужны на данном этапе.
-                # Создадим простую заглушку.
-                cur.execute(sql.SQL("CREATE OR REPLACE VIEW {} AS SELECT 1 as placeholder;").format(sscc_view_name))
-                logging.debug("Представление-заглушка для SSCC создано.")
+                # --- НОВАЯ ЛОГИКА: Создание полноценного SSCC-представления ---
+                logging.debug("Начало создания SSCC-представления.")
+                
+                # 4. Проверяем наличие агрегации
+                cur.execute(
+                    sql.SQL("SELECT 1 FROM items WHERE order_id = %s AND package_id IS NOT NULL LIMIT 1"),
+                    (order_id,)
+                )
+                aggregation_exists = cur.fetchone() is not None
+                logging.debug(f"Проверка наличия агрегации для заказа {order_id}: {aggregation_exists}")
+
+                # 5. Создаем второе представление для SSCC
+                if aggregation_exists:
+                    sscc_view_query = sql.SQL("""
+                    CREATE OR REPLACE VIEW {view_name} AS
+                    WITH RECURSIVE package_hierarchy AS (
+                        SELECT
+                            p.id as base_box_id, p.id as package_id, p.level, p.sscc, p.parent_id
+                        FROM packages p
+                        WHERE p.level = 1 AND p.id IN (
+                            SELECT DISTINCT i.package_id
+                            FROM items i
+                            WHERE i.order_id = {order_id} AND i.package_id IS NOT NULL
+                        )
+                        UNION ALL
+                        SELECT ph.base_box_id, p_parent.id as package_id, p_parent.level, p_parent.sscc, p_parent.parent_id
+                        FROM package_hierarchy ph JOIN packages p_parent ON ph.parent_id = p_parent.id
+                    ),
+                    boxes_view AS (
+                        SELECT
+                            base_box_id AS id_level_1,
+                            MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1,
+                            MAX(CASE WHEN level = 2 THEN package_id END) AS id_level_2,
+                            MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2,
+                            MAX(CASE WHEN level = 3 THEN package_id END) AS id_level_3,
+                            MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
+                        FROM package_hierarchy
+                        GROUP BY base_box_id
+                    )
+                    SELECT * FROM boxes_view
+                    UNION ALL
+                    SELECT
+                        NULL::integer AS id_level_1, sscc_level_2 AS sscc_level_1,
+                        id_level_2, sscc_level_2, id_level_3, sscc_level_3
+                    FROM boxes_view WHERE id_level_2 IS NOT NULL
+                    GROUP BY id_level_2, sscc_level_2, id_level_3, sscc_level_3
+                    UNION ALL
+                    SELECT
+                        NULL::integer AS id_level_1, sscc_level_3 AS sscc_level_1,
+                        NULL::integer AS id_level_2, NULL::varchar AS sscc_level_2,
+                        id_level_3, sscc_level_3
+                    FROM boxes_view WHERE id_level_3 IS NOT NULL
+                    GROUP BY id_level_3, sscc_level_3;
+                    """).format(
+                        view_name=sscc_view_name,
+                        order_id=sql.Literal(order_id)
+                    )
+                else:
+                    # Пустое представление, если агрегации нет
+                    sscc_view_query = sql.SQL("""
+                    CREATE OR REPLACE VIEW {view_name} AS
+                    SELECT NULL::integer AS id_level_1, NULL::varchar AS sscc_level_1, NULL::integer AS id_level_2,
+                           NULL::varchar AS sscc_level_2, NULL::integer AS id_level_3, NULL::varchar AS sscc_level_3
+                    WHERE 1=0;
+                    """).format(view_name=sscc_view_name)
+
+                cur.execute(sscc_view_query)
+                logging.debug("SSCC-представление успешно создано.")
 
             conn.commit()
             logging.info(f"Представления для заказа №{order_id} успешно созданы/обновлены и транзакция закоммичена.")
