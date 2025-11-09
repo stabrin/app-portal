@@ -1900,6 +1900,10 @@ class OrderEditorDialog(tk.Toplevel):
         ttk.Button(controls_frame, text="Сохранить изменения", command=self._save_changes).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame, text="Выгрузить в Excel", command=self._export_details_to_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame, text="Загрузить из Excel", command=self._import_details_from_excel).pack(side=tk.LEFT, padx=2)
+        # --- НОВЫЙ БЛОК: Кнопки для экспорта/импорта товаров ---
+        ttk.Separator(controls_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
+        ttk.Button(controls_frame, text="Экспорт товаров", command=self._export_products_to_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame, text="Импорт товаров", command=self._import_products_from_excel).pack(side=tk.LEFT, padx=2)
 
         # --- НОВЫЙ БЛОК: Кнопка для Bartender ---
         post_processing_mode = self.scenario_data.get('post_processing')
@@ -2058,6 +2062,66 @@ class OrderEditorDialog(tk.Toplevel):
         except Exception as e:
             logging.error(f"Ошибка при импорте детализации для заказа {self.order_id}: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
+
+    def _export_products_to_excel(self):
+        """Выгружает в Excel данные о товарах, связанных с текущим заказом."""
+        logging.info(f"Запуск экспорта товаров для заказа ID: {self.order_id}")
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # 1. Получаем уникальные GTIN из детализации заказа
+                    cur.execute("SELECT DISTINCT gtin FROM dmkod_aggregation_details WHERE order_id = %s AND gtin IS NOT NULL", (self.order_id,))
+                    gtins = [row['gtin'] for row in cur.fetchall()]
+                    
+                    if not gtins:
+                        messagebox.showwarning("Внимание", "В заказе нет товаров для экспорта.", parent=self)
+                        return
+
+                    # 2. Получаем данные этих товаров из справочника products
+                    cur.execute("SELECT gtin, name, description_1, description_2, description_3 FROM products WHERE gtin = ANY(%s)", (gtins,))
+                    products_data = cur.fetchall()
+
+            if not products_data:
+                messagebox.showwarning("Внимание", "Не найдено записей в справочнике товаров для GTIN из этого заказа.", parent=self)
+                return
+
+            df = pd.DataFrame(products_data)
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+                initialfile=f"order_{self.order_id}_products.xlsx",
+                parent=self
+            )
+
+            if filepath:
+                df.to_excel(filepath, index=False)
+                messagebox.showinfo("Успех", f"Товары заказа успешно выгружены в файл:\n{filepath}", parent=self)
+
+        except Exception as e:
+            logging.error(f"Ошибка при экспорте товаров заказа {self.order_id}: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось экспортировать товары: {e}", parent=self)
+
+    def _import_products_from_excel(self):
+        """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
+        logging.info(f"Запуск импорта товаров из файла.")
+        if not messagebox.askyesno("Подтверждение", "Данные из файла обновят записи в общем справочнике товаров. Продолжить?", parent=self):
+            return
+
+        filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+        if not filepath:
+            return
+
+        try:
+            df = pd.read_excel(filepath, dtype={'gtin': str})
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    from .utils import upsert_data_to_db
+                    upsert_data_to_db(cur, 'products', df, 'gtin')
+                conn.commit()
+            messagebox.showinfo("Успех", f"Справочник товаров успешно обновлен. Обработано {len(df)} строк.", parent=self)
+        except Exception as e:
+            logging.error(f"Ошибка при импорте товаров: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось импортировать товары: {e}", parent=self)
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""
