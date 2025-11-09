@@ -56,7 +56,7 @@ def read_and_increment_counter(cursor, counter_name: str, increment_by: int = 1)
     if counter_name == 'sscc_id':
         # --- НОВАЯ ЛОГИКА: Получаем настройки из таблицы ap_settings ---
         cursor.execute("SELECT setting_key, setting_value FROM public.ap_settings WHERE setting_key IN ('SSCC_GCP_1', 'SSCC_GCP_2', 'SSCC_PRIMARY_GCP_LIMIT', 'SSCC_WARNING_PERCENT')")
-        settings_from_db = {row[0]: row[1] for row in cursor.fetchall()}
+        settings_from_db = {row['setting_key']: row['setting_value'] for row in cursor.fetchall()}
 
         # Используем значения из БД или значения по умолчанию
         gcp1 = settings_from_db.get('SSCC_GCP_1', '')
