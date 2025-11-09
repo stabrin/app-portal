@@ -1868,6 +1868,11 @@ class ApiIntegrationDialog(tk.Toplevel):
                             (generated_upload_id, result['id'])
                         )
                         self.after(0, lambda r_id=result['id'], u_id=generated_upload_id: self._append_log(f"  Записи ID {r_id} присвоен ID загрузки: {u_id}"))
+                        
+                        # --- ДОБАВЛЕНО: Пауза между запросами ---
+                        if i < len(results_to_process) - 1:
+                            self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
+                            time.sleep(10)
                 
                 conn.commit()
 
@@ -1917,6 +1922,11 @@ class ApiIntegrationDialog(tk.Toplevel):
                             (generated_upload_id, detail['detail_id'])
                         )
                         self.after(0, lambda d_id=detail['detail_id'], u_id=generated_upload_id: self._append_log(f"  Записи детализации ID {d_id} присвоен ID загрузки: {u_id}"))
+
+                        # --- ДОБАВЛЕНО: Пауза между запросами ---
+                        if i < len(details_to_process) - 1:
+                            self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
+                            time.sleep(10)
                 
                 conn.commit()
 
