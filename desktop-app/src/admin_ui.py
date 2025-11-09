@@ -1898,11 +1898,13 @@ class OrderEditorDialog(tk.Toplevel):
         controls_frame.pack(fill=tk.X, pady=5)
 
         ttk.Button(controls_frame, text="Сохранить изменения", command=self._save_changes).pack(side=tk.LEFT, padx=2)
-        ttk.Button(controls_frame, text="Загрузить из файла", command=self._replace_from_file).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame, text="Выгрузить в Excel", command=self._export_details_to_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame, text="Загрузить из Excel", command=self._import_details_from_excel).pack(side=tk.LEFT, padx=2)
 
         # --- НОВЫЙ БЛОК: Кнопка для Bartender ---
         post_processing_mode = self.scenario_data.get('post_processing')
         if post_processing_mode == "Печать через Bartender":
+            ttk.Separator(controls_frame, orient=tk.VERTICAL).pack(side=tk.LEFT, padx=5, fill=tk.Y)
             ttk.Button(controls_frame, text="Создать/Обновить View", command=self._create_bartender_view).pack(side=tk.LEFT, padx=2)
 
         ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
@@ -1997,10 +1999,65 @@ class OrderEditorDialog(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сохранить изменения: {e}", parent=self)
 
-    def _replace_from_file(self):
-        """Заменяет детализацию из файла (логика из dmkod-integration-app)."""
-        messagebox.showinfo("В разработке", "Функционал замены детализации из файла находится в разработке.", parent=self)
-        # Здесь будет логика, адаптированная из dmkod-integration-app/app/routes.py, action 'replace_details'
+    def _export_details_to_excel(self):
+        """Собирает данные из таблицы и выгружает их в Excel-файл."""
+        logging.debug(f"Запуск экспорта детализации для заказа ID: {self.order_id}")
+        try:
+            items_to_export = []
+            for item_id in self.details_tree.get_children():
+                values = self.details_tree.item(item_id, "values")
+                items_to_export.append(dict(zip(self.details_cols, values)))
+            
+            if not items_to_export:
+                messagebox.showwarning("Внимание", "Нет данных для экспорта.", parent=self)
+                return
+
+            df = pd.DataFrame(items_to_export)
+            
+            filepath = filedialog.asksaveasfilename(
+                defaultextension=".xlsx",
+                filetypes=[("Excel", "*.xlsx")],
+                initialfile=f"order_{self.order_id}_details.xlsx",
+                parent=self
+            )
+
+            if filepath:
+                df.to_excel(filepath, index=False)
+                messagebox.showinfo("Успех", f"Детализация заказа успешно выгружена в файл:\n{filepath}", parent=self)
+
+        except Exception as e:
+            logging.error(f"Ошибка при экспорте детализации заказа {self.order_id}: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось экспортировать данные: {e}", parent=self)
+
+    def _import_details_from_excel(self):
+        """Заменяет детализацию из Excel-файла."""
+        logging.debug(f"Запуск импорта детализации для заказа ID: {self.order_id}")
+        if not messagebox.askyesno("Подтверждение", "Импорт из файла полностью заменит текущую детализацию заказа. Продолжить?", parent=self):
+            return
+
+        filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+        if not filepath:
+            return
+
+        try:
+            df = pd.read_excel(filepath, dtype={'gtin': str})
+            df = df.where(pd.notna(df), None) # Заменяем NaN на None для корректной вставки в БД
+
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    # 1. Удаляем старую детализацию
+                    cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                    logging.info(f"Старая детализация для заказа {self.order_id} удалена.")
+
+                    # 2. Вставляем новые данные
+                    from .utils import upsert_data_to_db # Локальный импорт
+                    upsert_data_to_db(cur, 'dmkod_aggregation_details', df, ['order_id', 'gtin'])
+                conn.commit()
+            messagebox.showinfo("Успех", f"Детализация заказа успешно импортирована. Загружено {len(df)} строк.", parent=self)
+            self._load_details() # Обновляем таблицу
+        except Exception as e:
+            logging.error(f"Ошибка при импорте детализации для заказа {self.order_id}: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""

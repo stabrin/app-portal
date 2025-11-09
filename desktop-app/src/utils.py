@@ -44,12 +44,17 @@ def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_colum
     set_clause = sql.SQL(', ').join(
         sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col)) for col in update_columns
     )
-
-    query = sql.SQL("INSERT INTO {table} ({cols}) VALUES %s ON CONFLICT ({pk}) DO UPDATE SET {set_clause}").format(
+    # --- ИЗМЕНЕНИЕ: Если нет колонок для обновления (только PK), используем DO NOTHING ---
+    if not update_columns:
+        action_on_conflict = sql.SQL("DO NOTHING")
+    else:
+        action_on_conflict = sql.SQL("DO UPDATE SET {set_clause}").format(set_clause=set_clause)
+    
+    query = sql.SQL("INSERT INTO {table} ({cols}) VALUES %s ON CONFLICT ({pk}) {action}").format(
         table=sql.Identifier(table_name),
         cols=sql.SQL(', ').join(map(sql.Identifier, columns)),
         pk=conflict_target,
-        set_clause=set_clause
+        action=action_on_conflict
     )
     df_prepared = dataframe.where(pd.notna(dataframe), None)
     data_tuples = [tuple(x) for x in df_prepared.itertuples(index=False)]
