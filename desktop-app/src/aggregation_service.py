@@ -7,6 +7,7 @@ from psycopg2.extras import RealDictCursor
 
 from .printing_service import PrintingService # Для получения подключения к БД
 from .utils import upsert_data_to_db # Импортируем утилиту
+from .sscc_service import generate_sscc, read_and_increment_counter # Импортируем централизованные функции
 
 # Константа-разделитель для кодов DataMatrix
 GS_SEPARATOR = '\x1d'
@@ -63,62 +64,6 @@ def parse_datamatrix(dm_string: str) -> dict:
         elif part.startswith('92'): result['crypto_part_92'] = part[2:]
         elif part.startswith('93'): result['crypto_part_93'] = part[2:]
     return result
-
-# --- Логика из datamatrix-app/app/services/sscc_service.py ---
-
-def calculate_sscc_check_digit(base_sscc: str) -> int:
-    """Вычисляет контрольную цифру для 17-значного SSCC по алгоритму GS1."""
-    if len(base_sscc) != 17:
-        raise ValueError("База для SSCC должна содержать 17 цифр")
-    total_sum = 0
-    for i, digit_char in enumerate(reversed(base_sscc)):
-        digit = int(digit_char)
-        if i % 2 == 0:
-            total_sum += digit * 3
-        else:
-            total_sum += digit * 1
-    return (10 - (total_sum % 10)) % 10
-
-def generate_sscc(sscc_id: int, gcp: str) -> tuple[str, str]:
-    """Вспомогательная функция для генерации SSCC."""
-    if not gcp:
-        raise ValueError("GCP (Global Company Prefix) не задан.")
-
-    if len(gcp) > 16:
-        raise ValueError(f"Некорректная длина GCP '{gcp}' ({len(gcp)} символов).")
-
-    serial_number_length = 16 - len(gcp)
-    serial_number_capacity = 10 ** serial_number_length
-
-    extension_digit = (sscc_id // serial_number_capacity) % 10
-    serial_number = sscc_id % serial_number_capacity
-    serial_part = str(serial_number).zfill(serial_number_length)
-    base_sscc = str(extension_digit) + gcp + serial_part
-    check_digit = calculate_sscc_check_digit(base_sscc)
-    full_sscc = base_sscc + str(check_digit)
-    return base_sscc, full_sscc
-
-def read_and_increment_counter(cursor, counter_name: str, increment_by: int = 1) -> tuple[int, Optional[str], str]:
-    """
-    Атомарно читает и увеличивает счетчик в БД.
-    Возвращает (новое_значение, сообщение_с_предупреждением | None, используемый_gcp).
-    """
-    cursor.execute(
-        "SELECT current_value FROM system_counters WHERE counter_name = %s FOR UPDATE;",
-        (counter_name,)
-    )
-    current_value = cursor.fetchone()['current_value']
-    new_value = current_value + increment_by
-    
-    warning_message = None
-    gcp_to_use = os.getenv('SSCC_GCP_1', '')
-
-    cursor.execute(
-        "UPDATE system_counters SET current_value = %s WHERE counter_name = %s;",
-        (new_value, counter_name)
-    )
-    
-    return new_value, warning_message, gcp_to_use
 
 def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
     """
