@@ -147,9 +147,11 @@ class ApiService:
             headers = self._get_auth_headers() # Получаем базовые заголовки
             headers['Content-Type'] = 'application/json' # Явно указываем Content-Type
             
-            # Если payload - это словарь, преобразуем его в JSON-строку. Если это уже строка, используем как есть.
-            data_to_send = json.dumps(payload) if isinstance(payload, dict) else payload
-            response = requests.post(url, headers=headers, data=data_to_send.encode('utf-8'), timeout=240)
+            # --- ИСПРАВЛЕНИЕ: Используем параметр `json` вместо `data` ---
+            # `requests` сам корректно обработает и словарь, и JSON-строку,
+            # а также установит правильный Content-Type и кодировку.
+            # Это решает проблему "can only concatenate str (not "int") to str".
+            response = requests.post(url, headers=headers, json=payload_dict, timeout=240)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
