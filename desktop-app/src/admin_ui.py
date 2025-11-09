@@ -2144,7 +2144,7 @@ class OrderEditorDialog(tk.Toplevel):
             with self._get_client_db_connection() as conn:
                 # Этот запрос объединяет логику создания base_view и sscc_view в один
                 query = """
-                WITH base_data AS (
+                WITH RECURSIVE base_data AS (
                     SELECT
                         i.datamatrix, i.gtin, i.package_id,
                         p.name AS product_name, p.description_1, p.description_2, p.description_3
