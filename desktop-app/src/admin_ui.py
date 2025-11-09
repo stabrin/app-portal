@@ -1847,13 +1847,18 @@ class ApiIntegrationDialog(tk.Toplevel):
                 
                 with conn.cursor() as cur:
                     for i, result in enumerate(results_to_process):
-                        # --- ИСПРАВЛЕНИЕ: Используем JSON из БД как есть, просто загружая его в словарь ---
-                        payload = json.loads(result['codes_json'])
+                        # --- ИСПРАВЛЕНИЕ: Используем JSON-строку из БД напрямую ---
+                        payload = result['codes_json']
 
                         self.after(0, lambda i=i, p_id=result['printrun_id']: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {p_id} ---"))
                         
                         # --- ДОБАВЛЕНО: Логирование тела запроса ---
-                        self.after(0, lambda p=payload: self._append_log(f"  Тело запроса (payload):\n{json.dumps(p, indent=2, ensure_ascii=False)}"))
+                        # Пытаемся красиво отформатировать для лога, если это валидный JSON
+                        try:
+                            pretty_payload = json.dumps(json.loads(payload), indent=2, ensure_ascii=False)
+                        except:
+                            pretty_payload = payload # Если не получилось, показываем как есть
+                        self.after(0, lambda p=pretty_payload: self._append_log(f"  Тело запроса (payload):\n{p}"))
                         
                         self.api_service.upload_utilisation_data(payload)
                         

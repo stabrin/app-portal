@@ -131,16 +131,25 @@ class ApiService:
         Отправляет сведения об использовании кодов (атрибуция, агрегация).
         Адаптировано из dmkod-integration-app.
         """
-        logger.info(f"Отправка сведений об использовании. Payload: {payload}")
+        import json # Добавляем импорт
+        logger.info(f"Отправка сведений об использовании. Тип Payload: {type(payload)}")
         try:
+            # --- НОВАЯ ЛОГИКА: Определяем URL на основе содержимого ---
+            # Если payload - это строка, пытаемся загрузить ее как JSON для проверки
+            payload_dict = json.loads(payload) if isinstance(payload, str) else payload
+
             # Определяем URL в зависимости от наличия атрибутов в payload
-            if 'attributes' in payload:
+            if 'attributes' in payload_dict:
                 url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload"
             else:
                 url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/include"
             
-            headers = self._get_auth_headers()
-            response = requests.post(url, headers=headers, json=payload, timeout=240) # Увеличенный таймаут
+            headers = self._get_auth_headers() # Получаем базовые заголовки
+            headers['Content-Type'] = 'application/json' # Явно указываем Content-Type
+            
+            # Если payload - это словарь, преобразуем его в JSON-строку. Если это уже строка, используем как есть.
+            data_to_send = json.dumps(payload) if isinstance(payload, dict) else payload
+            response = requests.post(url, headers=headers, data=data_to_send.encode('utf-8'), timeout=240)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
