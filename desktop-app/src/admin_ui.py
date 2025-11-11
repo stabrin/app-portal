@@ -2598,7 +2598,7 @@ class AdminWindow(tk.Tk):
                 'vehicle_number', 'status', 'positions_count', 'dm_count')
         
         # --- Левая панель (2/3) для таблицы ---
-        left_pane = ttk.Frame(top_paned_window)
+        left_pane = ttk.LabelFrame(top_paned_window, text="Уведомления", padding=10) # Сделаем левую панель LabelFrame с отступом
         top_paned_window.add(left_pane, weight=1)
 
         controls = ttk.Frame(left_pane)
