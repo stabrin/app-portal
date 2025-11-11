@@ -2647,30 +2647,29 @@ class AdminWindow(tk.Tk):
         from .supply_notification_service import SupplyNotificationService
         service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
  
-        # --- ИЗМЕНЕНИЕ: Создаем PanedWindow для разделения на 2 части ---
-        paned_window = ttk.PanedWindow(parent_frame, orient=tk.VERTICAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
+        # --- ИЗМЕНЕНИЕ: Создаем PanedWindow для разделения на верхнюю и нижнюю части ---
+        main_paned_window = ttk.PanedWindow(parent_frame, orient=tk.VERTICAL)
+        main_paned_window.pack(fill=tk.BOTH, expand=True)
 
-        # --- Верхняя часть (3/4) ---
-        top_pane = ttk.Frame(paned_window)
-        paned_window.add(top_pane, weight=3)
+        # --- Верхняя часть (список и редактор) ---
+        top_pane = ttk.Frame(main_paned_window)
+        main_paned_window.add(top_pane, weight=3)
 
-        # --- Нижняя часть (1/4) ---
-        bottom_pane = ttk.LabelFrame(paned_window, text="Сводка по дням", padding=5)
-        paned_window.add(bottom_pane, weight=1)
-
-        controls = ttk.Frame(parent_frame)
-        controls.pack(fill=tk.X, pady=5)
+        # --- ИЗМЕНЕНИЕ: Разделяем верхнюю часть на левую (таблица) и правую (редактор) ---
+        top_paned_window = ttk.PanedWindow(top_pane, orient=tk.HORIZONTAL)
+        top_paned_window.pack(fill=tk.BOTH, expand=True)
 
         cols = ('id', 'scenario_name', 'client_name', 'product_groups', 'planned_arrival_date', 
                 'vehicle_number', 'status', 'positions_count', 'dm_count', 'actions')
         
-        tree = ttk.Treeview(parent_frame, columns=cols, show='headings')
-        # --- ИЗМЕНЕНИЕ: Размещаем элементы управления и таблицу в верхней панели ---
-        controls = ttk.Frame(top_pane)
+        # --- Левая панель (2/3) для таблицы ---
+        left_pane = ttk.Frame(top_paned_window)
+        top_paned_window.add(left_pane, weight=2)
+
+        controls = ttk.Frame(left_pane)
         controls.pack(fill=tk.X, pady=5)
 
-        tree = ttk.Treeview(top_pane, columns=cols, show='headings')
+        tree = ttk.Treeview(left_pane, columns=cols, show='headings')
         col_map = {
             'id': ('ID', 10, 'center'),
             'scenario_name': ('Сценарий', 150, 'w'),
@@ -2694,6 +2693,15 @@ class AdminWindow(tk.Tk):
         tree.tag_configure('Проект', background='light yellow')
         tree.tag_configure('Ожидание', background='light green')
         tree.tag_configure('Заказ создан', background='lightpink')
+
+        # --- Правая панель (1/3) для редактора ---
+        right_pane = ttk.LabelFrame(top_paned_window, text="Детали уведомления", padding=10)
+        top_paned_window.add(right_pane, weight=1)
+        ttk.Label(right_pane, text="Выберите уведомление из списка слева", anchor="center").pack(expand=True)
+
+        # --- Нижняя часть (1/4) для сводки ---
+        bottom_pane = ttk.LabelFrame(main_paned_window, text="Сводка по дням", padding=5)
+        main_paned_window.add(bottom_pane, weight=1)
 
         # --- ИЗМЕНЕНИЕ: Создаем многоуровневые заголовки для сводки ---
         # 1. Фрейм для верхних заголовков (даты)
@@ -2795,6 +2803,99 @@ class AdminWindow(tk.Tk):
             refresh_notifications()
             refresh_summary_data()
 
+        def populate_editor_pane(notification_id):
+            """Заполняет правую панель данными выбранного уведомления."""
+            # Очищаем правую панель
+            for widget in right_pane.winfo_children():
+                widget.destroy()
+
+            if not notification_id:
+                ttk.Label(right_pane, text="Выберите уведомление из списка слева", anchor="center").pack(expand=True)
+                return
+
+            try:
+                # Загружаем данные
+                notification_data = service.get_notification_by_id(notification_id)
+                if not notification_data:
+                    ttk.Label(right_pane, text="Не удалось загрузить данные.", anchor="center").pack(expand=True)
+                    return
+
+                # Создаем виджеты, как в NotificationEditorDialog
+                editor_notebook = ttk.Notebook(right_pane)
+                editor_notebook.pack(fill=tk.BOTH, expand=True)
+
+                # Вкладка "Документы"
+                docs_frame = ttk.Frame(editor_notebook, padding=5)
+                editor_notebook.add(docs_frame, text="Документы")
+
+                docs_controls = ttk.Frame(docs_frame)
+                docs_controls.pack(fill=tk.X, pady=2)
+                
+                # --- Функции для работы с файлами (адаптированы из NotificationEditorDialog) ---
+                files_listbox = tk.Listbox(docs_frame, height=4)
+                client_files = []
+
+                def _load_files():
+                    nonlocal client_files
+                    files_listbox.delete(0, tk.END)
+                    client_files = service.get_notification_files(notification_id)
+                    for f in client_files:
+                        files_listbox.insert(tk.END, f['filename'])
+                
+                def _upload_doc():
+                    filepath = filedialog.askopenfilename(parent=self)
+                    if not filepath: return
+                    try:
+                        filename = os.path.basename(filepath)
+                        with open(filepath, 'rb') as f: file_data = f.read()
+                        service.add_notification_file(notification_id, filename, file_data, 'client_document')
+                        _load_files()
+                        messagebox.showinfo("Успех", "Файл успешно загружен.", parent=self)
+                    except Exception as e: messagebox.showerror("Ошибка", f"Не удалось загрузить файл: {e}", parent=self)
+
+                def _download_doc():
+                    selected = files_listbox.curselection()
+                    if not selected: return
+                    file_id = client_files[selected[0]]['id']
+                    content, filename = service.get_file_content(file_id)
+                    save_path = filedialog.asksaveasfilename(initialfile=filename, parent=self)
+                    if save_path:
+                        with open(save_path, 'wb') as f: f.write(content)
+                        messagebox.showinfo("Успех", "Файл сохранен.", parent=self)
+
+                def _delete_doc():
+                    selected = files_listbox.curselection()
+                    if not selected: return
+                    if not messagebox.askyesno("Подтверждение", "Удалить выбранный файл?", parent=self): return
+                    file_id = client_files[selected[0]]['id']
+                    service.delete_notification_file(file_id)
+                    _load_files()
+
+                ttk.Button(docs_controls, text="Загрузить", command=_upload_doc).pack(side=tk.LEFT)
+                ttk.Button(docs_controls, text="Скачать", command=_download_doc).pack(side=tk.LEFT, padx=5)
+                ttk.Button(docs_controls, text="Удалить", command=_delete_doc).pack(side=tk.LEFT)
+                files_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                _load_files()
+
+                # Вкладка "Детализация"
+                details_frame = ttk.Frame(editor_notebook, padding=5)
+                editor_notebook.add(details_frame, text="Детализация")
+
+                details_controls = ttk.Frame(details_frame)
+                details_controls.pack(fill=tk.X, pady=5)
+                
+                def _open_full_editor():
+                    # Открываем старый диалог для полноценного редактирования
+                    open_notification_editor(notification_id)
+
+                ttk.Button(details_controls, text="Открыть редактор детализации", command=_open_full_editor).pack(side=tk.LEFT)
+
+            except Exception as e:
+                logging.error(f"Ошибка при заполнении панели редактора: {e}", exc_info=True)
+                for widget in right_pane.winfo_children(): widget.destroy()
+                ttk.Label(right_pane, text=f"Ошибка: {e}", wraplength=right_pane.winfo_width()-20).pack(expand=True)
+
+
         def open_notification_editor(notification_id=None):
             """Открывает диалог для создания/редактирования уведомления."""
             logging.info(f"Вызвана функция open_notification_editor с notification_id: {notification_id}, тип: {type(notification_id)}")
@@ -2861,7 +2962,14 @@ class AdminWindow(tk.Tk):
         ttk.Button(controls, text="Создать новое уведомление", command=lambda: open_notification_editor()).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Обновить", command=refresh_all).pack(side=tk.LEFT, padx=2)
 
+        def on_tree_select(event):
+            """Обработчик выбора элемента в таблице."""
+            selected_item = tree.focus()
+            if selected_item:
+                populate_editor_pane(int(selected_item))
+
         tree.bind("<Button-3>", show_context_menu) # Правый клик
+        tree.bind("<<TreeviewSelect>>", on_tree_select) # Выбор элемента
 
         refresh_all()
 
