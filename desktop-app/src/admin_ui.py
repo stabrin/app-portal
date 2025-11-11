@@ -2633,9 +2633,9 @@ class AdminWindow(tk.Tk):
         tree.pack(expand=True, fill='both')
 
         # Настройка тегов для подсветки строк
-        tree.tag_configure('Проект', background='light yellow')
-        tree.tag_configure('Ожидание', background='light green')
-        tree.tag_configure('Заказ создан', background='lightpink')
+        tree.tag_configure('Проект', background='lightpink')
+        tree.tag_configure('Ожидание', background='light yellow')
+        tree.tag_configure('Заказ создан', background='light green')
 
         # --- Правая панель (1/3) для редактора ---
         right_pane = ttk.LabelFrame(top_paned_window, text="Детали уведомления", padding=10)
