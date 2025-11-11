@@ -2759,6 +2759,100 @@ class AdminWindow(tk.Tk):
                 editor_notebook = ttk.Notebook(right_pane)
                 editor_notebook.pack(fill=tk.BOTH, expand=True)
 
+                # --- НОВЫЙ БЛОК: Вкладка "Общее" ---
+                general_tab = ttk.Frame(editor_notebook, padding=10)
+                editor_notebook.add(general_tab, text="Общее")
+
+                # --- Поля для редактирования (адаптировано из NotificationEditorDialog) ---
+                from .catalogs_service import CatalogsService
+                catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
+
+                # Товарные группы
+                ttk.Label(general_tab, text="Товарные группы:").pack(anchor="w")
+                pg_frame = ttk.Frame(general_tab)
+                pg_frame.pack(fill=tk.X, pady=2)
+                product_groups_listbox = tk.Listbox(pg_frame, selectmode=tk.MULTIPLE, height=3)
+                product_groups_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                
+                all_product_groups = catalog_service.get_product_groups()
+                for pg in all_product_groups:
+                    product_groups_listbox.insert(tk.END, pg['display_name'])
+                
+                initial_pg_ids = {pg['id'] for pg in notification_data.get('product_groups', [])}
+                for i, pg in enumerate(all_product_groups):
+                    if pg['id'] in initial_pg_ids:
+                        product_groups_listbox.select_set(i)
+
+                # Дата прибытия
+                ttk.Label(general_tab, text="Планируемая дата прибытия:").pack(anchor="w")
+                arrival_date_var = tk.StringVar(value=str(notification_data.get('planned_arrival_date', '')))
+                date_frame = ttk.Frame(general_tab)
+                date_frame.pack(fill=tk.X, pady=2)
+                arrival_date_entry = ttk.Entry(date_frame, textvariable=arrival_date_var)
+                arrival_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+                
+                def _open_calendar():
+                    try: initial_date = datetime.strptime(arrival_date_var.get(), "%Y-%m-%d")
+                    except ValueError: initial_date = datetime.now()
+                    cal_dialog = CalendarDialog(self, initial_date=initial_date)
+                    self.wait_window(cal_dialog)
+                    if cal_dialog.result: arrival_date_var.set(cal_dialog.result.strftime("%Y-%m-%d"))
+                
+                ttk.Button(date_frame, text="...", width=3, command=_open_calendar).pack(side=tk.LEFT, padx=(5,0))
+
+                # Номер ТС
+                ttk.Label(general_tab, text="Номер контейнера/автомобиля:").pack(anchor="w")
+                vehicle_number_entry = ttk.Entry(general_tab)
+                vehicle_number_entry.insert(0, notification_data.get('vehicle_number', ''))
+                vehicle_number_entry.pack(fill=tk.X, pady=2)
+
+                # Комментарии
+                ttk.Label(general_tab, text="Комментарии:").pack(anchor="w")
+                comments_text = tk.Text(general_tab, height=3)
+                comments_text.insert('1.0', notification_data.get('comments', ''))
+                comments_text.pack(fill=tk.X, pady=2)
+
+                # --- Кнопка сохранения ---
+                def _save_general_info():
+                    try:
+                        selected_pg_indices = product_groups_listbox.curselection()
+                        selected_pgs = [all_product_groups[i] for i in selected_pg_indices]
+
+                        data_to_save = {
+                            'product_groups': [{'id': pg['id'], 'name': pg['display_name']} for pg in selected_pgs],
+                            'planned_arrival_date': arrival_date_var.get() or None,
+                            'vehicle_number': vehicle_number_entry.get(),
+                            'comments': comments_text.get('1.0', 'end-1c')
+                        }
+                        
+                        service.update_notification(notification_id, data_to_save)
+                        messagebox.showinfo("Успех", "Данные уведомления успешно обновлены.", parent=self)
+                        refresh_all() # Обновляем всю вкладку
+
+                    except Exception as e:
+                        logging.error(f"Ошибка сохранения данных из боковой панели: {e}", exc_info=True)
+                        messagebox.showerror("Ошибка", f"Не удалось сохранить изменения: {e}", parent=self)
+
+                ttk.Button(general_tab, text="Сохранить изменения", command=_save_general_info).pack(pady=(10,0))
+
+                # --- Кнопка "Создать заказ" ---
+                def _create_order_from_panel():
+                    logging.info(f"Запрос на создание заказа из уведомления ID: {notification_id}")
+                    try:
+                        success, message = service.create_order_from_notification(notification_id)
+                        if success:
+                            messagebox.showinfo("Успех", message, parent=self)
+                            refresh_all() # Обновляем, чтобы увидеть изменение статуса
+                        else:
+                            messagebox.showwarning("Внимание", message, parent=self)
+                    except Exception as e:
+                        logging.error(f"Ошибка при создании заказа из уведомления {notification_id}: {e}", exc_info=True)
+                        messagebox.showerror("Ошибка", f"Не удалось создать заказ: {e}", parent=self)
+
+                # Добавляем кнопку, если статус позволяет создание заказа
+                if notification_data.get('status') != 'Заказ создан':
+                    ttk.Button(general_tab, text="Создать заказ", command=_create_order_from_panel).pack(pady=5)
+
                 # Вкладка "Документы"
                 docs_frame = ttk.Frame(editor_notebook, padding=5)
                 editor_notebook.add(docs_frame, text="Документы")
