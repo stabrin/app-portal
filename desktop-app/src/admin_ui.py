@@ -1865,10 +1865,6 @@ class ApiIntegrationDialog(tk.Toplevel):
                             payload = result['codes_json']
                             self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
                             
-                            # --- ДОБАВЛЕНО: Детальное логирование payload перед отправкой ---
-                            log_msg = f"  Payload type: {type(payload)}, content: {str(payload)[:500]}..."
-                            self.after(0, lambda msg=log_msg: self._append_log(msg))
-                            
                             # Вызов API
                             response_data = self.api_service.upload_utilisation_data(payload)
                             
@@ -1938,9 +1934,6 @@ class ApiIntegrationDialog(tk.Toplevel):
         except Exception as e:
             self.after(0, lambda err=e: self._display_api_response(500, f"КРИТИЧЕСКАЯ ОШИБКА: {err}\n\n{traceback.format_exc()}"))
         finally:
-            # --- ИЗМЕНЕНИЕ: Добавляем паузу перед обновлением кнопок ---
-            # Это дает пользователю время прочитать лог, даже если окно закроется.
-            time.sleep(2)
             self.after(0, self._update_buttons_state)
 
     def _prepare_report(self):
