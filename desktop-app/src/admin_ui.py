@@ -2588,7 +2588,7 @@ class AdminWindow(tk.Tk):
 
         # --- Верхняя часть (список и редактор) ---
         top_pane = ttk.Frame(main_paned_window)
-        main_paned_window.add(top_pane, weight=3)
+        main_paned_window.add(top_pane, weight=5)
 
         # --- ИЗМЕНЕНИЕ: Разделяем верхнюю часть на левую (таблица) и правую (редактор) ---
         top_paned_window = ttk.PanedWindow(top_pane, orient=tk.HORIZONTAL)
