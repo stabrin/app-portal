@@ -2599,7 +2599,7 @@ class AdminWindow(tk.Tk):
         
         # --- Левая панель (2/3) для таблицы ---
         left_pane = ttk.Frame(top_paned_window)
-        top_paned_window.add(left_pane, weight=2)
+        top_paned_window.add(left_pane, weight=3)
 
         controls = ttk.Frame(left_pane)
         controls.pack(fill=tk.X, pady=5)
@@ -2630,7 +2630,7 @@ class AdminWindow(tk.Tk):
 
         # --- Правая панель (1/3) для редактора ---
         right_pane = ttk.LabelFrame(top_paned_window, text="Детали уведомления", padding=10)
-        top_paned_window.add(right_pane, weight=1)
+        top_paned_window.add(right_pane, weight=2)
         ttk.Label(right_pane, text="Выберите уведомление из списка слева", anchor="center").pack(expand=True)
 
         # --- Нижняя часть (1/4) для сводки ---
