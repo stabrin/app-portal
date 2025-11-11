@@ -142,11 +142,8 @@ class ApiService:
             else:
                 payload_dict = payload
 
-            # Определяем URL в зависимости от наличия ключа 'attributes'
-            if 'attributes' in payload_dict and payload_dict['attributes']:
-                url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload"
-            else:
-                url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/include"
+            # --- ИЗМЕНЕНИЕ: Используем единый эндпоинт согласно вашему требованию ---
+            url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload"
             
             headers = self._get_auth_headers() # Получаем базовые заголовки
             # Используем параметр `json`, который автоматически кодирует словарь в JSON

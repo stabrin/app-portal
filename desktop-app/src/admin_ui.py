@@ -1546,9 +1546,16 @@ class ApiIntegrationDialog(tk.Toplevel):
             self.prepare_report_btn.config(state="normal" if api_status == 'Сведения подготовлены' else "disabled")
 
     def _display_api_response(self, status_code, body):
-        """Отображает ответ API в текстовом поле."""
+        """Отображает ответ API в текстовом поле, безопасно преобразуя тело ответа в строку."""
         self.response_text.config(state="normal")
         self.response_text.delete("1.0", tk.END)
+        
+        # --- ИСПРАВЛЕНИЕ: Гарантируем, что body является строкой перед отображением ---
+        # Это предотвращает ошибку 'can only concatenate str (not "int") to str',
+        # если body является словарем или другим не-строковым типом.
+        if not isinstance(body, str):
+            body = json.dumps(body, indent=2, ensure_ascii=False)
+
         response_content = f"Статус: {status_code}\n\nТело ответа:\n{body}"
         self.response_text.insert(tk.END, response_content)
         self.response_text.config(state="disabled")
@@ -1857,6 +1864,10 @@ class ApiIntegrationDialog(tk.Toplevel):
                         for i, result in enumerate(results_to_process):
                             payload = result['codes_json']
                             self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
+                            
+                            # --- ДОБАВЛЕНО: Детальное логирование payload перед отправкой ---
+                            log_msg = f"  Payload type: {type(payload)}, content: {str(payload)[:500]}..."
+                            self.after(0, lambda msg=log_msg: self._append_log(msg))
                             
                             # Вызов API
                             response_data = self.api_service.upload_utilisation_data(payload)
