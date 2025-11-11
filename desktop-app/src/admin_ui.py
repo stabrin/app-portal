@@ -881,11 +881,6 @@ def open_user_management_window(parent_widget, user_info):
         
         user_id, name, login, is_active = users_tree.item(selected_item)['values']
 
-        try:
-        except ImportError:
-            messagebox.showerror("Ошибка", "Библиотеки 'qrcode' и 'Pillow' не установлены.\nУстановите их: pip install qrcode pillow", parent=users_window)
-            return
-
         # Собираем все данные для QR-кода
         auth_data = {
             "type": "user_auth", # Тип для распознавания сканером
