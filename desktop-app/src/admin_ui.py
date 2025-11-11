@@ -2916,14 +2916,6 @@ class AdminWindow(tk.Tk):
                 files_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
                 _load_files()
 
-                # --- НОВЫЙ БЛОК: Вкладка "Детализация" ---
-                # Вкладка "Детализация"
-                details_frame = ttk.Frame(editor_notebook, padding=5)
-                editor_notebook.add(details_frame, text="Детализация")
-
-                details_controls = ttk.Frame(details_frame)
-                details_controls.pack(fill=tk.X, pady=5)
-
                 # Определяем колонки для таблицы детализации
                 details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
                 details_tree = ttk.Treeview(details_frame, columns=details_cols, show='headings')
@@ -2936,24 +2928,6 @@ class AdminWindow(tk.Tk):
                 for col, (text, width, anchor) in col_map.items():
                     details_tree.heading(col, text=text)
                     details_tree.column(col, width=width, anchor=anchor)
-
-                details_scrollbar = ttk.Scrollbar(details_frame, orient="vertical", command=details_tree.yview)
-                details_tree.configure(yscrollcommand=details_scrollbar.set)
-
-                def _load_notification_details_panel():
-                    """Загружает и отображает детализацию в Treeview."""
-                    for i in details_tree.get_children(): details_tree.delete(i)
-                    details = service.get_notification_details(notification_id)
-                    if details:
-                        for item in details:
-                            values = [item.get(col, '') for col in details_cols]
-                            details_tree.insert('', 'end', iid=item['id'], values=values)
-                        details_tree.pack(fill=tk.BOTH, expand=True, pady=(5,0))
-                        details_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-                    else:
-                        details_tree.pack_forget()
-                        details_scrollbar.pack_forget()
-                        ttk.Label(details_frame, text="Детализация не загружена.", anchor="center").pack(expand=True)
 
                 def _on_details_double_click_panel(event):
                     """Обработчик двойного клика для редактирования ячейки в Treeview."""
@@ -3025,20 +2999,50 @@ class AdminWindow(tk.Tk):
                     except Exception as e:
                         messagebox.showerror("Ошибка", f"Не удалось сохранить детализацию: {e}", parent=self)
 
-                def _open_full_editor():
-                    # Открываем старый диалог для полноценного редактирования
-                    open_notification_editor(notification_id)
+                # --- ИСПРАВЛЕНИЕ: Создаем вкладку и размещаем на ней виджеты ---
+                details_frame = ttk.Frame(editor_notebook, padding=5)
+                editor_notebook.add(details_frame, text="Детализация")
 
-                ttk.Button(details_controls, text="Открыть редактор детализации", command=_open_full_editor).pack(side=tk.LEFT)
+                # Панель с кнопками
+                details_controls = ttk.Frame(details_frame)
+                details_controls.pack(fill=tk.X, pady=5)
+                ttk.Button(details_controls, text="Скачать шаблон", command=_download_details_template_panel).pack(side=tk.LEFT, padx=2)
+                ttk.Button(details_controls, text="Загрузить из файла", command=_upload_details_file_panel).pack(side=tk.LEFT, padx=2)
+                ttk.Button(details_controls, text="Сохранить изменения", command=_save_details_from_table_panel).pack(side=tk.RIGHT, padx=2)
+
+                # Контейнер для таблицы и скроллбара
+                tree_container = ttk.Frame(details_frame)
+                tree_container.pack(fill=tk.BOTH, expand=True, pady=(5,0))
+
+                details_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=details_tree.yview)
+                details_tree.configure(yscrollcommand=details_scrollbar.set)
+
+                # Загрузчик данных, который решает, показывать таблицу или заглушку
+                def _load_notification_details_panel():
+                    """Загружает и отображает детализацию в Treeview."""
+                    for i in details_tree.get_children(): details_tree.delete(i)
+                    details = service.get_notification_details(notification_id)
+                    
+                    # Очищаем контейнер перед добавлением виджетов
+                    for widget in tree_container.winfo_children():
+                        if widget not in (details_tree, details_scrollbar):
+                            widget.destroy()
+
+                    if details:
+                        for item in details:
+                            values = [item.get(col, '') for col in details_cols]
+                            details_tree.insert('', 'end', iid=item['id'], values=values)
+                        details_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+                        details_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+                    else:
+                        details_tree.pack_forget()
+                        details_scrollbar.pack_forget()
+                        ttk.Label(tree_container, text="Детализация не загружена.", anchor="center").pack(expand=True)
+
+                details_tree.bind("<Double-1>", _on_details_double_click_panel)
+                _load_notification_details_panel()
 
             except Exception as e:
-                # --- КОНЕЦ НОВОГО БЛОКА ---
-
-                # --- ИЗМЕНЕНИЕ: Привязываем обработчик двойного клика ---
-                details_tree.bind("<Double-1>", _on_details_double_click_panel)
-
-                # --- ИЗМЕНЕНИЕ: Загружаем данные при инициализации вкладки ---
-                _load_notification_details_panel()
                 logging.error(f"Ошибка при заполнении панели редактора: {e}", exc_info=True)
                 for widget in right_pane.winfo_children(): widget.destroy()
                 ttk.Label(right_pane, text=f"Ошибка: {e}", wraplength=right_pane.winfo_width()-20).pack(expand=True)
