@@ -1039,8 +1039,8 @@ class NotificationEditorDialog(tk.Toplevel):
         self.client_combo.bind("<Button-1>", self._on_client_combo_click)
         self.client_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        ttk.Label(general_tab, text="Товарные группы:").pack(anchor="w")
-        self.product_groups_listbox = tk.Listbox(general_tab, selectmode=tk.MULTIPLE, height=3)
+        ttk.Label(general_tab, text="Товарная группа:").pack(anchor="w")
+        self.product_groups_listbox = tk.Listbox(general_tab, selectmode=tk.SINGLE, height=3, exportselection=False)
         self.product_groups_listbox.pack(fill=tk.X, pady=2)
         self._load_product_groups()
 
@@ -2768,10 +2768,10 @@ class AdminWindow(tk.Tk):
                 catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
 
                 # Товарные группы
-                ttk.Label(general_tab, text="Товарные группы:").pack(anchor="w")
+                ttk.Label(general_tab, text="Товарная группа:").pack(anchor="w")
                 pg_frame = ttk.Frame(general_tab)
                 pg_frame.pack(fill=tk.X, pady=2)
-                product_groups_listbox = tk.Listbox(pg_frame, selectmode=tk.MULTIPLE, height=3)
+                product_groups_listbox = tk.Listbox(pg_frame, selectmode=tk.SINGLE, height=3, exportselection=False)
                 product_groups_listbox.pack(side=tk.LEFT, fill=tk.X, expand=True)
                 
                 all_product_groups = catalog_service.get_product_groups()
@@ -2779,9 +2779,10 @@ class AdminWindow(tk.Tk):
                     product_groups_listbox.insert(tk.END, pg['display_name'])
                 
                 initial_pg_ids = {pg['id'] for pg in notification_data.get('product_groups', [])}
-                for i, pg in enumerate(all_product_groups):
-                    if pg['id'] in initial_pg_ids:
-                        product_groups_listbox.select_set(i)
+                if initial_pg_ids:
+                    for i, pg in enumerate(all_product_groups):
+                        if pg['id'] in initial_pg_ids:
+                            product_groups_listbox.select_set(i)
 
                 # Дата прибытия
                 ttk.Label(general_tab, text="Планируемая дата прибытия:").pack(anchor="w")
@@ -2812,13 +2813,13 @@ class AdminWindow(tk.Tk):
                 comments_text.insert('1.0', notification_data.get('comments', ''))
                 comments_text.pack(fill=tk.X, pady=2)
 
-                # --- Кнопка сохранения ---
-                def _save_general_info():
+                # --- ИЗМЕНЕНИЕ: Универсальная функция сохранения ---
+                def _save_general_info_from_panel():
                     try:
                         selected_pg_indices = product_groups_listbox.curselection()
-                        selected_pgs = [all_product_groups[i] for i in selected_pg_indices]
-
-                        data_to_save = {
+                        # --- ИЗМЕНЕНИЕ: Обработка одиночного выбора ---
+                        selected_pgs = [all_product_groups[selected_pg_indices[0]]] if selected_pg_indices else []
+                        data_to_save = { # Собираем данные для сохранения
                             'product_groups': [{'id': pg['id'], 'name': pg['display_name']} for pg in selected_pgs],
                             'planned_arrival_date': arrival_date_var.get() or None,
                             'vehicle_number': vehicle_number_entry.get(),
@@ -2827,14 +2828,13 @@ class AdminWindow(tk.Tk):
                         
                         service.update_notification(notification_id, data_to_save)
                         messagebox.showinfo("Успех", "Данные уведомления успешно обновлены.", parent=self)
-                        refresh_all() # Обновляем всю вкладку
-
+                        refresh_all()
+                        return True # Возвращаем успех
                     except Exception as e:
                         logging.error(f"Ошибка сохранения данных из боковой панели: {e}", exc_info=True)
                         messagebox.showerror("Ошибка", f"Не удалось сохранить изменения: {e}", parent=self)
-
-                ttk.Button(general_tab, text="Сохранить изменения", command=_save_general_info).pack(pady=(10,0))
-
+                        return False # Возвращаем неудачу
+                
                 # --- Кнопка "Создать заказ" ---
                 def _create_order_from_panel():
                     logging.info(f"Запрос на создание заказа из уведомления ID: {notification_id}")
@@ -2849,9 +2849,20 @@ class AdminWindow(tk.Tk):
                         logging.error(f"Ошибка при создании заказа из уведомления {notification_id}: {e}", exc_info=True)
                         messagebox.showerror("Ошибка", f"Не удалось создать заказ: {e}", parent=self)
 
-                # Добавляем кнопку, если статус позволяет создание заказа
+                # --- НОВАЯ КНОПКА: Создать/Обновить заказ ---
+                def _save_and_create_order():
+                    if _save_general_info_from_panel(): # Сначала сохраняем
+                        _create_order_from_panel()      # Затем создаем заказ
+
+                # --- Размещаем кнопки ---
+                buttons_frame = ttk.Frame(general_tab)
+                buttons_frame.pack(fill=tk.X, pady=(10,0))
+                ttk.Button(buttons_frame, text="Сохранить изменения", command=_save_general_info_from_panel).pack(side=tk.LEFT, padx=(0, 5))
+
+                # Добавляем кнопку "Создать/Обновить заказ", если статус позволяет
                 if notification_data.get('status') != 'Заказ создан':
-                    ttk.Button(general_tab, text="Создать заказ", command=_create_order_from_panel).pack(pady=5)
+                    ttk.Button(buttons_frame, text="Создать/Обновить заказ", command=_save_and_create_order).pack(side=tk.LEFT)
+
 
                 # Вкладка "Документы"
                 docs_frame = ttk.Frame(editor_notebook, padding=5)
@@ -2885,7 +2896,10 @@ class AdminWindow(tk.Tk):
                 def _download_doc():
                     selected = files_listbox.curselection()
                     if not selected: return
-                    file_id = client_files[selected[0]]['id']
+                    # --- ИСПРАВЛЕНИЕ: Получаем file_id из кэша client_files ---
+                    selected_file_info = client_files[selected[0]]
+                    file_id = selected_file_info['id']
+                    # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
                     content, filename = service.get_file_content(file_id)
                     save_path = filedialog.asksaveasfilename(initialfile=filename, parent=self)
                     if save_path:
