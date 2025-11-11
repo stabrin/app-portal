@@ -2916,47 +2916,22 @@ class AdminWindow(tk.Tk):
                 files_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
                 _load_files()
 
-                # Определяем колонки для таблицы детализации
+                # --- ИСПРАВЛЕНИЕ: Сначала создаем вкладку "Детализация", а потом ее содержимое ---
+                details_frame = ttk.Frame(editor_notebook, padding=5)
+                editor_notebook.add(details_frame, text="Детализация")
+
+                # Определяем колонки для таблицы детализации (теперь details_frame существует)
                 details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
                 details_tree = ttk.Treeview(details_frame, columns=details_cols, show='headings')
 
                 col_map = {
                     "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "quantity": ("Кол-во", 80, "e"),
                     "aggregation": ("Агрегация", 80, "center"), "production_date": ("Дата произв.", 100, "center"),
-                    "shelf_life_months": ("Срок годн. (мес)", 100, "center"), "expiry_date": ("Годен до", 100, "center")
+                    "shelf_life_months": ("Срок годн. (мес)", 100, "center"), "expiry_date": ("Годен до", 100, "center") # type: ignore
                 }
                 for col, (text, width, anchor) in col_map.items():
                     details_tree.heading(col, text=text)
                     details_tree.column(col, width=width, anchor=anchor)
-
-                def _on_details_double_click_panel(event):
-                    """Обработчик двойного клика для редактирования ячейки в Treeview."""
-                    region = details_tree.identify("region", event.x, event.y)
-                    if region != "cell": return
-
-                    column_id = details_tree.identify_column(event.x)
-                    column_index = int(column_id.replace('#', '')) - 1
-                    item_id = details_tree.focus()
-                    
-                    x, y, width, height = details_tree.bbox(item_id, column_id)
-
-                    entry_var = tk.StringVar()
-                    entry = ttk.Entry(details_tree, textvariable=entry_var)
-                    entry.place(x=x, y=y, width=width, height=height)
-                    
-                    current_value = details_tree.item(item_id, "values")[column_index]
-                    entry_var.set(current_value)
-                    entry.focus_set()
-
-                    def on_focus_out(event):
-                        new_value = entry_var.get()
-                        current_values = list(details_tree.item(item_id, "values"))
-                        current_values[column_index] = new_value
-                        details_tree.item(item_id, values=tuple(current_values))
-                        entry.destroy()
-
-                    entry.bind("<FocusOut>", on_focus_out)
-                    entry.bind("<Return>", on_focus_out)
 
                 def _download_details_template_panel():
                     df = service.get_formalization_template()
@@ -2999,9 +2974,34 @@ class AdminWindow(tk.Tk):
                     except Exception as e:
                         messagebox.showerror("Ошибка", f"Не удалось сохранить детализацию: {e}", parent=self)
 
-                # --- ИСПРАВЛЕНИЕ: Создаем вкладку и размещаем на ней виджеты ---
-                details_frame = ttk.Frame(editor_notebook, padding=5)
-                editor_notebook.add(details_frame, text="Детализация")
+                def _on_details_double_click_panel(event):
+                    """Обработчик двойного клика для редактирования ячейки в Treeview."""
+                    region = details_tree.identify("region", event.x, event.y)
+                    if region != "cell": return
+
+                    column_id = details_tree.identify_column(event.x)
+                    column_index = int(column_id.replace('#', '')) - 1
+                    item_id = details_tree.focus()
+                    
+                    x, y, width, height = details_tree.bbox(item_id, column_id)
+
+                    entry_var = tk.StringVar()
+                    entry = ttk.Entry(details_tree, textvariable=entry_var)
+                    entry.place(x=x, y=y, width=width, height=height)
+                    
+                    current_value = details_tree.item(item_id, "values")[column_index]
+                    entry_var.set(current_value)
+                    entry.focus_set()
+
+                    def on_focus_out(event):
+                        new_value = entry_var.get()
+                        current_values = list(details_tree.item(item_id, "values"))
+                        current_values[column_index] = new_value
+                        details_tree.item(item_id, values=tuple(current_values))
+                        entry.destroy()
+
+                    entry.bind("<FocusOut>", on_focus_out)
+                    entry.bind("<Return>", on_focus_out)
 
                 # Панель с кнопками
                 details_controls = ttk.Frame(details_frame)
