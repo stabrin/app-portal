@@ -2916,13 +2916,115 @@ class AdminWindow(tk.Tk):
                 files_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
                 _load_files()
 
+                # --- НОВЫЙ БЛОК: Вкладка "Детализация" ---
                 # Вкладка "Детализация"
                 details_frame = ttk.Frame(editor_notebook, padding=5)
                 editor_notebook.add(details_frame, text="Детализация")
 
                 details_controls = ttk.Frame(details_frame)
                 details_controls.pack(fill=tk.X, pady=5)
-                
+
+                # Определяем колонки для таблицы детализации
+                details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
+                details_tree = ttk.Treeview(details_frame, columns=details_cols, show='headings')
+
+                col_map = {
+                    "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "quantity": ("Кол-во", 80, "e"),
+                    "aggregation": ("Агрегация", 80, "center"), "production_date": ("Дата произв.", 100, "center"),
+                    "shelf_life_months": ("Срок годн. (мес)", 100, "center"), "expiry_date": ("Годен до", 100, "center")
+                }
+                for col, (text, width, anchor) in col_map.items():
+                    details_tree.heading(col, text=text)
+                    details_tree.column(col, width=width, anchor=anchor)
+
+                details_scrollbar = ttk.Scrollbar(details_frame, orient="vertical", command=details_tree.yview)
+                details_tree.configure(yscrollcommand=details_scrollbar.set)
+
+                def _load_notification_details_panel():
+                    """Загружает и отображает детализацию в Treeview."""
+                    for i in details_tree.get_children(): details_tree.delete(i)
+                    details = service.get_notification_details(notification_id)
+                    if details:
+                        for item in details:
+                            values = [item.get(col, '') for col in details_cols]
+                            details_tree.insert('', 'end', iid=item['id'], values=values)
+                        details_tree.pack(fill=tk.BOTH, expand=True, pady=(5,0))
+                        details_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+                    else:
+                        details_tree.pack_forget()
+                        details_scrollbar.pack_forget()
+                        ttk.Label(details_frame, text="Детализация не загружена.", anchor="center").pack(expand=True)
+
+                def _on_details_double_click_panel(event):
+                    """Обработчик двойного клика для редактирования ячейки в Treeview."""
+                    region = details_tree.identify("region", event.x, event.y)
+                    if region != "cell": return
+
+                    column_id = details_tree.identify_column(event.x)
+                    column_index = int(column_id.replace('#', '')) - 1
+                    item_id = details_tree.focus()
+                    
+                    x, y, width, height = details_tree.bbox(item_id, column_id)
+
+                    entry_var = tk.StringVar()
+                    entry = ttk.Entry(details_tree, textvariable=entry_var)
+                    entry.place(x=x, y=y, width=width, height=height)
+                    
+                    current_value = details_tree.item(item_id, "values")[column_index]
+                    entry_var.set(current_value)
+                    entry.focus_set()
+
+                    def on_focus_out(event):
+                        new_value = entry_var.get()
+                        current_values = list(details_tree.item(item_id, "values"))
+                        current_values[column_index] = new_value
+                        details_tree.item(item_id, values=tuple(current_values))
+                        entry.destroy()
+
+                    entry.bind("<FocusOut>", on_focus_out)
+                    entry.bind("<Return>", on_focus_out)
+
+                def _download_details_template_panel():
+                    df = service.get_formalization_template()
+                    save_path = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=[("Excel", "*.xlsx")], parent=self)
+                    if save_path:
+                        df.to_excel(save_path, index=False)
+                        messagebox.showinfo("Успех", "Шаблон успешно сохранен.", parent=self)
+
+                def _upload_details_file_panel():
+                    if not messagebox.askyesno("Подтверждение", "Загрузка из файла полностью заменит текущую детализацию. Продолжить?", parent=self):
+                        return
+                    filepath = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx *.xls")], parent=self)
+                    if not filepath: return
+                    try:
+                        with open(filepath, 'rb') as f:
+                            file_data = f.read()
+                        rows_processed = service.process_formalized_file(notification_id, file_data)
+                        _load_notification_details_panel()
+                        messagebox.showinfo("Успех", f"Файл успешно обработан. Загружено {rows_processed} строк.", parent=self)
+                    except Exception as e:
+                        messagebox.showerror("Ошибка", f"Не удалось обработать файл: {e}", parent=self)
+
+                def _save_details_from_table_panel():
+                    details_to_save = []
+                    for item_id in details_tree.get_children():
+                        raw_values = details_tree.item(item_id, "values")
+                        processed_values = [
+                            int(raw_values[0]) if raw_values[0] else None, # id
+                            raw_values[1] if raw_values[1] else None, # gtin
+                            int(raw_values[2]) if raw_values[2] else None, # quantity
+                            int(raw_values[3]) if raw_values[3] else None, # aggregation
+                            raw_values[4] if raw_values[4] else None, # production_date
+                            int(raw_values[5]) if raw_values[5] else None, # shelf_life_months
+                            raw_values[6] if raw_values[6] else None # expiry_date
+                        ]
+                        details_to_save.append(tuple(processed_values))
+                    try:
+                        service.save_notification_details(details_to_save)
+                        messagebox.showinfo("Успех", "Изменения в детализации успешно сохранены.", parent=self)
+                    except Exception as e:
+                        messagebox.showerror("Ошибка", f"Не удалось сохранить детализацию: {e}", parent=self)
+
                 def _open_full_editor():
                     # Открываем старый диалог для полноценного редактирования
                     open_notification_editor(notification_id)
@@ -2930,6 +3032,13 @@ class AdminWindow(tk.Tk):
                 ttk.Button(details_controls, text="Открыть редактор детализации", command=_open_full_editor).pack(side=tk.LEFT)
 
             except Exception as e:
+                # --- КОНЕЦ НОВОГО БЛОКА ---
+
+                # --- ИЗМЕНЕНИЕ: Привязываем обработчик двойного клика ---
+                details_tree.bind("<Double-1>", _on_details_double_click_panel)
+
+                # --- ИЗМЕНЕНИЕ: Загружаем данные при инициализации вкладки ---
+                _load_notification_details_panel()
                 logging.error(f"Ошибка при заполнении панели редактора: {e}", exc_info=True)
                 for widget in right_pane.winfo_children(): widget.destroy()
                 ttk.Label(right_pane, text=f"Ошибка: {e}", wraplength=right_pane.winfo_width()-20).pack(expand=True)

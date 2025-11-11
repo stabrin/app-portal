@@ -293,6 +293,21 @@ class SupplyNotificationService:
                 cur.execute("DELETE FROM ap_supply_notification_files WHERE id = %s", (file_id,))
             conn.commit()
 
+    def get_file_content(self, file_id):
+        """
+        Возвращает содержимое (в байтах) и имя файла по его ID.
+        """
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT filename, file_data FROM ap_supply_notification_files WHERE id = %s",
+                    (file_id,)
+                )
+                file_record = cur.fetchone()
+                if not file_record:
+                    raise FileNotFoundError(f"Файл с ID {file_id} не найден в базе данных.")
+                return file_record['file_data'], file_record['filename']
+
     def get_formalization_template(self):
         """Возвращает шаблон для формализации в виде DataFrame."""
         return pd.DataFrame(columns=['GTIN', 'Кол-во', 'Агрегация', 'Дата производства', 'Срок годности', 'Окончание срока годности'])
