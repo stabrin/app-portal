@@ -2,10 +2,9 @@
 
 import tkinter as tk
 import logging
-
 from tkinter import ttk, messagebox, filedialog, simpledialog
 import logging
-import threading
+import threading # Keep this, it's used for update_api_status
 import re
 import json
 import time
@@ -21,7 +20,7 @@ try:
 except ImportError:
     Image = None # Помечаем как недоступный, если Pillow не установлен
 
-# Настройка логирования
+# Настройка логирования (оставляем один раз)
 logging.basicConfig(
     level=logging.DEBUG,
     format='%(asctime)s - %(levelname)s - [admin_ui.py] - %(message)s',
@@ -44,8 +43,8 @@ from .printing_service import PrintingService, LabelEditorWindow, ImageSelection
 import requests
 from datetime import datetime
 import traceback
-
-import zlib, base64 # Для сжатия данных QR-кода
+ 
+import zlib, base64 # Для сжатия данных QR-кода (оставляем один раз)
 
 def open_label_editor_window(parent_widget, user_info):
     """
@@ -883,8 +882,6 @@ def open_user_management_window(parent_widget, user_info):
         user_id, name, login, is_active = users_tree.item(selected_item)['values']
 
         try:
-            import qrcode
-            from PIL import Image, ImageTk
         except ImportError:
             messagebox.showerror("Ошибка", "Библиотеки 'qrcode' и 'Pillow' не установлены.\nУстановите их: pip install qrcode pillow", parent=users_window)
             return
@@ -908,12 +905,6 @@ def open_user_management_window(parent_widget, user_info):
             messagebox.showerror("Ошибка", "Не удалось найти конфигурацию базы данных клиента для генерации QR-кода.", parent=users_window)
             return
 
-        # auth_data['password'] = "..." 
-
-        # --- ИСПРАВЛЕНИЕ: Сжимаем данные перед кодированием ---
-        import zlib
-        import base64
-
         # 1. Преобразуем в JSON и кодируем в байты
         json_bytes = json.dumps(auth_data, ensure_ascii=False).encode('utf-8')
         # 2. Сжимаем байты с максимальным уровнем сжатия
@@ -927,59 +918,8 @@ def open_user_management_window(parent_widget, user_info):
         chunk_size = 2500
         chunks = [full_base64_data[i:i + chunk_size] for i in range(0, len(full_base64_data), chunk_size)]
 
-        # --- Отображение последовательности QR-кодов ---
-        qr_sequence_window = tk.Toplevel(users_window)
-        qr_sequence_window.title(f"Настройка для: {name}")
-        qr_sequence_window.grab_set()
-
-        current_chunk_index = 0
-        
-        info_label = ttk.Label(qr_sequence_window, text="", font=("Arial", 12))
-        info_label.pack(pady=10)
-
-        qr_label = ttk.Label(qr_sequence_window)
-        qr_label.pack(padx=20, pady=10)
-
-        nav_frame = ttk.Frame(qr_sequence_window)
-        nav_frame.pack(pady=10)
-        prev_button = ttk.Button(nav_frame, text="<< Назад")
-        prev_button.pack(side=tk.LEFT, padx=10)
-        next_button = ttk.Button(nav_frame, text="Далее >>")
-        next_button.pack(side=tk.LEFT, padx=10)
-
-        def show_chunk(index):
-            nonlocal current_chunk_index
-            current_chunk_index = index
-            
-            # Формируем данные для этой части: "chunk_index/total_chunks:data"
-            chunk_data = f"{index+1}/{len(chunks)}:{chunks[index]}"
-
-            qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_L)
-            qr.add_data(chunk_data)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white").resize((350, 350))
-            
-            photo = ImageTk.PhotoImage(img)
-            qr_label.config(image=photo)
-            qr_label.image = photo
-
-            info_label.config(text=f"Шаг {index + 1} из {len(chunks)}. Отсканируйте код.")
-
-            prev_button.config(state="normal" if index > 0 else "disabled")
-            next_button.config(state="normal" if index < len(chunks) - 1 else "disabled")
-
-        def show_next():
-            if current_chunk_index < len(chunks) - 1:
-                show_chunk(current_chunk_index + 1)
-
-        def show_prev():
-            if current_chunk_index > 0:
-                show_chunk(current_chunk_index - 1)
-
-        prev_button.config(command=show_prev)
-        next_button.config(command=show_next)
-
-        show_chunk(0)
+        # --- ИСПРАВЛЕНИЕ: Используем глобальную функцию для отображения последовательности QR-кодов ---
+        display_qr_sequence(f"Настройка для: {name}", chunks, users_window)
 
     # --- Виджеты окна ---
     main_frame = ttk.Frame(users_window, padding="10")
