@@ -1039,9 +1039,11 @@ class NotificationEditorDialog(tk.Toplevel):
         self.client_combo.bind("<Button-1>", self._on_client_combo_click)
         self.client_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        ttk.Label(general_tab, text="Товарные группы:").pack(anchor="w")
-        self.product_groups_listbox = tk.Listbox(general_tab, selectmode=tk.MULTIPLE, height=3)
-        self.product_groups_listbox.pack(fill=tk.X, pady=2)
+        # --- ИЗМЕНЕНИЕ: Замена Listbox на Combobox для товарной группы ---
+        ttk.Label(general_tab, text="Товарная группа:").pack(anchor="w")
+        self.product_group_var = tk.StringVar()
+        self.product_group_combo = ttk.Combobox(general_tab, textvariable=self.product_group_var, state="readonly")
+        self.product_group_combo.pack(fill=tk.X, pady=2)
         self._load_product_groups()
 
         ttk.Label(general_tab, text="Планируемая дата прибытия:").pack(anchor="w")
@@ -1105,7 +1107,7 @@ class NotificationEditorDialog(tk.Toplevel):
         buttons_frame = ttk.Frame(self, padding=(10, 0, 10, 10))
         buttons_frame.pack(fill=tk.X)
         # Переименовываем кнопку в "Создать/Обновить"
-        ttk.Button(buttons_frame, text="Создать/Обновить", command=self._save).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(buttons_frame, text="Создать", command=self._save).pack(side=tk.RIGHT, padx=5)
         ttk.Button(buttons_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
 
         if self.initial_data:
@@ -1314,8 +1316,9 @@ class NotificationEditorDialog(tk.Toplevel):
     def _load_product_groups(self):
         product_groups = self.catalog_service.get_product_groups()
         self.product_groups = product_groups
-        for pg in product_groups:
-            self.product_groups_listbox.insert(tk.END, pg['display_name'])
+        # --- ИЗМЕНЕНИЕ: Заполняем Combobox ---
+        self.product_group_combo['values'] = [pg['display_name'] for pg in product_groups]
+
 
     def _load_initial_values(self):
         data = self.initial_data
@@ -1324,10 +1327,12 @@ class NotificationEditorDialog(tk.Toplevel):
         # Сценарий и клиент уже загружаются в _load_scenarios и _load_clients
         
         # Товарные группы
-        initial_pg_ids = {pg['id'] for pg in data.get('product_groups', [])}
-        for i, pg in enumerate(self.product_groups):
-            if pg['id'] in initial_pg_ids:
-                self.product_groups_listbox.select_set(i)
+        # --- ИЗМЕНЕНИЕ: Устанавливаем значение для Combobox ---
+        initial_pgs = data.get('product_groups', [])
+        if initial_pgs:
+            initial_pg_name = initial_pgs[0].get('name')
+            if initial_pg_name in self.product_group_combo['values']:
+                self.product_group_var.set(initial_pg_name)
 
         # Дата прибытия
         if data.get('planned_arrival_date'):
@@ -1348,8 +1353,11 @@ class NotificationEditorDialog(tk.Toplevel):
             selected_client_name = self.client_var.get()
             client = next((c for c in self.clients if c['name'] == selected_client_name), None)
 
-            selected_pg_indices = self.product_groups_listbox.curselection()
-            selected_pgs = [self.product_groups[i] for i in selected_pg_indices]
+            # --- ИЗМЕНЕНИЕ: Получаем данные из Combobox ---
+            selected_pg_name = self.product_group_var.get()
+            selected_pg = next((pg for pg in self.product_groups if pg['display_name'] == selected_pg_name), None)
+            # Сохраняем как список из одного элемента для совместимости
+            selected_pgs = [selected_pg] if selected_pg else []
 
             data = {
                 'scenario_id': scenario['id'],
@@ -2605,6 +2613,7 @@ class AdminWindow(tk.Tk):
         controls.pack(fill=tk.X, pady=5)
 
         tree = ttk.Treeview(left_pane, columns=cols, show='headings')
+        tree["displaycolumns"] = [c for c in cols if c != 'id'] # Скрываем колонку ID
         col_map = {
             'id': ('ID', 10, 'center'),
             'scenario_name': ('Сценарий', 150, 'w'),
@@ -3011,6 +3020,7 @@ class AdminWindow(tk.Tk):
 
                 # Создаем Treeview внутри tree_container
                 details_tree = ttk.Treeview(tree_container, columns=details_cols, show='headings')
+                details_tree["displaycolumns"] = [c for c in details_cols if c != 'id'] # Скрываем колонку ID
                 for col, (text, width, anchor) in col_map.items():
                     details_tree.heading(col, text=text)
                     details_tree.column(col, width=width, anchor=anchor)

@@ -31,7 +31,7 @@ class SupplyNotificationService:
                         planned_arrival_date, vehicle_number, status, comments
                     FROM ap_supply_notifications
                     WHERE status NOT IN ('В работе', 'В архиве')
-                    ORDER BY planned_arrival_date ASC NULLS LAST, id DESC
+                    ORDER BY planned_arrival_date ASC NULLS LAST, id ASC
                 """)
                 notifications = cur.fetchall()
 
