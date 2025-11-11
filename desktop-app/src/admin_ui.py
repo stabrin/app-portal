@@ -1677,10 +1677,24 @@ class ApiIntegrationDialog(tk.Toplevel):
             if not api_products:
                 raise Exception("API не вернуло список продуктов в заказе.")
 
-            # Шаг 3: Сопоставляем GTIN и api_product_id
-            gtin_to_api_product_id = {p['gtin']: p['id'] for p in api_products if p.get('state') == 'ACTIVE'}
+            # Шаг 3: Сопоставляем GTIN и api_product_id, используя более строгое условие
+            gtin_to_api_product_id = {
+                p['gtin']: p['id'] for p in api_products
+                if p.get('state') == 'ACTIVE' and p.get('qty') == p.get('qty_received')
+            }
             details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
             self.after(0, lambda: self._append_log("Сопоставление продуктов с API завершено."))
+
+            # --- ДОБАВЛЕНО: Шаг 3.5 - Обновление справочника товаров, как в веб-версии ---
+            products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name')]
+            if products_to_upsert:
+                self.after(0, lambda: self._append_log("Обновление локального справочника товаров..."))
+                from .utils import upsert_data_to_db
+                upsert_df = pd.DataFrame(products_to_upsert)
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+                    conn.commit()
 
             # Шаг 4: Цикл создания тиражей
             for i, row in details_df.iterrows():
@@ -1860,9 +1874,11 @@ class ApiIntegrationDialog(tk.Toplevel):
                 # Логика для статуса 'dmkod'
                 with self._get_client_db_connection() as conn:
                     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        # --- ИЗМЕНЕНИЕ: Добавляем o.fias_code в SELECT ---
                         cur.execute("""
-                            SELECT d.api_id, d.production_date, d.expiry_date, d.id as detail_id
+                            SELECT d.api_id, d.production_date, d.expiry_date, d.id as detail_id, o.fias_code
                             FROM dmkod_aggregation_details d
+                            JOIN orders o ON d.order_id = o.id
                             WHERE d.order_id = %s AND d.api_id IS NOT NULL AND d.utilisation_upload_id IS NULL
                         """, (self.order_id,))
                         details_to_process = cur.fetchall()
@@ -1881,6 +1897,9 @@ class ApiIntegrationDialog(tk.Toplevel):
                                 attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
                             if detail.get('expiry_date'):
                                 attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
+                            # --- ДОБАВЛЕНО: Используем fias_code, если он есть ---
+                            if detail.get('fias_code'):
+                                attributes['fias_id'] = detail['fias_code']
 
                             payload = {"all_from_printrun": detail['api_id']}
                             if attributes:
