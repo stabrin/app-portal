@@ -2923,9 +2923,9 @@ class AdminWindow(tk.Tk):
                 details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
 
                 col_map = {
-                    "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "quantity": ("Кол-во", 80, "e"),
+                    "id": ("ID", 40, "center"), "gtin": ("GTIN", 180, "w"), "quantity": ("Кол-во", 80, "e"),
                     "aggregation": ("Агрегация", 80, "center"), "production_date": ("Дата произв.", 100, "center"),
-                    "shelf_life_months": ("Срок годн. (мес)", 100, "center"), "expiry_date": ("Годен до", 100, "center") # type: ignore
+                    "shelf_life_months": ("Срок годн. (мес)", 120, "center"), "expiry_date": ("Годен до", 120, "center") # type: ignore
                 }
 
                 def _download_details_template_panel():
