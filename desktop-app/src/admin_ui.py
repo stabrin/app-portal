@@ -2856,8 +2856,8 @@ class AdminWindow(tk.Tk):
                 buttons_frame.pack(fill=tk.X, pady=(10,0))
                 ttk.Button(buttons_frame, text="Сохранить изменения", command=_save_general_info_from_panel).pack(side=tk.LEFT, padx=(0, 5))
 
-                # Добавляем кнопку "Создать/Обновить заказ", если статус позволяет
-                if notification_data.get('status') != 'Заказ создан':
+                # --- ИЗМЕНЕНИЕ: Кнопка доступна, только если детализация загружена (статус 'Ожидание') ---
+                if notification_data.get('status') == 'Ожидание':
                     ttk.Button(buttons_frame, text="Создать/Обновить заказ", command=_save_and_create_order).pack(side=tk.LEFT)
 
                 # Вкладка "Документы"
