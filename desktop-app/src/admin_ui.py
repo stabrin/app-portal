@@ -2919,18 +2919,14 @@ class AdminWindow(tk.Tk):
                 details_frame = ttk.Frame(editor_notebook, padding=5)
                 editor_notebook.add(details_frame, text="Детализация")
 
-                # Определяем колонки для таблицы детализации (теперь details_frame существует)
+                # --- ИСПРАВЛЕНИЕ: Создаем Treeview внутри правильного контейнера (tree_container) ---
                 details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
-                details_tree = ttk.Treeview(details_frame, columns=details_cols, show='headings')
 
                 col_map = {
                     "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "quantity": ("Кол-во", 80, "e"),
                     "aggregation": ("Агрегация", 80, "center"), "production_date": ("Дата произв.", 100, "center"),
                     "shelf_life_months": ("Срок годн. (мес)", 100, "center"), "expiry_date": ("Годен до", 100, "center") # type: ignore
                 }
-                for col, (text, width, anchor) in col_map.items():
-                    details_tree.heading(col, text=text)
-                    details_tree.column(col, width=width, anchor=anchor)
 
                 def _download_details_template_panel():
                     df = service.get_formalization_template()
@@ -3012,6 +3008,12 @@ class AdminWindow(tk.Tk):
                 # Контейнер для таблицы и скроллбара
                 tree_container = ttk.Frame(details_frame)
                 tree_container.pack(fill=tk.BOTH, expand=True, pady=(5,0))
+
+                # Создаем Treeview внутри tree_container
+                details_tree = ttk.Treeview(tree_container, columns=details_cols, show='headings')
+                for col, (text, width, anchor) in col_map.items():
+                    details_tree.heading(col, text=text)
+                    details_tree.column(col, width=width, anchor=anchor)
 
                 details_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=details_tree.yview)
                 details_tree.configure(yscrollcommand=details_scrollbar.set)
