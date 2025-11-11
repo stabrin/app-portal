@@ -2594,8 +2594,8 @@ class AdminWindow(tk.Tk):
         top_paned_window = ttk.PanedWindow(top_pane, orient=tk.HORIZONTAL)
         top_paned_window.pack(fill=tk.BOTH, expand=True)
 
-        cols = ('id', 'scenario_name', 'client_name', 'product_groups', 'planned_arrival_date', 
-                'vehicle_number', 'status', 'positions_count', 'dm_count', 'actions')
+        cols = ('id', 'scenario_name', 'client_name', 'product_groups', 'planned_arrival_date',
+                'vehicle_number', 'status', 'positions_count', 'dm_count')
         
         # --- Левая панель (2/3) для таблицы ---
         left_pane = ttk.Frame(top_paned_window)
@@ -2614,8 +2614,7 @@ class AdminWindow(tk.Tk):
             'vehicle_number': ('Номер Контейнера/ТС', 100, 'center'),
             'status': ('Статус', 100, 'center'),
             'positions_count': ('Позиций', 70, 'center'),
-            'dm_count': ('Кодов ДМ', 80, 'center'),
-            'actions': ('Действия', 60, 'center')
+            'dm_count': ('Кодов ДМ', 80, 'center')
         }
 
         for col_key, (text, width, anchor) in col_map.items():
@@ -3053,46 +3052,6 @@ class AdminWindow(tk.Tk):
             dialog = NotificationEditorDialog(self, self.user_info, notification_id=int(notification_id) if notification_id else None)
             dialog.on_save_callback = refresh_all
             # self.wait_window(dialog) # Эта строка делала окно модальным, но мы используем callback
-
-        def archive_notification():
-            selected_item = tree.focus()
-            if not selected_item: return
-            if messagebox.askyesno("Подтверждение", "Переместить уведомление в архив?", parent=self):
-                try:
-                    service.archive_notification(int(selected_item))
-                    refresh_all()
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось архивировать уведомление: {e}", parent=self)
-
-        def show_context_menu(event):
-            item_id = tree.identify_row(event.y)
-            logging.info(f"Правый клик мыши. Событие: y={event.y}. Определен ID строки: {item_id}")
-            if not item_id: return
-            
-            tree.selection_set(item_id) # Выделяем строку, по которой кликнули
-            
-            menu = tk.Menu(self, tearoff=0)
-            menu.add_command(label="Редактировать", command=lambda: open_notification_editor(item_id))
-            
-            # --- НОВАЯ ЛОГИКА: Создание заказа ---
-            def create_order_from_notification_ui(notif_id):
-                logging.info(f"Запрос на создание заказа из уведомления ID: {notif_id}")
-                try:
-                    # Вызываем новый метод сервиса
-                    success, message = service.create_order_from_notification(notif_id)
-                    if success:
-                        messagebox.showinfo("Успех", message, parent=self)
-                        # Можно добавить обновление вкладки "Заказы"
-                    else:
-                        messagebox.showwarning("Внимание", message, parent=self)
-                except Exception as e:
-                    logging.error(f"Ошибка при создании заказа из уведомления {notif_id}: {e}", exc_info=True)
-                    messagebox.showerror("Ошибка", f"Не удалось создать заказ: {e}", parent=self)
-            menu.add_command(label="Создать заказ", command=lambda item_id=item_id: create_order_from_notification_ui(item_id))
-            menu.add_separator()
-            menu.add_command(label="Удалить в архив", command=archive_notification)
-            menu.post(event.x_root, event.y_root)
-
         ttk.Button(controls, text="Создать новое уведомление", command=lambda: open_notification_editor()).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls, text="Обновить", command=refresh_all).pack(side=tk.LEFT, padx=2)
 
@@ -3101,8 +3060,9 @@ class AdminWindow(tk.Tk):
             selected_item = tree.focus()
             if selected_item:
                 populate_editor_pane(int(selected_item))
-
-        tree.bind("<Button-3>", show_context_menu) # Правый клик
+        
+        # Удаляем привязку контекстного меню
+        # tree.bind("<Button-3>", show_context_menu) # Правый клик
         tree.bind("<Double-1>", lambda event: open_notification_editor(tree.focus())) # Двойной клик
         tree.bind("<<TreeviewSelect>>", on_tree_select) # Выбор элемента
 
