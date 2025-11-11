@@ -132,25 +132,25 @@ class ApiService:
         Адаптировано из dmkod-integration-app.
         """
         logger.info(f"Отправка сведений об использовании. Payload: {payload}")
-        import json # Добавляем импорт
+        import json
         try:
-            # --- НОВАЯ ЛОГИКА: Определяем URL на основе содержимого ---
-            # Если payload - это строка, пытаемся загрузить ее как JSON для проверки
-            payload_dict = json.loads(payload) if isinstance(payload, str) else payload
+            # --- ИСПРАВЛЕНИЕ: Гарантируем, что payload всегда является словарем ---
+            # Если payload - это строка, загружаем ее как JSON.
+            # Это решает проблему "can only concatenate str (not "int") to str" при повторных вызовах.
+            if isinstance(payload, str):
+                payload_dict = json.loads(payload)
+            else:
+                payload_dict = payload
 
-            # Определяем URL в зависимости от наличия атрибутов в payload
-            if 'attributes' in payload_dict:
+            # Определяем URL в зависимости от наличия ключа 'attributes'
+            if 'attributes' in payload_dict and payload_dict['attributes']:
                 url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload"
             else:
                 url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/include"
             
             headers = self._get_auth_headers() # Получаем базовые заголовки
-            headers['Content-Type'] = 'application/json' # Явно указываем Content-Type
-            
-            # --- ИСПРАВЛЕНИЕ 2: Используем параметр `json` вместо `data` и правильное имя переменной ---
-            # `requests` сам корректно обработает и словарь, и JSON-строку,
-            # а также установит правильный Content-Type и кодировку.
-            # Это решает проблему "can only concatenate str (not "int") to str".
+            # Используем параметр `json`, который автоматически кодирует словарь в JSON
+            # и устанавливает правильный заголовок 'Content-Type: application/json'.
             response = requests.post(url, headers=headers, json=payload_dict, timeout=240)
             response.raise_for_status()
             return response.json()

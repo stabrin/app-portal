@@ -2516,8 +2516,8 @@ class OrderEditorDialog(tk.Toplevel):
                 upsert_data_to_db(cur, 'delta_result', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
                 logging.info(f"[Delta Import] Сохранено {len(delta_result_df)} сгруппированных записей в 'delta_result'.")
 
-                # 6. Обновление статуса заказа
-                cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
+                # # 6. Обновление статуса заказа
+                # cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
             
             conn.commit()
             messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
