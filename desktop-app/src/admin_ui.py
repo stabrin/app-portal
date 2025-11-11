@@ -2894,26 +2894,13 @@ class AdminWindow(tk.Tk):
                 logging.error(f"Ошибка при заполнении панели редактора: {e}", exc_info=True)
                 for widget in right_pane.winfo_children(): widget.destroy()
                 ttk.Label(right_pane, text=f"Ошибка: {e}", wraplength=right_pane.winfo_width()-20).pack(expand=True)
-
-
+        
         def open_notification_editor(notification_id=None):
             """Открывает диалог для создания/редактирования уведомления."""
             logging.info(f"Вызвана функция open_notification_editor с notification_id: {notification_id}, тип: {type(notification_id)}")
-            if notification_id:
-                logging.info(f"Открытие редактора для существующего уведомления ID: {notification_id}")
-            else:
-                logging.info("Открытие редактора для создания нового уведомления.")
-            
-            # --- ИСПРАВЛЕНИЕ: Передаем user_info и notification_id в правильный конструктор ---
-            dialog = NotificationEditorDialog(self, user_info=self.user_info, notification_id=int(notification_id) if notification_id else None)
-            # --- ИЗМЕНЕНИЕ: Убираем ожидание, чтобы окно не было модальным ---
-            logging.info("Экземпляр NotificationEditorDialog создан.")
-            # self.wait_window(dialog) # Убираем блокировку
-            # Вместо этого, диалог сам вызовет обновление списка при успешном сохранении
+            dialog = NotificationEditorDialog(self, self.user_info, notification_id=int(notification_id) if notification_id else None)
             dialog.on_save_callback = refresh_all
-            if getattr(dialog, 'result', False):
-                logging.info("Диалог уведомлений завершился успешно. Обновление списка...")
-                refresh_notifications()
+            # self.wait_window(dialog) # Эта строка делала окно модальным, но мы используем callback
 
         def archive_notification():
             selected_item = tree.focus()
@@ -2933,12 +2920,7 @@ class AdminWindow(tk.Tk):
             tree.selection_set(item_id) # Выделяем строку, по которой кликнули
             
             menu = tk.Menu(self, tearoff=0)
-            # Добавляем логирование прямо в команду меню
-            def deferred_open_editor(uid):
-                logging.info(f"Выбран пункт меню 'Редактировать' для ID: {uid}")
-                # ИСПОЛЬЗУЕМ self.after, чтобы отложить вызов и избежать конфликта модальных окон
-                self.after(1, lambda: open_notification_editor(uid))
-            menu.add_command(label="Редактировать", command=lambda item_id=item_id: deferred_open_editor(item_id))
+            menu.add_command(label="Редактировать", command=lambda: open_notification_editor(item_id))
             
             # --- НОВАЯ ЛОГИКА: Создание заказа ---
             def create_order_from_notification_ui(notif_id):
@@ -2969,6 +2951,7 @@ class AdminWindow(tk.Tk):
                 populate_editor_pane(int(selected_item))
 
         tree.bind("<Button-3>", show_context_menu) # Правый клик
+        tree.bind("<Double-1>", lambda event: open_notification_editor(tree.focus())) # Двойной клик
         tree.bind("<<TreeviewSelect>>", on_tree_select) # Выбор элемента
 
         refresh_all()
