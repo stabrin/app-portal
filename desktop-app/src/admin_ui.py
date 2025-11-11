@@ -1665,7 +1665,7 @@ class ApiIntegrationDialog(tk.Toplevel):
 
     def _split_runs_task(self):
         """Задача для разбиения заказа на тиражи."""
-        self.after(0, lambda: self._display_api_response(200, "Начинаю создание тиражей..."))
+        # self.after(0, lambda: self._display_api_response(200, "Начинаю создание тиражей..."))
         try:
             # Шаг 1: Собираем данные из нашей БД
             with self._get_client_db_connection() as conn:
@@ -1675,10 +1675,10 @@ class ApiIntegrationDialog(tk.Toplevel):
             if not details_data:
                 raise Exception("В заказе нет детализации для создания тиражей.")
             details_df = pd.DataFrame(details_data)
-            self.after(0, lambda: self._append_log(f"Найдено {len(details_df)} позиций в локальной БД."))
+            # self.after(0, lambda: self._append_log(f"Найдено {len(details_df)} позиций в локальной БД."))
 
             # Шаг 2: Получаем детали заказа из API
-            self.after(0, lambda: self._append_log("Получение деталей заказа из API..."))
+            # self.after(0, lambda: self._append_log("Получение деталей заказа из API..."))
             order_details_from_api = self.api_service.get_order_details(self.order_data['api_order_id'])
             api_products = order_details_from_api.get('orders', [{}])[0].get('products', [])
             if not api_products:
@@ -1690,12 +1690,12 @@ class ApiIntegrationDialog(tk.Toplevel):
                 if p.get('state') == 'ACTIVE' and p.get('qty') == p.get('qty_received')
             }
             details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
-            self.after(0, lambda: self._append_log("Сопоставление продуктов с API завершено."))
+            # self.after(0, lambda: self._append_log("Сопоставление продуктов с API завершено."))
 
             # --- ДОБАВЛЕНО: Шаг 3.5 - Обновление справочника товаров, как в веб-версии ---
             products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name')]
             if products_to_upsert:
-                self.after(0, lambda: self._append_log("Обновление локального справочника товаров..."))
+                # self.after(0, lambda: self._append_log("Обновление локального справочника товаров..."))
                 from .utils import upsert_data_to_db
                 upsert_df = pd.DataFrame(products_to_upsert)
                 with self._get_client_db_connection() as conn:
@@ -1706,15 +1706,15 @@ class ApiIntegrationDialog(tk.Toplevel):
             # Шаг 4: Цикл создания тиражей
             for i, row in details_df.iterrows():
                 if pd.notna(row.get('api_id')):
-                    self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, тираж уже существует (ID: {r['api_id']})."))
+                    # self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, тираж уже существует (ID: {r['api_id']})."))
                     continue
                 
                 api_product_id = row.get('api_product_id')
                 if pd.isna(api_product_id):
-                    self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, не найден активный продукт в API."))
+                    # self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, не найден активный продукт в API."))
                     continue
 
-                self.after(0, lambda r=row: self._append_log(f"--- Создаю тираж для GTIN {r['gtin']}..."))
+                # self.after(0, lambda r=row: self._append_log(f"--- Создаю тираж для GTIN {r['gtin']}..."))
                 
                 # --- ИЗМЕНЕНИЕ: Добавляем обработку специфичной ошибки 400 ---
                 try:
@@ -1727,8 +1727,8 @@ class ApiIntegrationDialog(tk.Toplevel):
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 400:
                         # Если это ошибка 400, прерываем цикл и выводим дружелюбное сообщение
-                        self.after(0, lambda: self._append_log("\nAPI вернуло ошибку. Вероятно, система еще обрабатывает предыдущий запрос."))
-                        self.after(0, lambda: self._append_log("Пожалуйста, подождите несколько минут и запустите операцию 'Разбить на тиражи' еще раз."))
+                        # self.after(0, lambda: self._append_log("\nAPI вернуло ошибку. Вероятно, система еще обрабатывает предыдущий запрос."))
+                        # self.after(0, lambda: self._append_log("Пожалуйста, подождите несколько минут и запустите операцию 'Разбить на тиражи' еще раз."))
                         self.after(0, self._update_buttons_state)
                         return # Выходим из функции _split_runs_task
                     else:
@@ -1739,9 +1739,9 @@ class ApiIntegrationDialog(tk.Toplevel):
                     with conn.cursor() as cur:
                         cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s", (new_printrun_id, row['id']))
                     conn.commit()
-                self.after(0, lambda r=row, p_id=new_printrun_id: self._append_log(f"  Успешно создан тираж ID {p_id} для GTIN {r['gtin']}."))
+                # self.after(0, lambda r=row, p_id=new_printrun_id: self._append_log(f"  Успешно создан тираж ID {p_id} для GTIN {r['gtin']}."))
                 
-                self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
+                # self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
                 time.sleep(10)
 
             # Шаг 5: Обновление статуса заказа
@@ -1751,7 +1751,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                 conn.commit()
             
             self.order_data['api_status'] = 'Тиражи созданы'
-            self.after(0, lambda: self._append_log("\nВсе тиражи успешно созданы!"))
+            self.after(0, lambda: self._display_api_response(200, "Все тиражи успешно созданы!"))
             self.after(0, self._update_buttons_state)
 
         except Exception as e:
@@ -1762,7 +1762,7 @@ class ApiIntegrationDialog(tk.Toplevel):
         self._run_in_thread(self._prepare_json_task)
 
     def _prepare_json_task(self):
-        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку JSON..."))
+        # self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку JSON..."))
         try:
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -1773,9 +1773,9 @@ class ApiIntegrationDialog(tk.Toplevel):
                 raise Exception("Не найдено позиций с ID тиража для обработки.")
 
             for i, detail in enumerate(details_to_process):
-                self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос JSON для тиража ID {d['api_id']}..."))
+                # self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос JSON для тиража ID {d['api_id']}..."))
                 self.api_service.create_printrun_json({"printrun_id": detail['api_id']})
-                self.after(0, lambda d=detail: self._append_log(f"  Запрос для тиража {d['api_id']} успешно отправлен."))
+                # self.after(0, lambda d=detail: self._append_log(f"  Запрос для тиража {d['api_id']} успешно отправлен."))
                 time.sleep(0.5)
 
             with self._get_client_db_connection() as conn:
@@ -1784,7 +1784,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                 conn.commit()
             
             self.order_data['api_status'] = 'JSON заказан'
-            self.after(0, lambda: self._append_log("\nВсе запросы на подготовку JSON успешно отправлены!"))
+            self.after(0, lambda: self._display_api_response(200, "Все запросы на подготовку JSON успешно отправлены!"))
             self.after(0, self._update_buttons_state)
 
         except Exception as e:
@@ -1795,7 +1795,7 @@ class ApiIntegrationDialog(tk.Toplevel):
         self._run_in_thread(self._download_codes_task)
 
     def _download_codes_task(self):
-        self.after(0, lambda: self._display_api_response(200, "Начинаю скачивание кодов..."))
+        # self.after(0, lambda: self._display_api_response(200, "Начинаю скачивание кодов..."))
         try:
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -1808,18 +1808,18 @@ class ApiIntegrationDialog(tk.Toplevel):
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
                     for i, detail in enumerate(details_to_process):
-                        self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос кодов для тиража ID {d['api_id']}..."))
+                        # self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос кодов для тиража ID {d['api_id']}..."))
                         response_data = self.api_service.download_printrun_json({"printrun_id": detail['api_id']})
                         codes = response_data.get('codes', [])
                         if not codes:
-                            self.after(0, lambda d=detail: self._append_log(f"  Коды для тиража {d['api_id']} еще не готовы или отсутствуют."))
+                            # self.after(0, lambda d=detail: self._append_log(f"  Коды для тиража {d['api_id']} еще не готовы или отсутствуют."))
                             continue
                         
                         cur.execute(
                             "UPDATE dmkod_aggregation_details SET api_codes_json = %s WHERE id = %s",
                             (json.dumps({'codes': codes}), detail['id'])
                         )
-                        self.after(0, lambda c=len(codes), d_id=detail['id']: self._append_log(f"  Сохранено {c} кодов в БД для строки ID {d_id}."))
+                        # self.after(0, lambda c=len(codes), d_id=detail['id']: self._append_log(f"  Сохранено {c} кодов в БД для строки ID {d_id}."))
 
                 conn.commit() # Фиксируем сохранение всех JSON
 
@@ -1829,7 +1829,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                     cur.execute("UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s", (self.order_id,))
                 conn.commit()
             self.order_data['api_status'] = 'Коды скачаны'
-            self.after(0, lambda: self._append_log("\nВсе коды успешно сохранены в базу данных."))
+            self.after(0, lambda: self._display_api_response(200, "Все коды успешно сохранены в базу данных."))
             self.after(0, self._update_buttons_state)
 
         except Exception as e:
@@ -1841,10 +1841,10 @@ class ApiIntegrationDialog(tk.Toplevel):
 
     def _prepare_report_data_task(self):
         """Задача для подготовки сведений для отчета."""
-        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений для отчета..."))
+        # self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений для отчета..."))
         try:
             order_status = self.order_data.get('status')
-            self.after(0, lambda: self._append_log(f"Статус заказа: {order_status}"))
+            # self.after(0, lambda: self._append_log(f"Статус заказа: {order_status}"))
 
             if order_status == 'delta':
                 # Логика для статуса 'delta'
@@ -1854,16 +1854,16 @@ class ApiIntegrationDialog(tk.Toplevel):
                         results_to_process = cur.fetchall()
 
                 if not results_to_process:
-                    self.after(0, lambda: self._append_log("Нет новых данных от 'Дельта' для отправки."))
+                    self.after(0, lambda: self._display_api_response(200, "Нет новых данных от 'Дельта' для отправки."))
                     return
 
-                self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
+                # self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
 
                 with self._get_client_db_connection() as conn:
                     with conn.cursor() as cur:
                         for i, result in enumerate(results_to_process):
                             payload = result['codes_json']
-                            self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
+                            # self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
                             
                             # Вызов API
                             response_data = self.api_service.upload_utilisation_data(payload)
@@ -1872,8 +1872,8 @@ class ApiIntegrationDialog(tk.Toplevel):
                             generated_upload_id = (self.order_id * 1000) + (i + 1)
                             cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (generated_upload_id, result['id']))
                             
-                            self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
-                            self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
+                            # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
+                            # self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
                             time.sleep(5)
                     conn.commit()
 
@@ -1891,10 +1891,10 @@ class ApiIntegrationDialog(tk.Toplevel):
                         details_to_process = cur.fetchall()
 
                 if not details_to_process:
-                    self.after(0, lambda: self._append_log("Нет новых тиражей для отправки сведений."))
+                    self.after(0, lambda: self._display_api_response(200, "Нет новых тиражей для отправки сведений."))
                     return
 
-                self.after(0, lambda: self._append_log(f"Найдено {len(details_to_process)} тиражей для обработки."))
+                # self.after(0, lambda: self._append_log(f"Найдено {len(details_to_process)} тиражей для обработки."))
 
                 with self._get_client_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -1912,15 +1912,15 @@ class ApiIntegrationDialog(tk.Toplevel):
                             if attributes:
                                 payload['attributes'] = attributes
 
-                            self.after(0, lambda i=i, p=payload: self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка данных: {json.dumps(p)} ---"))
+                            # self.after(0, lambda i=i, p=payload: self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка данных: {json.dumps(p)} ---"))
                             
                             response_data = self.api_service.upload_utilisation_data(payload)
                             
                             generated_upload_id = (self.order_id * 1000) + (i + 1)
                             cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (generated_upload_id, detail['detail_id']))
 
-                            self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
-                            self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
+                            # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
+                            # self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
                             time.sleep(5)
                     conn.commit()
 
@@ -1930,7 +1930,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                     cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
                 conn.commit()
             self.order_data['api_status'] = 'Сведения подготовлены'
-            self.after(0, lambda: self._append_log("\nВсе сведения успешно отправлены!"))
+            self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
         except Exception as e:
             self.after(0, lambda err=e: self._display_api_response(500, f"КРИТИЧЕСКАЯ ОШИБКА: {err}\n\n{traceback.format_exc()}"))
         finally:
@@ -1940,10 +1940,10 @@ class ApiIntegrationDialog(tk.Toplevel):
         self._run_in_thread(self._prepare_report_task)
 
     def _prepare_report_task(self):
-        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку отчета..."))
+        # self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку отчета..."))
         try:
             # Логика аналогична `prepare_report` из routes.py
-            self.after(0, lambda: self._append_log("Отправка запросов на подготовку отчета..."))
+            # self.after(0, lambda: self._append_log("Отправка запросов на подготовку отчета..."))
             time.sleep(5) # Эмуляция работы
 
             with self._get_client_db_connection() as conn:
@@ -1952,7 +1952,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                 conn.commit()
             
             self.order_data['api_status'] = 'Отчет подготовлен'
-            self.after(0, lambda: self._append_log("\nОтчет успешно подготовлен!"))
+            self.after(0, lambda: self._display_api_response(200, "Отчет успешно подготовлен!"))
             self.after(0, self._update_buttons_state)
 
         except Exception as e:
