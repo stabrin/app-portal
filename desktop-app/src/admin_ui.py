@@ -1078,23 +1078,23 @@ class NotificationEditorDialog(tk.Toplevel):
 
     def _create_widgets(self):
         logging.info("Начало создания виджетов в NotificationEditorDialog.")
-        paned_window = ttk.PanedWindow(self, orient=tk.VERTICAL)
-        paned_window.pack(fill=tk.BOTH, expand=True)
+        
+        # --- ИЗМЕНЕНИЕ: Создаем Notebook для вкладок ---
+        main_notebook = ttk.Notebook(self)
+        main_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        top_pane = ttk.Frame(paned_window, padding=10)
-        paned_window.add(top_pane, weight=1)
+        # --- ВКЛАДКА 1: Общая информация ---
+        general_tab = ttk.Frame(main_notebook, padding=10)
+        main_notebook.add(general_tab, text="Общая информация")
 
-        header_frame = ttk.LabelFrame(top_pane, text="Основная информация")
-        header_frame.pack(fill=tk.BOTH, expand=True)
-
-        ttk.Label(header_frame, text="Сценарий маркировки:").pack(anchor="w")
+        ttk.Label(general_tab, text="Сценарий маркировки:").pack(anchor="w")
         self.scenario_var = tk.StringVar()
-        self.scenario_combo = ttk.Combobox(header_frame, textvariable=self.scenario_var, state="readonly")
+        self.scenario_combo = ttk.Combobox(general_tab, textvariable=self.scenario_var, state="readonly")
         self.scenario_combo.pack(fill=tk.X, pady=2)
         self._load_scenarios()
         self.scenario_combo.bind("<<ComboboxSelected>>", self._on_scenario_change)
 
-        client_frame = ttk.Frame(header_frame)
+        client_frame = ttk.Frame(general_tab)
         client_frame.pack(fill=tk.X, pady=2)
         ttk.Label(client_frame, text="Клиент:").pack(anchor="w")
         self.client_var = tk.StringVar()
@@ -1104,56 +1104,54 @@ class NotificationEditorDialog(tk.Toplevel):
         self.client_combo.bind("<Button-1>", self._on_client_combo_click)
         self.client_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        ttk.Label(header_frame, text="Товарные группы:").pack(anchor="w")
-        self.product_groups_listbox = tk.Listbox(header_frame, selectmode=tk.MULTIPLE, height=3)
+        ttk.Label(general_tab, text="Товарные группы:").pack(anchor="w")
+        self.product_groups_listbox = tk.Listbox(general_tab, selectmode=tk.MULTIPLE, height=3)
         self.product_groups_listbox.pack(fill=tk.X, pady=2)
         self._load_product_groups()
 
-        ttk.Label(header_frame, text="Планируемая дата прибытия:").pack(anchor="w")
+        ttk.Label(general_tab, text="Планируемая дата прибытия:").pack(anchor="w")
         self.arrival_date_var = tk.StringVar()
-        date_frame = ttk.Frame(header_frame)
+        date_frame = ttk.Frame(general_tab)
         date_frame.pack(fill=tk.X, pady=2)
         self.arrival_date_entry = ttk.Entry(date_frame, textvariable=self.arrival_date_var)
         self.arrival_date_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(date_frame, text="...", width=3, command=self._open_calendar_dialog).pack(side=tk.LEFT, padx=(5,0))
 
-        ttk.Label(header_frame, text="Номер контейнера/автомобиля:").pack(anchor="w")
-        self.vehicle_number_entry = ttk.Entry(header_frame)
+        ttk.Label(general_tab, text="Номер контейнера/автомобиля:").pack(anchor="w")
+        self.vehicle_number_entry = ttk.Entry(general_tab)
         self.vehicle_number_entry.pack(fill=tk.X, pady=2)
 
-        ttk.Label(header_frame, text="Комментарии:").pack(anchor="w")
-        self.comments_text = tk.Text(header_frame, height=3)
+        ttk.Label(general_tab, text="Комментарии:").pack(anchor="w")
+        self.comments_text = tk.Text(general_tab, height=3)
         self.comments_text.pack(fill=tk.X, pady=2)
 
         if self.notification_id:
-            docs_frame = ttk.LabelFrame(top_pane, text="Документы от клиента")
-            docs_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+            # --- ВКЛАДКА 2: Документы ---
+            docs_tab = ttk.Frame(main_notebook, padding=10)
+            main_notebook.add(docs_tab, text="Документы")
             
-            docs_controls = ttk.Frame(docs_frame)
+            docs_controls = ttk.Frame(docs_tab)
             docs_controls.pack(fill=tk.X, pady=2)
             ttk.Button(docs_controls, text="Загрузить", command=self._upload_client_document).pack(side=tk.LEFT)
             ttk.Button(docs_controls, text="Скачать", command=self._download_client_document).pack(side=tk.LEFT, padx=5)
             ttk.Button(docs_controls, text="Удалить", command=self._delete_client_document).pack(side=tk.LEFT)
 
-            self.files_listbox = tk.Listbox(docs_frame, height=3)
+            self.files_listbox = tk.Listbox(docs_tab, height=4)
             self.files_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             self._load_notification_files()
 
-        if self.notification_id:
-            bottom_pane = ttk.Frame(paned_window, padding=10)
-            paned_window.add(bottom_pane, weight=2)
+            # --- ВКЛАДКА 3: Детализация заказа ---
+            details_tab = ttk.Frame(main_notebook, padding=10)
+            main_notebook.add(details_tab, text="Детализация заказа")
 
-            details_frame = ttk.LabelFrame(bottom_pane, text="Детализация уведомления")
-            details_frame.pack(fill=tk.BOTH, expand=True)
-
-            details_controls = ttk.Frame(details_frame)
+            details_controls = ttk.Frame(details_tab)
             details_controls.pack(fill=tk.X, pady=5)
             ttk.Button(details_controls, text="Скачать шаблон", command=self._download_details_template).pack(side=tk.LEFT)
             ttk.Button(details_controls, text="Загрузить из файла", command=self._upload_details_file).pack(side=tk.LEFT, padx=5)
             ttk.Button(details_controls, text="Сохранить детализацию", command=self._save_details_from_table).pack(side=tk.RIGHT)
 
             self.details_cols = ["id", "gtin", "quantity", "aggregation", "production_date", "shelf_life_months", "expiry_date"]
-            self.details_tree = ttk.Treeview(details_frame, columns=self.details_cols, show='headings')
+            self.details_tree = ttk.Treeview(details_tab, columns=self.details_cols, show='headings')
             
             col_map = {
                 "id": ("ID", 40, "center"), "gtin": ("GTIN", 140, "w"), "quantity": ("Кол-во", 80, "e"),
@@ -1164,13 +1162,15 @@ class NotificationEditorDialog(tk.Toplevel):
                 self.details_tree.heading(col, text=text)
                 self.details_tree.column(col, width=width, anchor=anchor)
             
-            self.details_tree.pack(fill=tk.BOTH, expand=True, pady=5)
+            self.details_tree.pack(fill=tk.BOTH, expand=True, pady=(5,0))
             self.details_tree.bind("<Double-1>", self._on_details_double_click)
             self._load_notification_details()
 
-        buttons_frame = ttk.Frame(top_pane)
-        buttons_frame.pack(fill=tk.X, pady=(10,0))
-        ttk.Button(buttons_frame, text="Сохранить", command=self._save).pack(side=tk.RIGHT, padx=5)
+        # --- ИЗМЕНЕНИЕ: Кнопки сохранения/отмены теперь внизу, вне вкладок ---
+        buttons_frame = ttk.Frame(self, padding=(10, 0, 10, 10))
+        buttons_frame.pack(fill=tk.X)
+        # Переименовываем кнопку в "Создать/Обновить"
+        ttk.Button(buttons_frame, text="Создать/Обновить", command=self._save).pack(side=tk.RIGHT, padx=5)
         ttk.Button(buttons_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
 
         if self.initial_data:
