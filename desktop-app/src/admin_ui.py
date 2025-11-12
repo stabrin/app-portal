@@ -3456,7 +3456,17 @@ class AdminWindow(tk.Tk):
                         new_status = f"Архив_{current_status}"
                         with get_client_db_connection(self.user_info) as conn:
                             with conn.cursor() as cur:
-                                cur.execute("UPDATE orders SET status = %s WHERE id = %s", (new_status, order_id))
+                                # 1. Обновляем статус самого заказа
+                                cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, order_id))
+                                result = cur.fetchone()
+                                notification_id = result[0] if result else None
+                                logging.info(f"Заказ ID {order_id} перемещен в архив. Связанное уведомление ID: {notification_id}")
+
+                                # 2. Если заказ связан с уведомлением, архивируем и его
+                                if notification_id:
+                                    cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
+                                    logging.info(f"Статус уведомления о поставке ID {notification_id} также изменен на 'В архиве'.")
+
                             conn.commit()
                         load_data() # Обновляем текущую вкладку
                         # TODO: Нужно обновить и другую вкладку тоже

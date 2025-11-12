@@ -30,7 +30,7 @@ class SupplyNotificationService:
                         id, scenario_name, client_name, product_groups, 
                         planned_arrival_date, vehicle_number, status, comments
                     FROM ap_supply_notifications
-                    WHERE status NOT IN ('В работе', 'В архиве')
+                    WHERE status NOT IN ('В работе', 'В архиве', 'Заказ создан')
                     ORDER BY planned_arrival_date ASC NULLS LAST, id ASC
                 """)
                 notifications = cur.fetchall()
