@@ -30,7 +30,7 @@ logging.basicConfig(
     ])
 
 # Импорты для работы с БД и QR-кодами
-from .db_connector import get_main_db_connection
+from .db_connector import get_main_db_connection, get_client_db_connection
 from .api_service import ApiService
 from .supply_notification_service import SupplyNotificationService
 import bcrypt
@@ -272,8 +272,8 @@ def open_workplace_setup_window(parent_widget, user_info):
 
     def get_client_db_connection(): # Эта функция локальна для open_workplace_setup_window
         """Вспомогательная функция для подключения к БД клиента."""
-        # Используем универсальный метод из PrintingService
-        return PrintingService._get_client_db_connection(user_info)
+        # Используем централизованный метод из db_connector
+        return get_client_db_connection(user_info)
 
     def load_warehouses():
         """Загружает и отображает склады и количество рабочих мест в них."""
@@ -574,8 +574,8 @@ class PrintWorkplaceLabelsDialog(tk.Toplevel):
 
     def _get_client_db_connection(self):
         """Вспомогательный метод для подключения к БД клиента.
-        Использует универсальный метод из PrintingService."""
-        return PrintingService._get_client_db_connection(self.user_info)
+        Использует централизованный метод из db_connector."""
+        return get_client_db_connection(self.user_info)
 
     def _create_widgets(self):
         frame = ttk.Frame(self, padding="10")
@@ -1001,11 +1001,11 @@ class NotificationEditorDialog(tk.Toplevel):
 
         logging.info(f"Инициализация NotificationEditorDialog. ID: {self.notification_id}")
 
-        from .supply_notification_service import SupplyNotificationService
+        # from .supply_notification_service import SupplyNotificationService # Уже импортирован
         self.on_save_callback = None
-        self.service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
+        self.service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
         from .catalogs_service import CatalogsService
-        self.catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
+        self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
 
         self.initial_data = {}
         if notification_id:
@@ -2592,7 +2592,7 @@ class AdminWindow(tk.Tk):
 
     def _create_supply_notice_tab(self, parent_frame):
         from .supply_notification_service import SupplyNotificationService
-        service = SupplyNotificationService(lambda: PrintingService._get_client_db_connection(self.user_info))
+        service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
  
         # --- ИЗМЕНЕНИЕ: Создаем PanedWindow для разделения на верхнюю и нижнюю части ---
         main_paned_window = ttk.PanedWindow(parent_frame, orient=tk.VERTICAL)
@@ -2777,7 +2777,7 @@ class AdminWindow(tk.Tk):
 
                 # --- Поля для редактирования (адаптировано из NotificationEditorDialog) ---
                 from .catalogs_service import CatalogsService
-                catalog_service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
+                catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
 
                 # --- ИЗМЕНЕНИЕ: Замена Listbox на Combobox для товарной группы ---
                 ttk.Label(general_tab, text="Товарная группа:").pack(anchor="w")
@@ -3089,7 +3089,7 @@ class AdminWindow(tk.Tk):
         """Создает содержимое для вкладки 'Справочники'."""
         # --- ИЗМЕНЕНИЕ: Передаем в сервис функцию для подключения к БД клиента ---
         from .catalogs_service import CatalogsService
-        service = CatalogsService(self.user_info, lambda: PrintingService._get_client_db_connection(self.user_info))
+        service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
 
         # --- ИЗМЕНЕНИЕ: Создаем вложенный Notebook для разных справочников ---
         notebook = ttk.Notebook(parent_frame)
@@ -3398,7 +3398,7 @@ class AdminWindow(tk.Tk):
                 for i in tree.get_children():
                     tree.delete(i)
                 try:
-                    with PrintingService._get_client_db_connection(self.user_info) as conn:
+                    with get_client_db_connection(self.user_info) as conn:
                         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                             status_filter = "status LIKE 'Архив%%'" if is_archive else "status NOT LIKE 'Архив%%'"
                             query = f"SELECT id, client_name, order_date, status, notes, api_status FROM orders WHERE {status_filter} ORDER BY id DESC"
@@ -3421,7 +3421,7 @@ class AdminWindow(tk.Tk):
                 if messagebox.askyesno("Подтверждение", "Переместить заказ в архив?", parent=parent):
                     try:
                         new_status = f"Архив_{current_status}"
-                        with PrintingService._get_client_db_connection(self.user_info) as conn:
+                        with get_client_db_connection(self.user_info) as conn:
                             with conn.cursor() as cur:
                                 cur.execute("UPDATE orders SET status = %s WHERE id = %s", (new_status, order_id))
                             conn.commit()
@@ -3443,7 +3443,7 @@ class AdminWindow(tk.Tk):
                 def open_correct_editor(order_id):
                     """Проверяет сценарий и открывает соответствующий редактор."""
                     try:
-                        with PrintingService._get_client_db_connection(self.user_info) as conn:
+                        with get_client_db_connection(self.user_info) as conn:
                             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                                 cur.execute("""
                                     SELECT s.scenario_data FROM orders o

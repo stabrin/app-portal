@@ -8,6 +8,7 @@ import os
 import logging
 import traceback
 import psycopg2
+import psycopg2.extras
 import tempfile
 from psycopg2 import sql
 import bcrypt
@@ -163,8 +164,8 @@ def open_clients_management_window(parent_widget):
             temp_cert_file = None
             try:
                 with get_main_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur: # Используем RealDictCursor
+                        cur.execute("SELECT * FROM clients WHERE id = %s", (client_id,)) # Получаем всю строку
                         db_data = cur.fetchone()
                 
                 if not db_data: raise ValueError("Не удалось найти данные для подключения к БД клиента.")
@@ -213,18 +214,16 @@ def open_clients_management_window(parent_widget):
                         os.remove(temp_cert_file_check)
                 # --- КОНЕЦ НОВОГО БЛОКА ---
 
-                ssl_params = {}
-                if db_ssl_cert:
-                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
-                        fp.write(db_ssl_cert)
-                        temp_cert_file = fp.name
-                    ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
-                    logging.info(f"Используется временный SSL-сертификат: {temp_cert_file}")
-
-                logging.info(f"Подключаюсь к базе клиента '{db_name}' на {db_host}...")
-                client_conn = psycopg2.connect(host=db_host, port=db_port, dbname=db_name, user=db_user, password=db_password, **ssl_params)
-
-                if update_client_db_schema(client_conn):
+                # --- ИЗМЕНЕНИЕ: Используем get_client_db_connection из db_connector ---
+                from .db_connector import get_client_db_connection
+                user_info_for_client_db = {'client_db_config': db_data}
+                
+                logging.info(f"Подключаюсь к базе клиента '{db_data['db_name']}'...")
+                with get_client_db_connection(user_info_for_client_db) as client_conn:
+                    if not client_conn:
+                        raise ConnectionError("Не удалось установить соединение с базой данных клиента.")
+                    
+                    if update_client_db_schema(client_conn):
                     messagebox.showinfo("Успех", "Схема базы данных клиента успешно обновлена.", parent=editor_window)
                 else:
                     messagebox.showerror("Ошибка", "Произошла ошибка при обновлении схемы. Подробности в app.log.", parent=editor_window)
@@ -233,30 +232,21 @@ def open_clients_management_window(parent_widget):
                 error_details = traceback.format_exc()
                 logging.error(f"Не удалось выполнить инициализацию БД клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка", f"Не удалось выполнить инициализацию: {e}", parent=editor_window)
-            finally:
-                if client_conn: client_conn.close()
-                if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
+            # The context manager handles closing the connection.
+            # temp_cert_file cleanup is handled by _attempt_db_connection.
 
         def sync_user_with_client_db(user_login, password_hash, is_admin, is_active):
-            client_conn = None
-            temp_cert_file = None
             try:
                 with get_main_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("SELECT db_host, db_port, db_name, db_user, db_password, db_ssl_cert FROM clients WHERE id = %s", (client_id,))
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("SELECT * FROM clients WHERE id = %s", (client_id,))
                         db_data = cur.fetchone()
                 if not db_data: raise ValueError("Данные клиента не найдены.")
 
-                db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
-                ssl_params = {}
-                if db_ssl_cert:
-                    import tempfile
-                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
-                        fp.write(db_ssl_cert)
-                        temp_cert_file = fp.name
-                    ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
-
-                client_conn = psycopg2.connect(host=db_host, port=db_port, dbname=db_name, user=db_user, password=db_password, **ssl_params)
+                # --- ИЗМЕНЕНИЕ: Используем get_client_db_connection из db_connector ---
+                from .db_connector import get_client_db_connection
+                user_info_for_client_db = {'client_db_config': db_data}
+                with get_client_db_connection(user_info_for_client_db) as client_conn:
                 with client_conn.cursor() as cur:
                     query = sql.SQL("""
                         INSERT INTO users (username, password_hash, is_admin, is_active)
@@ -268,7 +258,7 @@ def open_clients_management_window(parent_widget):
                     """)
                     cur.execute(query, (user_login, password_hash, is_admin, is_active))
                 client_conn.commit()
-                logging.info(f"Пользователь '{user_login}' успешно синхронизирован с БД клиента '{db_name}'.")
+                logging.info(f"Пользователь '{user_login}' успешно синхронизирован с БД клиента '{db_data['db_name']}'.")
                 return True
             except Exception as e:
                 error_details = traceback.format_exc()
@@ -276,8 +266,7 @@ def open_clients_management_window(parent_widget):
                 logging.error(f"Ошибка синхронизации пользователя с БД клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка синхронизации", f"Не удалось обновить данные в базе клиента: {e}", parent=editor_window)
                 return False
-            finally:
-                if client_conn: client_conn.close()
+            finally: # No need for temp_cert_file cleanup here, it's handled by PrintingService._attempt_db_connection
                 if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
 
         def _run_ping_test():
@@ -617,7 +606,10 @@ def open_clients_management_window(parent_widget):
                             temp_cert_file = fp.name # Запоминаем имя файла
                         ssl_params = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file}
 
-                    client_conn = psycopg2.connect(host=data_to_save['db_host'], port=data_to_save['db_port'], dbname=data_to_save['db_name'], user=data_to_save['db_user'], password=data_to_save['db_password'], **ssl_params)
+                    # --- ИЗМЕНЕНИЕ: Используем get_client_db_connection из db_connector ---
+                    from .db_connector import get_client_db_connection
+                    user_info_for_client_db = {'client_db_config': data_to_save}
+                    with get_client_db_connection(user_info_for_client_db) as client_conn:
                     with client_conn.cursor() as cur:
                         # --- ИСПРАВЛЕНИЕ: Сохраняем все необходимые ключи, а не только последние три ---
                         settings_to_sync = [
@@ -636,8 +628,7 @@ def open_clients_management_window(parent_widget):
                 except Exception as sync_err:
                     logging.error(f"Ошибка синхронизации настроек с БД клиента: {sync_err}")
                     messagebox.showerror("Ошибка синхронизации", f"Не удалось обновить настройки в базе клиента: {sync_err}", parent=editor_window)
-                finally:
-                    if client_conn: client_conn.close()
+                finally: # temp_cert_file cleanup is handled by _attempt_db_connection if it was used.
                     if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
 
                 load_clients()

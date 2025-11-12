@@ -826,42 +826,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
 
     def _get_client_db_connection(self) -> psycopg2.extensions.connection:
         """Создает подключение к БД клиента."""
-        logging.debug("Создание подключения к БД клиента.")
-        db_config = self.user_info.get("client_db_config")
-        if not db_config or not all([db_config.get(k) for k in ['db_host', 'db_port', 'db_name', 'db_user', 'db_password']]):
-            logging.error(f"Неполная конфигурация БД: {db_config}")
-            raise ConnectionError("Неполная конфигурация базы данных клиента.")
-
-        conn_params = {
-            'host': db_config['db_host'],
-            'port': db_config['db_port'],
-            'dbname': db_config['db_name'],
-            'user': db_config['db_user'],
-            'password': db_config['db_password']
-        }
-
-        temp_cert_file = None
-        try:
-            if db_config.get('db_ssl_cert'):
-                logging.debug("Создание временного файла сертификата SSL.")
-                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
-                    fp.write(db_config['db_ssl_cert'].strip()) # ИСПРАВЛЕНИЕ: Убираем лишние пробелы/переносы
-                    temp_cert_file = fp.name
-                conn_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
-
-            conn = psycopg2.connect(**conn_params)
-            logging.info(f"Успешное подключение к БД: {conn_params['dbname']}")
-            return conn
-        except Exception as e:
-            logging.error(f"Ошибка подключения к БД: {e}")
-            raise
-        finally:
-            if temp_cert_file and os.path.exists(temp_cert_file):
-                try:
-                    os.remove(temp_cert_file)
-                    logging.debug(f"Временный файл сертификата {temp_cert_file} удален.")
-                except OSError as e:
-                    logging.warning(f"Не удалось удалить временный файл {temp_cert_file}: {e}")
+        # --- ИЗМЕНЕНИЕ: Используем новую централизованную функцию ---
+        from .db_connector import get_client_db_connection
+        logging.debug("LabelEditorWindow: Создание подключения к БД клиента через db_connector.")
+        # Здесь мы не можем использовать 'with', так как метод должен вернуть открытое соединение.
+        # Вызывающий код (внутри LabelEditorWindow) должен будет его закрыть.
+        return get_client_db_connection(self.user_info).__enter__()
 
     def _create_widgets(self) -> None:
         """Создает виджеты редактора."""
@@ -1871,6 +1841,7 @@ class ImageSelectionDialog(tk.Toplevel if tk else object):
 
     def _get_client_db_connection(self):
         # Используем метод из основного сервиса
+        logging.debug("ImageSelectionDialog: Создание подключения к БД клиента через PrintingService.")
         return PrintingService._get_client_db_connection(self.user_info)
 
     def _load_images(self):
