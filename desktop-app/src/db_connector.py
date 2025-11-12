@@ -59,7 +59,7 @@ def initialize_main_db_pool():
     """Инициализирует пул соединений для главной БД."""
     global main_db_pool
     if main_db_pool is None:
-        logging.info("Инициализация пула соединений для главной БД по жестко заданным параметрам...")
+        logging.debug("Проверка необходимости инициализации пула для главной БД...")
         # --- ИЗМЕНЕНИЕ: Возвращаемся к жестко заданным параметрам для главной БД, как и требовалось. ---
         db_params = {
             "dbname": "tilda_db",
@@ -71,7 +71,8 @@ def initialize_main_db_pool():
             "sslmode": 'verify-full',
             "sslrootcert": project_root_path(os.path.join('secrets', 'postgres', 'server.crt'))
         }
-        logging.debug(f"Параметры подключения к главной БД: host={db_params['host']}, port={db_params['port']}, dbname={db_params['dbname']}, user={db_params['user']}")
+        logging.info("Пул для главной БД не найден. Начинаю инициализацию...")
+        logging.debug(f"Параметры для пула главной БД: host={db_params['host']}, port={db_params['port']}, dbname={db_params['dbname']}, user={db_params['user']}")
         # minconn=1 (одно соединение всегда открыто), maxconn=5 (до 5 одновременных)
         main_db_pool = pool.ThreadedConnectionPool(1, 5, **db_params)
         logging.info("Пул соединений для главной БД успешно создан.")
@@ -82,7 +83,7 @@ def get_client_pool(client_id: int, db_config: Dict[str, Any]) -> pool.ThreadedC
     Логика выбора адреса (внешний/внутренний) выполняется один раз при создании пула.
     """
     if client_id not in client_db_pools:
-        logging.info(f"Пул для клиента ID {client_id} не найден. Создание нового пула...")
+        logging.info(f"Пул для клиента ID {client_id} не найден. Начинаю процедуру создания нового пула...")
         
         # --- ИЗМЕНЕНИЕ: Восстанавливаем правильный порядок проверки: сначала внешний (SSL), потом внутренний. ---
         conn_params = None
@@ -95,13 +96,15 @@ def get_client_pool(client_id: int, db_config: Dict[str, Any]) -> pool.ThreadedC
                 'connect_timeout': 3 # Короткий таймаут, чтобы не "висеть"
             }
             if all(external_params.values()):
-                logging.debug(f"Клиент ID {client_id}: Попытка подключения по внешнему адресу {external_params['host']}:{external_params['port']} с SSL.")
+                logging.debug(f"Клиент ID {client_id}: [Попытка 1/2] Проверка внешнего адреса: {external_params['host']}:{external_params['port']} с SSL.")
                 with _attempt_db_connection(external_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
                     if conn:
                         conn_params = {**external_params, 'sslmode': 'verify-full', 'sslrootcert': _get_cert_path(db_config.get('db_ssl_cert'))}
-                        logging.info(f"Для пула клиента ID {client_id} будут использованы внешние параметры с SSL.")
+                        logging.info(f"Клиент ID {client_id}: Внешний адрес доступен. Пул будет создан с использованием SSL.")
+                    else:
+                        logging.warning(f"Клиент ID {client_id}: Тестовое подключение по внешнему адресу не вернуло объект соединения.")
         except psycopg2.OperationalError as e:
-            logging.warning(f"Не удалось проверить внешний адрес для пула клиента ID {client_id}: {e}")
+            logging.warning(f"Клиент ID {client_id}: Не удалось подключиться по внешнему адресу. Ошибка: {e}")
 
         # 2. Попытка с внутренним адресом, если внешний не удался
         if not conn_params:
@@ -112,19 +115,22 @@ def get_client_pool(client_id: int, db_config: Dict[str, Any]) -> pool.ThreadedC
                     'connect_timeout': 5
                 }
                 if all(local_params.values()):
-                    logging.debug(f"Клиент ID {client_id}: Попытка подключения по внутреннему адресу {local_params['host']}:{local_params['port']} без SSL.")
+                    logging.debug(f"Клиент ID {client_id}: [Попытка 2/2] Проверка внутреннего адреса: {local_params['host']}:{local_params['port']} без SSL.")
                     with _attempt_db_connection(local_params, None, 'disable') as conn:
                         if conn:
                             conn_params = {**local_params, 'sslmode': 'disable'}
-                            logging.info(f"Для пула клиента ID {client_id} будут использованы внутренние параметры без SSL.")
+                            logging.info(f"Клиент ID {client_id}: Внутренний адрес доступен. Пул будет создан без использования SSL.")
+                        else:
+                            logging.warning(f"Клиент ID {client_id}: Тестовое подключение по внутреннему адресу не вернуло объект соединения.")
             except psycopg2.OperationalError as e:
-                logging.warning(f"Не удалось проверить внутренний адрес для пула клиента ID {client_id}: {e}")
+                logging.warning(f"Клиент ID {client_id}: Не удалось подключиться по внутреннему адресу. Ошибка: {e}")
 
         if not conn_params:
+            logging.error(f"Не удалось создать пул для клиента ID {client_id}. Ни один из адресов (внешний/внутренний) не ответил.")
             raise ConnectionError(f"Не удалось создать пул соединений для клиента ID {client_id}: ни один из адресов не доступен.")
 
         client_db_pools[client_id] = pool.ThreadedConnectionPool(1, 5, **conn_params)
-        logging.info(f"Пул соединений для клиента ID {client_id} успешно создан.")
+        logging.info(f"Пул соединений для клиента ID {client_id} успешно создан. Параметры: host={conn_params.get('host')}, port={conn_params.get('port')}, sslmode={conn_params.get('sslmode')}")
 
     return client_db_pools[client_id]
 
@@ -201,10 +207,12 @@ def get_client_db_connection_DEPRECATED(user_info: Dict[str, Any]) -> Optional[p
 @contextmanager
 def get_main_db_connection():
     """Контекстный менеджер, который берет соединение из пула для главной БД."""
+    logging.debug("Запрос соединения из пула главной БД...")
     if main_db_pool is None:
         initialize_main_db_pool()
     
     conn = main_db_pool.getconn()
+    logging.debug(f"Соединение {id(conn)} получено из пула главной БД.")
     try:
         yield conn
     finally:
@@ -213,6 +221,7 @@ def get_main_db_connection():
 @contextmanager
 def get_client_db_connection(user_info: Dict[str, Any]):
     """Контекстный менеджер, который берет соединение из пула для клиентской БД."""
+    logging.debug("Запрос соединения из пула клиентской БД...")
     db_config = user_info.get("client_db_config")
     if not db_config:
         raise ValueError("Конфигурация базы данных клиента не предоставлена.")
@@ -228,11 +237,14 @@ def get_client_db_connection(user_info: Dict[str, Any]):
 
     client_pool = get_client_pool(client_id, db_config)
     
+    logging.debug(f"Получение соединения из пула для клиента ID {client_id}...")
     conn = client_pool.getconn()
+    logging.debug(f"Соединение {id(conn)} получено из пула клиента ID {client_id}.")
     try:
         yield conn
     finally:
         client_pool.putconn(conn)
+        logging.debug(f"Соединение {id(conn)} возвращено в пул клиента ID {client_id}.")
 
 def _get_cert_path(ssl_cert_content: Optional[str]) -> Optional[str]:
     """Создает временный файл для сертификата и возвращает путь к нему."""

@@ -85,6 +85,7 @@ class StandaloneLoginWindow(tk.Tk):
         messagebox.showinfo("В разработке", "Функция входа по QR-коду находится в разработке.", parent=self)
         
     def _verify_login(self):
+        logging.debug("Начало процесса верификации логина.")
         login = self.login_entry.get()
         password = self.password_entry.get()
 
@@ -92,23 +93,12 @@ class StandaloneLoginWindow(tk.Tk):
             messagebox.showerror("Ошибка", "Логин и пароль не могут быть пустыми.", parent=self)
             return
 
-        # --- НОВАЯ ЛОГИКА: Заранее читаем содержимое SSL-сертификата ---
-        # Это необходимо, чтобы передать его в конфигурацию для QR-кодов.
-        ssl_cert_content = None
         try:
-            app_portal_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-            cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
-            if os.path.exists(cert_path):
-                with open(cert_path, 'r', encoding='utf-8') as f:
-                    ssl_cert_content = f.read()
-            else:
-                logging.warning(f"Файл сертификата не найден по пути: {cert_path}")
-        except Exception as e:
-            logging.error(f"Ошибка при чтении файла SSL-сертификата: {e}")
-
-        try:
+            logging.debug("Попытка подключения к главной базе данных для получения данных пользователя...")
             with get_main_db_connection() as conn:
+                logging.debug("Успешное подключение к главной базе данных.")
                 with conn.cursor() as cur:
+                    logging.debug("Выполнение запроса для получения данных пользователя, клиента и API.")
                     # --- ИЗМЕНЕНИЕ: Динамически проверяем наличие новых колонок ---
                     # Это предотвратит падение приложения, если схема БД еще не обновлена.
                     cur.execute("""
@@ -130,14 +120,17 @@ class StandaloneLoginWindow(tk.Tk):
                     """.format(local_server_fields)
                     cur.execute(query, (login,))
                     user_data = cur.fetchone()
+                    logging.debug(f"Запрос выполнен. Результат: {'Данные получены' if user_data else 'Пользователь не найден'}.")
 
             if user_data:
                 (user_name, hashed_password, user_role, client_id, db_name, db_host, 
                  db_port, db_user, db_password, db_ssl_cert, api_base_url, 
                  api_email, api_password, local_server_address, local_server_port) = user_data
 
+                logging.debug(f"Проверка пароля для пользователя '{login}'.")
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
+                    logging.info(f"Пароль верен. Пользователь '{login}' успешно аутентифицирован. Роль: {user_role}.")
 
                     # Если это администратор, добавляем всю информацию о его клиенте
                     # --- ИСПРАВЛЕНИЕ: Читаем SSL-сертификат из активного соединения ---
@@ -145,7 +138,7 @@ class StandaloneLoginWindow(tk.Tk):
                         # --- ПЕРЕМЕЩЕННЫЙ БЛОК: Получаем API токен только для администратора ---
                         try:
                             logging.info("Попытка получить токен API для администратора...")
-                            if api_base_url is None:
+                            if not api_base_url:
                                 logging.error("API_BASE_URL не задан для этого клиента в базе данных.")
                                 messagebox.showwarning("Предупреждение API", "URL для подключения к API не настроен для этого клиента.", parent=self)
                                 raise ValueError("API_BASE_URL не настроен.")
@@ -166,6 +159,7 @@ class StandaloneLoginWindow(tk.Tk):
                             logging.error(f"Аутентификация в API провалена: {e}")
                             messagebox.showwarning("Предупреждение API", f"Не удалось получить токен API: {e}", parent=self)
 
+                        logging.debug("Формирование конфигурации БД клиента для user_info.")
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
@@ -177,12 +171,15 @@ class StandaloneLoginWindow(tk.Tk):
                         user_info['client_api_config'] = {
                             "api_base_url": api_base_url, "api_email": api_email, "api_password": api_password
                         }
+                    logging.debug("Вызов on_complete_callback и уничтожение окна входа.")
                     self.on_complete_callback(user_info) # Сначала вызываем callback
                     self.destroy() # Затем уничтожаем окно
                 else:
+                    logging.warning(f"Неверный пароль для пользователя '{login}'.")
                     messagebox.showerror("Ошибка", "Неверный пароль.", parent=self)
                     # Не закрываем окно, даем пользователю еще попытку
             else:
+                logging.warning(f"Пользователь '{login}' не найден в базе данных или неактивен.")
                 messagebox.showerror("Ошибка", "Пользователь не найден или не имеет прав доступа.", parent=self)
 
         except Exception as e:
