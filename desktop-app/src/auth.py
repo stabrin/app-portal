@@ -109,17 +109,25 @@ class StandaloneLoginWindow(tk.Tk):
         try:
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
-                    # Изменяем запрос, чтобы через LEFT JOIN получить имя базы данных клиента
-                    # и все данные для подключения к ней.
+                    # --- ИЗМЕНЕНИЕ: Динамически проверяем наличие новых колонок ---
+                    # Это предотвратит падение приложения, если схема БД еще не обновлена.
+                    cur.execute("""
+                        SELECT column_name FROM information_schema.columns 
+                        WHERE table_name='clients' AND column_name='local_server_address';
+                    """)
+                    has_new_columns = cur.fetchone() is not None
+                    
+                    local_server_fields = "c.local_server_address, c.local_server_port" if has_new_columns else "NULL, NULL"
+
                     query = """
                         SELECT u.name, u.password_hash, u.role, u.client_id,
                                c.db_name, c.db_host, c.db_port, c.db_user, c.db_password, 
                                c.db_ssl_cert, c.api_base_url, c.api_email, c.api_password,
-                               c.local_server_address, c.local_server_port
+                               {}
                         FROM users u
                         LEFT JOIN clients c ON u.client_id = c.id
                         WHERE u.login = %s AND u.is_active = TRUE AND (u.role = 'супервизор' OR u.role = 'администратор')
-                    """
+                    """.format(local_server_fields)
                     cur.execute(query, (login,))
                     user_data = cur.fetchone()
 

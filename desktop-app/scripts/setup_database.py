@@ -21,11 +21,16 @@ logging.basicConfig(
 # Добавляем папку 'src' в sys.path, чтобы импортировать SshTunnelProcess
 import sys
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-src_path = os.path.join(project_root, 'src')
+src_path = os.path.join(project_root, 'src') # Добавляем src в путь
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 # Загружаем переменные окружения из файла .env в корне проекта
 dotenv_path = os.path.join(project_root, '..', '.env') # Ищем .env в корне app-portal
 load_dotenv(dotenv_path=dotenv_path)
+
+# --- ИЗМЕНЕНИЕ: Импортируем функцию подключения из db_connector ---
+from db_connector import get_main_db_connection
 
 # --- ЧТЕНИЕ КОНФИГУРАЦИИ ---
 
@@ -42,50 +47,11 @@ def initialize_main_database():
     а затем создает/обновляет в ней необходимую схему (таблицы, типы).
     """
     logger.info("--- Запуск функции инициализации главной базы данных ---")
-    logger.info(f"Попытка подключения к серверу {DB_HOST} по SSL...")
 
     try:
-        app_portal_root = os.path.abspath(os.path.join(project_root, '..'))
-        cert_path = os.path.join(app_portal_root, 'secrets', 'postgres', 'server.crt')
-        if not os.path.exists(cert_path):
-            raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
-
-        if not MAIN_DB_NAME:
-            raise ValueError("Переменная DB_NAME не задана в .env файле.")
-
-        # --- Этап 1: Проверка существования базы данных ---
-        logger.info(f"Подключаюсь к системной базе 'postgres' для проверки существования '{MAIN_DB_NAME}'...")
-        
-        try:
-            with psycopg2.connect(
-                host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname='postgres',
-                sslmode='verify-full', sslrootcert=cert_path
-            ) as conn_system:
-                conn_system.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
-                with conn_system.cursor() as cur:
-                    cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (MAIN_DB_NAME,))
-                    if not cur.fetchone():
-                        logger.error(f"База данных '{MAIN_DB_NAME}' не найдена.")
-                        error_message = (
-                            f"База данных '{MAIN_DB_NAME}' не найдена на сервере {DB_HOST}.\n\n"
-                            "Пожалуйста, создайте ее и соответствующего пользователя вручную.\n\n"
-                            "Примерные SQL-команды:\n"
-                            f"CREATE DATABASE {MAIN_DB_NAME};\n"
-                            f"CREATE USER {DB_USER} WITH PASSWORD '{DB_PASSWORD}';\n"
-                            f"GRANT ALL PRIVILEGES ON DATABASE {MAIN_DB_NAME} TO {DB_USER};"
-                        )
-                        return False, error_message
-        except psycopg2.OperationalError as e:
-            logger.error(f"Ошибка подключения к серверу PostgreSQL: {e}")
-            return False, f"Не удалось подключиться к серверу PostgreSQL для проверки базы данных. Убедитесь, что сервер доступен и учетные данные верны.\n\nОшибка: {e}"
-
-        # --- Этап 2: Создание таблиц в новой базе данных ---
-        logger.info(f"Подключаюсь к '{MAIN_DB_NAME}' для создания таблиц...")
-
-        with psycopg2.connect(
-            host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASSWORD, dbname=MAIN_DB_NAME,
-            sslmode='verify-full', sslrootcert=cert_path
-        ) as conn_main_db:
+        # --- ИЗМЕНЕНИЕ: Используем единый способ подключения ---
+        logger.info("Подключаюсь к главной БД для создания/обновления таблиц...")
+        with get_main_db_connection() as conn_main_db:
             conn_main_db.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
             with conn_main_db.cursor() as cur:
                 # Создаем перечисляемый тип для ролей пользователей
