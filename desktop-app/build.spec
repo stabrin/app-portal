@@ -4,7 +4,6 @@
 # Он указывает, как правильно собрать ваше приложение в исполняемый файл.
 
 import os
-import sys
 import pkg_resources
 
 # --- Шаг 1: Находим DLL для pylibdmtx ---
@@ -19,63 +18,50 @@ except (pkg_resources.DistributionNotFound, KeyError):
         "Убедитесь, что pylibdmtx установлена корректно (`pip install pylibdmtx`)."
     )
 
-# Используем переменную SPECPATH, предоставляемую PyInstaller, для надежного определения пути.
-spec_dir = os.path.dirname(SPECPATH)
-
 # --- Шаг 2: Анализ зависимостей ---
 # PyInstaller анализирует ваш код, начиная с auth.py, и находит все импорты.
 a = Analysis(
-    # --- ИСПРАВЛЕНИЕ: Указываем только точку входа. ---
-    # Используем новый скрипт-загрузчик, который правильно импортирует пакет src.
     ['run.py'],
-    pathex=[spec_dir], # Добавляем путь к spec-файлу, чтобы PyInstaller нашел пакет 'src'.
+    pathex=[],
     # Явно указываем, что нужно включить DLL. Она будет лежать в корневой папке приложения.
     binaries=[(libdmtx_dll_path, '.')],
     # Указываем, какие файлы данных нужно скопировать.
-    # ('путь/откуда', 'путь/куда_в_сборке'). Пути также относительны spec-файла.
+    # ('путь/откуда', 'путь/куда_в_сборке').
+    # Копируем всю папку secrets в корень сборки.
     datas=[
-        ('../secrets/postgres/server.crt', 'secrets/postgres')
+        ('../secrets', 'secrets')
     ],
     # Иногда PyInstaller "пропускает" некоторые импорты.
     # Здесь мы явно указываем их, чтобы избежать ошибок во время выполнения.
     hiddenimports=[
         'pylibdmtx.pylibdmtx',
-        'babel.numbers' # Часто требуется для других библиотек
+        'babel.numbers',
+        'pytz', # Для работы с часовыми поясами
+        'dateutil', # Для работы с датами
+        'psycopg2.extras' # Явно включаем extras для psycopg2
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=None,
-    noarchive=False,
 )
 
 # --- Шаг 3: Создание архива приложения ---
-pyz = PYZ(a.pure, a.zipped_data, cipher=None)
+pyz = PYZ(a.pure)
 
 # --- Шаг 4: Создание исполняемого файла ---
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
-    name='TildaKodApp', # Имя вашего .exe файла
+    name='TildaKod', # Имя вашего .exe файла
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
     runtime_tmpdir=None,
-    console=False, # False - для GUI-приложений, чтобы не открывалась черная консоль
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    console=False, # False - для GUI-приложений, чтобы не открывалась черная консоль. Установите в True для отладки.
+    icon='../assets/icon.ico' # Путь к иконке приложения
 )
 
 # --- Шаг 5: Сборка итоговой папки ---
@@ -83,10 +69,9 @@ exe = EXE(
 coll = COLLECT(
     exe,
     a.binaries,
-    a.zipfiles,
     a.datas,
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='TildaKodApp', # Название итоговой папки
+    name='TildaKod', # Название итоговой папки
 )

@@ -27,14 +27,13 @@ def project_root_path(relative_path):
     Возвращает абсолютный путь к ресурсу относительно корня всего проекта (app-portal).
     Используется для доступа к общим ресурсам, таким как папка 'secrets'.
     """
+    # --- ИСПРАВЛЕНИЕ: Упрощаем логику для надежной работы в скомпилированном приложении ---
     try:
-        # В скомпилированном приложении _MEIPASS указывает на временную папку.
-        # Нам нужно подняться на два уровня, чтобы достичь корня проекта.
-        base_path = os.path.abspath(os.path.join(sys._MEIPASS, '..', '..'))
+        # В скомпилированном приложении _MEIPASS - это путь к временной папке с ресурсами.
+        base_path = sys._MEIPASS
     except AttributeError:
-        # В режиме разработки поднимаемся на два уровня от папки 'src'
+        # В режиме разработки, корень проекта - это две папки вверх от текущего файла (src/utils.py)
         base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-
     return os.path.join(base_path, relative_path)
 
 def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_column: str):
