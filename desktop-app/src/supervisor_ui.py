@@ -250,11 +250,12 @@ def open_clients_management_window(parent_widget):
                 if db_data:
                     db_data['id'] = client_id
                 if not db_data: raise ValueError("Данные клиента не найдены.")
-
-                # --- ИЗМЕНЕНИЕ: Используем get_client_db_connection из db_connector ---
+                
+                # --- ИСПРАВЛЕНИЕ: Используем централизованную функцию get_client_db_connection, которая содержит правильную логику ---
                 from .db_connector import get_client_db_connection
-                user_info_for_client_db = {'client_db_config': db_data}
-                with get_client_db_connection(user_info_for_client_db) as client_conn:
+                
+                # Просто вызываем get_client_db_connection, он сам выберет правильный способ
+                with get_client_db_connection({'client_db_config': db_data}) as client_conn:
                     with client_conn.cursor() as cur:
                         query = sql.SQL("""
                             INSERT INTO users (username, password_hash, is_admin, is_active)
@@ -270,7 +271,6 @@ def open_clients_management_window(parent_widget):
                 return True
             except Exception as e:
                 error_details = traceback.format_exc()
-                if client_conn: client_conn.rollback()
                 logging.error(f"Ошибка синхронизации пользователя с БД клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка синхронизации", f"Не удалось обновить данные в базе клиента: {e}", parent=editor_window)
                 return False
@@ -300,7 +300,7 @@ def open_clients_management_window(parent_widget):
                 # 1. Собираем данные из полей ввода, как это делает get_client_pool
                 db_config_from_ui = {
                     'db_host': entries['DB Хост'].get(),
-                    'db_port': int(entries['DB Порт'].get() or 5432),
+                    'db_port': entries['DB Порт'].get() or 5432,
                     'db_name': entries['DB Имя'].get(),
                     'db_user': entries['DB Пользователь'].get(),
                     'db_password': entries['DB Пароль'].get(),
@@ -314,18 +314,32 @@ def open_clients_management_window(parent_widget):
 
                 # Попытка 1: Внешний адрес с SSL
                 add_log(f"Шаг 1: Попытка подключения по внешнему адресу {db_config_from_ui['db_host']}:{db_config_from_ui['db_port']} с SSL...")
+                external_params = {
+                    'host': db_config_from_ui.get('db_host'),
+                    'port': int(db_config_from_ui.get('db_port')),
+                    'dbname': db_config_from_ui.get('db_name'),
+                    'user': db_config_from_ui.get('db_user'),
+                    'password': db_config_from_ui.get('db_password')
+                }
                 try:
-                    with _attempt_db_connection(db_config_from_ui, db_config_from_ui['db_ssl_cert'], 'verify-full') as conn:
+                    with _attempt_db_connection(external_params, db_config_from_ui['db_ssl_cert'], 'verify-full') as conn:
                         if conn:
                             add_log("УСПЕХ: Подключение по внешнему адресу с SSL прошло успешно!", "SUCCESS")
                             return
                 except Exception as e:
                     add_log(f"ОШИБКА: Не удалось подключиться по внешнему адресу. {e}", "ERROR")
 
-                # Попытка 2: Внутренний адрес без SSL
+                # Попытка 2: Внутренний адрес без SSL, если внешний не удался
                 add_log(f"Шаг 2: Попытка подключения по внутреннему адресу {db_config_from_ui['local_server_address']}:{db_config_from_ui['local_server_port']} без SSL...")
+                local_params = {
+                    'host': db_config_from_ui.get('local_server_address'),
+                    'port': int(db_config_from_ui.get('local_server_port')),
+                    'dbname': db_config_from_ui.get('db_name'),
+                    'user': db_config_from_ui.get('db_user'),
+                    'password': db_config_from_ui.get('db_password')
+                }
                 try:
-                    with _attempt_db_connection(db_config_from_ui, None, 'disable') as conn:
+                    with _attempt_db_connection(local_params, None, 'disable') as conn:
                         if conn:
                             add_log("УСПЕХ: Подключение по внутреннему адресу без SSL прошло успешно!", "SUCCESS")
                             return
