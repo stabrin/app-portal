@@ -1246,7 +1246,9 @@ class NotificationEditorDialog(tk.Toplevel):
             messagebox.showerror("Ошибка", f"Не удалось сохранить детализацию: {e}", parent=self)
 
     def _on_client_combo_click(self, event):
-        if not hasattr(self, 'add_client_button'):
+        # --- ИСПРАВЛЕНИЕ: Показываем кнопку "Добавить нового" только для локального справочника ---
+        # Это предотвращает появление кнопки при работе с клиентами из API ДМ.Код.
+        if self.client_source == 'local' and not hasattr(self, 'add_client_button'):
             self.add_client_button = ttk.Button(self.client_combo.master, text="Добавить нового", command=self._add_new_client)
             self.add_client_button.pack(side=tk.RIGHT, padx=5)
 
