@@ -236,8 +236,6 @@ def open_clients_management_window(parent_widget):
                 error_details = traceback.format_exc()
                 logging.error(f"Не удалось выполнить инициализацию БД клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка", f"Не удалось выполнить инициализацию: {e}", parent=editor_window)
-            # The context manager handles closing the connection.
-            # temp_cert_file cleanup is handled by _attempt_db_connection.
 
         def sync_user_with_client_db(user_login, password_hash, is_admin, is_active):
             try:
@@ -274,8 +272,6 @@ def open_clients_management_window(parent_widget):
                 logging.error(f"Ошибка синхронизации пользователя с БД клиента: {e}\n{error_details}")
                 messagebox.showerror("Ошибка синхронизации", f"Не удалось обновить данные в базе клиента: {e}", parent=editor_window)
                 return False
-            finally: # No need for temp_cert_file cleanup here, it's handled by PrintingService._attempt_db_connection
-                if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
 
         def _run_ping_test():
             """Выполняет тестовое подключение к БД клиента, используя ту же логику, что и приложение."""
