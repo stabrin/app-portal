@@ -169,7 +169,7 @@ class StandaloneLoginWindow(tk.Tk):
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
-                            "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert,
+                            "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert, "id": client_id,
                             "local_server_address": local_server_address, 
                             "local_server_port": local_server_port
                         }
