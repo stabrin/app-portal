@@ -26,12 +26,15 @@ def run_db_setup():
     try:
         logging.debug("Запуск функции run_db_setup для инициализации главной БД.")
         # --- ИЗМЕНЕНИЕ: Запускаем скрипт через subprocess ---
-        script_path = resource_path(os.path.join('scripts', 'setup_database.py'))
-        # Запускаем с помощью python.exe, чтобы гарантировать правильное окружение
-        result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, check=False, encoding='utf-8')
+        script_path = resource_path(os.path.join('scripts', 'setup_database.py')) # type: ignore
+        # --- ИСПРАВЛЕНИЕ: Добавляем errors='replace' для обработки ошибок кодировки в Windows ---
+        result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, check=False, encoding='utf-8', errors='replace')
         
         success = result.returncode == 0
-        message = result.stdout.strip() or result.stderr.strip()
+        # --- ИСПРАВЛЕНИЕ: Проверяем, что stdout/stderr не None, прежде чем вызывать strip() ---
+        stdout_msg = result.stdout.strip() if result.stdout else ""
+        stderr_msg = result.stderr.strip() if result.stderr else ""
+        message = stdout_msg or stderr_msg
 
         if success:
             logging.info(f"Результат инициализации БД: {message}")

@@ -6,14 +6,18 @@ import traceback
 import psycopg2
 from psycopg2.extensions import ISOLATION_LEVEL_AUTOCOMMIT
 from dotenv import load_dotenv
+import io
 
 # Настраиваем логгер для этого модуля
 logger = logging.getLogger(__name__)
+# --- ИЗМЕНЕНИЕ: Направляем логгер в строковый буфер, а не в консоль ---
+log_stream = io.StringIO()
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - (setup_database) - %(message)s',
     handlers=[
-        logging.StreamHandler() # Вывод в консоль, чтобы видеть в черном окне
+        # logging.StreamHandler(), # Убираем вывод в консоль, чтобы избежать проблем с кодировкой
+        logging.StreamHandler(log_stream) # Пишем логи в буфер
     ]
 )
 
@@ -109,6 +113,12 @@ def initialize_main_database():
 
 if __name__ == "__main__":
     success, message = initialize_main_database()
-    print(message) # Выводим сообщение в stdout, чтобы subprocess мог его перехватить
+    # --- ИСПРАВЛЕНИЕ: Явно кодируем вывод в UTF-8 и пишем в бинарный stdout ---
+    # Это решает все проблемы с кодировками в Windows.
+    full_log = log_stream.getvalue()
+    final_output = f"{full_log}\n{message}"
+    sys.stdout.buffer.write(final_output.encode('utf-8'))
+    sys.stdout.flush()
+
     if not success:
         sys.exit(1)
