@@ -1829,6 +1829,10 @@ class ApiIntegrationDialog(tk.Toplevel):
                             self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
                             time.sleep(20)
                     conn.commit()
+                # --- ИСПРАВЛЕНИЕ: Прерываем выполнение после обработки 'delta' ---
+                # Это предотвращает "проваливание" в блок для 'dmkod', если статус заказа 'delta'.
+                # Также это решает проблему, когда задержка из этого блока применялась к 'dmkod'.
+                return
 
             elif order_status == 'dmkod':
                 # Логика для статуса 'dmkod'
