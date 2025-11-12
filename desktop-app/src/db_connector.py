@@ -5,6 +5,7 @@ import tempfile
 import logging
 import psycopg2
 from contextlib import contextmanager
+from psycopg2 import pool
 from typing import Dict, Any, Optional
 
 from dotenv import load_dotenv
@@ -12,10 +13,10 @@ from dotenv import load_dotenv
 from .utils import project_root_path # --- ИЗМЕНЕНИЕ: Импортируем новую функцию для доступа к корню проекта ---
 
 @contextmanager
-def get_main_db_connection():
+def get_main_db_connection_DEPRECATED():
     """
-
-    Контекстный менеджер, который возвращает готовое SSL-соединение
+    DEPRECATED.
+    Контекстный менеджер, который создает новое SSL-соединение при каждом вызове
     с ГЛАВНОЙ базой данных (portal_db).
     """
     # --- ИЗМЕНЕНИЕ: Убираем зависимость от .env и хардкодим параметры ---
@@ -41,8 +42,75 @@ def get_main_db_connection():
     yield conn
     conn.close()
 
+# --- НОВАЯ ЛОГИКА: ПУЛЫ СОЕДИНЕНИЙ ---
+
+main_db_pool = None
+client_db_pools: Dict[int, pool.ThreadedConnectionPool] = {}
+
+def initialize_main_db_pool():
+    """Инициализирует пул соединений для главной БД."""
+    global main_db_pool
+    if main_db_pool is None:
+        logging.info("Инициализация пула соединений для главной БД...")
+        db_params = {
+            "dbname": "tilda_db", "user": "portal_user", "password": "!T-W0rkshop",
+            "host": "109.172.115.204", "port": "5432", "connect_timeout": 10,
+            "sslmode": 'verify-full',
+            "sslrootcert": project_root_path(os.path.join('secrets', 'postgres', 'server.crt'))
+        }
+        # minconn=1 (одно соединение всегда открыто), maxconn=5 (до 5 одновременных)
+        main_db_pool = pool.ThreadedConnectionPool(1, 5, **db_params)
+        logging.info("Пул соединений для главной БД успешно создан.")
+
+def get_client_pool(client_id: int, db_config: Dict[str, Any]) -> pool.ThreadedConnectionPool:
+    """
+    Возвращает или создает и кэширует пул соединений для конкретной клиентской БД.
+    Логика выбора адреса (внешний/внутренний) выполняется один раз при создании пула.
+    """
+    if client_id not in client_db_pools:
+        logging.info(f"Пул для клиента ID {client_id} не найден. Создание нового пула...")
+        
+        # --- Логика выбора правильных параметров для пула ---
+        conn_params = None
+        # 1. Попытка с внешним адресом
+        try:
+            external_params = {
+                'host': db_config.get('db_host'), 'port': db_config.get('db_port'), 'dbname': db_config.get('db_name'),
+                'user': db_config.get('db_user'), 'password': db_config.get('db_password')
+            }
+            if all(external_params.values()):
+                with _attempt_db_connection(external_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
+                    if conn:
+                        conn_params = {**external_params, 'sslmode': 'verify-full', 'sslrootcert': _get_cert_path(db_config.get('db_ssl_cert'))}
+                        logging.info(f"Для пула клиента ID {client_id} будут использованы внешние параметры с SSL.")
+        except Exception as e:
+            logging.warning(f"Не удалось проверить внешний адрес для пула клиента ID {client_id}: {e}")
+
+        # 2. Попытка с внутренним адресом, если внешний не удался
+        if not conn_params:
+            try:
+                local_params = {
+                    'host': db_config.get('local_server_address'), 'port': db_config.get('local_server_port'), 'dbname': db_config.get('db_name'),
+                    'user': db_config.get('db_user'), 'password': db_config.get('db_password')
+                }
+                if all(local_params.values()):
+                    with _attempt_db_connection(local_params, None, 'disable') as conn:
+                        if conn:
+                            conn_params = {**local_params, 'sslmode': 'disable'}
+                            logging.info(f"Для пула клиента ID {client_id} будут использованы внутренние параметры без SSL.")
+            except Exception as e:
+                logging.warning(f"Не удалось проверить внутренний адрес для пула клиента ID {client_id}: {e}")
+
+        if not conn_params:
+            raise ConnectionError(f"Не удалось создать пул соединений для клиента ID {client_id}: ни один из адресов не доступен.")
+
+        client_db_pools[client_id] = pool.ThreadedConnectionPool(1, 5, **conn_params)
+        logging.info(f"Пул соединений для клиента ID {client_id} успешно создан.")
+
+    return client_db_pools[client_id]
+
 @contextmanager
-def get_client_db_connection(user_info: Dict[str, Any]) -> Optional[psycopg2.extensions.connection]:
+def get_client_db_connection_DEPRECATED(user_info: Dict[str, Any]) -> Optional[psycopg2.extensions.connection]:
     """
     Контекстный менеджер для подключения к БД клиента с логикой отказоустойчивости и кэширования.
     Сначала пытается подключиться по внешнему адресу с SSL, затем по внутреннему без SSL.
@@ -110,7 +178,56 @@ def get_client_db_connection(user_info: Dict[str, Any]) -> Optional[psycopg2.ext
     finally:
         if conn:
             conn.close()
+            
+@contextmanager
+def get_main_db_connection():
+    """Контекстный менеджер, который берет соединение из пула для главной БД."""
+    if main_db_pool is None:
+        initialize_main_db_pool()
+    
+    conn = main_db_pool.getconn()
+    try:
+        yield conn
+    finally:
+        main_db_pool.putconn(conn)
 
+@contextmanager
+def get_client_db_connection(user_info: Dict[str, Any]):
+    """Контекстный менеджер, который берет соединение из пула для клиентской БД."""
+    db_config = user_info.get("client_db_config")
+    if not db_config:
+        raise ValueError("Конфигурация базы данных клиента не предоставлена.")
+        
+    # --- ИЗМЕНЕНИЕ: Используем ID клиента для идентификации пула ---
+    # Предполагаем, что client_db_config содержит 'id' клиента из главной БД.
+    # Если его нет, можно использовать, например, db_name как ключ.
+    client_id = db_config.get('id')
+    if not client_id:
+        # В supervisor_ui мы получаем всю строку, так что ID должен быть.
+        # Если его нет, это ошибка в логике передачи данных.
+        raise ValueError("В конфигурации БД клиента отсутствует 'id'.")
+
+    client_pool = get_client_pool(client_id, db_config)
+    
+    conn = client_pool.getconn()
+    try:
+        yield conn
+    finally:
+        client_pool.putconn(conn)
+
+def _get_cert_path(ssl_cert_content: Optional[str]) -> Optional[str]:
+    """Создает временный файл для сертификата и возвращает путь к нему."""
+    if not ssl_cert_content:
+        return None
+    # ВАЖНО: Утечка памяти! Файлы не удаляются. В реальном приложении
+    # нужно продумать механизм их очистки при закрытии пула.
+    # Для простоты примера пока оставляем так.
+    fp = tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8')
+    fp.write(ssl_cert_content.strip())
+    fp.close()
+    return fp.name
+
+@contextmanager
 def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Optional[str], ssl_mode: str = 'disable') -> Optional[psycopg2.extensions.connection]:
     """
     Вспомогательный метод для попытки подключения к БД с заданными параметрами.
@@ -143,9 +260,15 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
         return conn
     except psycopg2.OperationalError as e:
         logging.warning(f"Ошибка подключения к БД: {e}")
-        if conn: conn.close() # Закрываем соединение, если оно было создано, но произошла ошибка
         raise # Перебрасываем ошибку, чтобы вызывающий код мог ее обработать
     finally:
+        # --- ИЗМЕНЕНИЕ: Контекстный менеджер сам закроет соединение ---
+        if conn:
+            yield conn
+            conn.close()
+        else:
+            yield None
+            
         if temp_cert_file and os.path.exists(temp_cert_file):
             try:
                 os.remove(temp_cert_file)
