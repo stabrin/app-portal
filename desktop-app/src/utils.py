@@ -15,9 +15,10 @@ def resource_path(relative_path):
         # PyInstaller создает временную папку и сохраняет путь в _MEIPASS
         base_path = sys._MEIPASS
     except AttributeError:
-        # Если мы не в скомпилированном приложении, используем путь относительно
-        # корня проекта (app-portal), чтобы найти папку secrets.
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        # --- ИЗМЕНЕНИЕ: Если мы не в скомпилированном приложении, базовый путь - это корень 'desktop-app' ---
+        # os.path.dirname(__file__) -> .../desktop-app/src
+        # os.path.join(..., '..') -> .../desktop-app
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
     return os.path.join(base_path, relative_path)
 
