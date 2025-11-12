@@ -1,6 +1,7 @@
 # src/db_connector.py
 
 import os
+import sys
 import tempfile
 import logging
 import psycopg2
@@ -11,6 +12,13 @@ from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 
 from .utils import project_root_path # --- ИЗМЕНЕНИЕ: Импортируем новую функцию для доступа к корню проекта ---
+
+# --- ИСПРАВЛЕНИЕ: Загружаем переменные окружения в самом начале ---
+# Это гарантирует, что DB_HOST и другие будут доступны.
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+dotenv_path = os.path.join(project_root, '.env')
+if os.path.exists(dotenv_path):
+    load_dotenv(dotenv_path=dotenv_path)
 
 @contextmanager
 def get_main_db_connection_DEPRECATED():
@@ -52,13 +60,24 @@ def initialize_main_db_pool():
     global main_db_pool
     if main_db_pool is None:
         logging.info("Инициализация пула соединений для главной БД...")
+        # --- ИСПРАВЛЕНИЕ: Читаем параметры главной БД из переменных окружения ---
+        main_db_host = os.getenv("MAIN_DB_HOST", "109.172.115.204") # Используем дефолтное значение, если не задано
+        main_db_port = os.getenv("MAIN_DB_PORT", "5432")
+        main_db_name = os.getenv("MAIN_DB_NAME", "tilda_db")
+        main_db_user = os.getenv("MAIN_DB_USER", "portal_user")
+        main_db_password = os.getenv("MAIN_DB_PASSWORD", "!T-W0rkshop")
+
         db_params = {
-            "dbname": "tilda_db", "user": "portal_user", "password": "!T-W0rkshop",
-            "host": "109.172.115.204", "port": "5432", "connect_timeout": 10,
+            "dbname": main_db_name,
+            "user": main_db_user,
+            "password": main_db_password,
+            "host": main_db_host,
+            "port": main_db_port,
+            "connect_timeout": 10,
             "sslmode": 'verify-full',
             "sslrootcert": project_root_path(os.path.join('secrets', 'postgres', 'server.crt'))
         }
-        # minconn=1 (одно соединение всегда открыто), maxconn=5 (до 5 одновременных)
+        logging.debug(f"Параметры подключения к главной БД: host={db_params['host']}, port={db_params['port']}, dbname={db_params['dbname']}, user={db_params['user']}")
         main_db_pool = pool.ThreadedConnectionPool(1, 5, **db_params)
         logging.info("Пул соединений для главной БД успешно создан.")
 
@@ -257,6 +276,7 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
             return None
 
         conn = psycopg2.connect(**conn_params)
+        logging.debug(f"Успешное подключение к БД: host={conn_params['host']}, port={conn_params['port']}, dbname={conn_params['dbname']}")
         return conn
     except psycopg2.OperationalError as e:
         logging.warning(f"Ошибка подключения к БД: {e}")
