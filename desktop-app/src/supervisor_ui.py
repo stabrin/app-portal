@@ -522,14 +522,22 @@ def open_clients_management_window(parent_widget):
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password FROM clients WHERE id = %s", (client_id,))
-                        # --- ИЗМЕНЕНИЕ: Запрашиваем новые поля ---
+                        # --- ИСПРАВЛЕНИЕ: Динамически проверяем наличие новых колонок ---
                         cur.execute("""
-                            SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, 
-                                   api_base_url, api_email, api_password, 
-                                   local_server_address, local_server_port 
+                            SELECT column_name FROM information_schema.columns 
+                            WHERE table_name='clients' AND column_name='local_server_address';
+                        """)
+                        has_new_columns = cur.fetchone() is not None
+
+                        if has_new_columns:
+                            fields_to_select = "name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password, local_server_address, local_server_port"
+                        else:
+                            fields_to_select = "name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password, NULL, NULL"
+
+                        cur.execute("""
+                            SELECT {}
                             FROM clients WHERE id = %s
-                        """, (client_id,))
+                        """.format(fields_to_select), (client_id,))
                         client_data = cur.fetchone()
                 if client_data:
                     # ИСПРАВЛЕНИЕ: Используем числовые индексы для доступа к данным из кортежа client_data

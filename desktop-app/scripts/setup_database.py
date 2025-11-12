@@ -17,12 +17,15 @@ logging.basicConfig(
     ]
 )
 
-# --- ИЗМЕНЕНИЕ: Убираем манипуляции с sys.path, так как скрипт теперь запускается в контексте приложения ---
+# --- ИСПРАВЛЕНИЕ: Добавляем корень проекта в sys.path, чтобы импорт 'src' работал при запуске через subprocess ---
 import sys
+project_root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root_path not in sys.path:
+    sys.path.insert(0, project_root_path)
 
 # Загружаем переменные окружения из файла .env в корне проекта
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-dotenv_path = os.path.join(project_root, '..', '.env') # Ищем .env в корне app-portal
+project_root_for_env = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+dotenv_path = os.path.join(project_root_for_env, '..', '.env') # Ищем .env в корне app-portal
 load_dotenv(dotenv_path=dotenv_path)
 
 from src.db_connector import get_main_db_connection
