@@ -59,25 +59,20 @@ def initialize_main_db_pool():
     """Инициализирует пул соединений для главной БД."""
     global main_db_pool
     if main_db_pool is None:
-        logging.info("Инициализация пула соединений для главной БД...")
-        # --- ИСПРАВЛЕНИЕ: Читаем параметры главной БД из переменных окружения ---
-        main_db_host = os.getenv("MAIN_DB_HOST", "109.172.115.204") # Используем дефолтное значение, если не задано
-        main_db_port = os.getenv("MAIN_DB_PORT", "5432")
-        main_db_name = os.getenv("MAIN_DB_NAME", "tilda_db")
-        main_db_user = os.getenv("MAIN_DB_USER", "portal_user")
-        main_db_password = os.getenv("MAIN_DB_PASSWORD", "!T-W0rkshop")
-
+        logging.info("Инициализация пула соединений для главной БД по жестко заданным параметрам...")
+        # --- ИЗМЕНЕНИЕ: Возвращаемся к жестко заданным параметрам для главной БД, как и требовалось. ---
         db_params = {
-            "dbname": main_db_name,
-            "user": main_db_user,
-            "password": main_db_password,
-            "host": main_db_host,
-            "port": main_db_port,
+            "dbname": "tilda_db",
+            "user": "portal_user",
+            "password": "!T-W0rkshop",
+            "host": "109.172.115.204",
+            "port": "5432",
             "connect_timeout": 10,
             "sslmode": 'verify-full',
             "sslrootcert": project_root_path(os.path.join('secrets', 'postgres', 'server.crt'))
         }
         logging.debug(f"Параметры подключения к главной БД: host={db_params['host']}, port={db_params['port']}, dbname={db_params['dbname']}, user={db_params['user']}")
+        # minconn=1 (одно соединение всегда открыто), maxconn=5 (до 5 одновременных)
         main_db_pool = pool.ThreadedConnectionPool(1, 5, **db_params)
         logging.info("Пул соединений для главной БД успешно создан.")
 
@@ -89,20 +84,23 @@ def get_client_pool(client_id: int, db_config: Dict[str, Any]) -> pool.ThreadedC
     if client_id not in client_db_pools:
         logging.info(f"Пул для клиента ID {client_id} не найден. Создание нового пула...")
         
-        # --- Логика выбора правильных параметров для пула ---
+        # --- ИЗМЕНЕНИЕ: Восстанавливаем правильный порядок проверки: сначала внешний (SSL), потом внутренний. ---
         conn_params = None
-        # 1. Попытка с внешним адресом
+
+        # 1. Попытка с внешним адресом (SSL)
         try:
             external_params = {
                 'host': db_config.get('db_host'), 'port': db_config.get('db_port'), 'dbname': db_config.get('db_name'),
-                'user': db_config.get('db_user'), 'password': db_config.get('db_password')
+                'user': db_config.get('db_user'), 'password': db_config.get('db_password'),
+                'connect_timeout': 3 # Короткий таймаут, чтобы не "висеть"
             }
             if all(external_params.values()):
+                logging.debug(f"Клиент ID {client_id}: Попытка подключения по внешнему адресу {external_params['host']}:{external_params['port']} с SSL.")
                 with _attempt_db_connection(external_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
                     if conn:
                         conn_params = {**external_params, 'sslmode': 'verify-full', 'sslrootcert': _get_cert_path(db_config.get('db_ssl_cert'))}
                         logging.info(f"Для пула клиента ID {client_id} будут использованы внешние параметры с SSL.")
-        except Exception as e:
+        except psycopg2.OperationalError as e:
             logging.warning(f"Не удалось проверить внешний адрес для пула клиента ID {client_id}: {e}")
 
         # 2. Попытка с внутренним адресом, если внешний не удался
@@ -110,14 +108,16 @@ def get_client_pool(client_id: int, db_config: Dict[str, Any]) -> pool.ThreadedC
             try:
                 local_params = {
                     'host': db_config.get('local_server_address'), 'port': db_config.get('local_server_port'), 'dbname': db_config.get('db_name'),
-                    'user': db_config.get('db_user'), 'password': db_config.get('db_password')
+                    'user': db_config.get('db_user'), 'password': db_config.get('db_password'),
+                    'connect_timeout': 5
                 }
                 if all(local_params.values()):
+                    logging.debug(f"Клиент ID {client_id}: Попытка подключения по внутреннему адресу {local_params['host']}:{local_params['port']} без SSL.")
                     with _attempt_db_connection(local_params, None, 'disable') as conn:
                         if conn:
                             conn_params = {**local_params, 'sslmode': 'disable'}
                             logging.info(f"Для пула клиента ID {client_id} будут использованы внутренние параметры без SSL.")
-            except Exception as e:
+            except psycopg2.OperationalError as e:
                 logging.warning(f"Не удалось проверить внутренний адрес для пула клиента ID {client_id}: {e}")
 
         if not conn_params:
