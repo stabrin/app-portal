@@ -167,6 +167,10 @@ def open_clients_management_window(parent_widget):
                     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur: # Используем RealDictCursor
                         cur.execute("SELECT * FROM clients WHERE id = %s", (client_id,)) # Получаем всю строку
                         db_data = cur.fetchone()
+                # --- ИСПРАВЛЕНИЕ: Добавляем ID клиента в конфигурацию для пула соединений ---
+                # get_client_db_connection требует 'id' в client_db_config для идентификации пула.
+                if db_data:
+                    db_data['id'] = client_id
                 
                 if not db_data: raise ValueError("Не удалось найти данные для подключения к БД клиента.")
                 db_host, db_port, db_name, db_user, db_password, db_ssl_cert = db_data
@@ -241,6 +245,10 @@ def open_clients_management_window(parent_widget):
                     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                         cur.execute("SELECT * FROM clients WHERE id = %s", (client_id,))
                         db_data = cur.fetchone()
+                # --- ИСПРАВЛЕНИЕ: Добавляем ID клиента в конфигурацию для пула соединений ---
+                # get_client_db_connection требует 'id' в client_db_config для идентификации пула.
+                if db_data:
+                    db_data['id'] = client_id
                 if not db_data: raise ValueError("Данные клиента не найдены.")
 
                 # --- ИЗМЕНЕНИЕ: Используем get_client_db_connection из db_connector ---
@@ -270,12 +278,12 @@ def open_clients_management_window(parent_widget):
                 if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
 
         def _run_ping_test():
-            """Выполняет тестовое SSL-подключение к БД клиента и показывает лог."""
+            """Выполняет тестовое подключение к БД клиента, используя ту же логику, что и приложение."""
             log_window = tk.Toplevel(editor_window)
             log_window.title("Лог Пинг-теста")
             log_window.geometry("700x450")
             log_window.grab_set()
-            
+
             log_text = tk.Text(log_window, wrap="word", padx=10, pady=10, state="disabled")
             log_text.pack(expand=True, fill=tk.BOTH)
 
@@ -286,62 +294,48 @@ def open_clients_management_window(parent_widget):
                 log_text.config(state="disabled")
                 log_window.update_idletasks()
 
-            temp_cert_file = None
-            conn = None
             try:
                 add_log("Начало пинг-теста...")
-                
-                # 1. Собираем данные из полей ввода
-                db_params = {
-                    'host': entries['DB Хост'].get(),
-                    'port': int(entries['DB Порт'].get() or 5432),
-                    'dbname': entries['DB Имя'].get(),
-                    'user': entries['DB Пользователь'].get(),
-                    'password': entries['DB Пароль'].get(),
-                    'connect_timeout': 5 # Короткий таймаут для теста
+
+                # 1. Собираем данные из полей ввода, как это делает get_client_pool
+                db_config_from_ui = {
+                    'db_host': entries['DB Хост'].get(),
+                    'db_port': int(entries['DB Порт'].get() or 5432),
+                    'db_name': entries['DB Имя'].get(),
+                    'db_user': entries['DB Пользователь'].get(),
+                    'db_password': entries['DB Пароль'].get(),
+                    'db_ssl_cert': ssl_cert_text.get('1.0', 'end-1c').strip(),
+                    'local_server_address': entries['Локальный адрес сервера'].get(),
+                    'local_server_port': int(entries['Локальный порт сервера'].get() or 5432)
                 }
-                add_log(f"Параметры подключения: host={db_params['host']}, port={db_params['port']}, dbname={db_params['dbname']}, user={db_params['user']}")
 
-                # 2. Обрабатываем SSL-сертификат
-                ssl_cert_data = ssl_cert_text.get('1.0', 'end-1c').strip()
-                if ssl_cert_data:
-                    add_log("Шаг 1: Обнаружен SSL-сертификат. Попытка подключения с SSL (verify-full)...")
-                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
-                        fp.write(ssl_cert_data)
-                        temp_cert_file = fp.name
-                    
-                    ssl_params = db_params.copy()
-                    ssl_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
-                    add_log(f"Сертификат сохранен во временный файл: {temp_cert_file}", "DEBUG")
+                # --- ИЗМЕНЕНИЕ: Используем _attempt_db_connection из db_connector для каждой попытки ---
+                from .db_connector import _attempt_db_connection
 
-                    try:
-                        conn = psycopg2.connect(**ssl_params)
-                        add_log("УСПЕХ: SSL-соединение с базой данных успешно установлено!", "SUCCESS")
-                        return # Если успешно, выходим из функции
-                    except Exception as ssl_error:
-                        add_log(f"ОШИБКА SSL: {ssl_error}", "ERROR")
-                        add_log("Шаг 2: Попытка подключения без SSL (по паролю)...", "INFO")
-                        # Удаляем SSL параметры для второй попытки
-                        db_params.pop('sslmode', None)
-                        db_params.pop('sslrootcert', None)
-                else:
-                    add_log("SSL-сертификат не предоставлен. Попытка подключения без SSL (по паролю)...", "WARNING")
-                
-                # Эта часть выполнится, если SSL не указан или если SSL-подключение не удалось
-                db_params['sslmode'] = 'disable'
-                add_log("Попытка подключения к базе данных без SSL...", "DEBUG")
-                conn = psycopg2.connect(**db_params)
-                add_log("УСПЕХ: Соединение без SSL успешно установлено!", "SUCCESS")
+                # Попытка 1: Внешний адрес с SSL
+                add_log(f"Шаг 1: Попытка подключения по внешнему адресу {db_config_from_ui['db_host']}:{db_config_from_ui['db_port']} с SSL...")
+                try:
+                    with _attempt_db_connection(db_config_from_ui, db_config_from_ui['db_ssl_cert'], 'verify-full') as conn:
+                        if conn:
+                            add_log("УСПЕХ: Подключение по внешнему адресу с SSL прошло успешно!", "SUCCESS")
+                            return
+                except Exception as e:
+                    add_log(f"ОШИБКА: Не удалось подключиться по внешнему адресу. {e}", "ERROR")
+
+                # Попытка 2: Внутренний адрес без SSL
+                add_log(f"Шаг 2: Попытка подключения по внутреннему адресу {db_config_from_ui['local_server_address']}:{db_config_from_ui['local_server_port']} без SSL...")
+                try:
+                    with _attempt_db_connection(db_config_from_ui, None, 'disable') as conn:
+                        if conn:
+                            add_log("УСПЕХ: Подключение по внутреннему адресу без SSL прошло успешно!", "SUCCESS")
+                            return
+                except Exception as e:
+                    add_log(f"ОШИБКА: Не удалось подключиться по внутреннему адресу. {e}", "ERROR")
+
+                add_log("ПРОВАЛ: Не удалось подключиться ни по одному из адресов.", "ERROR")
 
             except Exception as e:
                 add_log(f"ОШИБКА: {e}", "ERROR")
-            finally:
-                if conn: 
-                    conn.close()
-                    add_log("Соединение закрыто.", "DEBUG")
-                if temp_cert_file and os.path.exists(temp_cert_file):
-                    os.remove(temp_cert_file)
-                    add_log(f"Временный файл сертификата удален.")
 
         def add_user():
             if not client_id: return
