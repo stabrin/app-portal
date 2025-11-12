@@ -307,25 +307,40 @@ def open_clients_management_window(parent_widget):
                 # 2. Обрабатываем SSL-сертификат
                 ssl_cert_data = ssl_cert_text.get('1.0', 'end-1c').strip()
                 if ssl_cert_data:
-                    add_log("Обнаружен SSL-сертификат. Используется режим 'verify-full'.")
+                    add_log("Шаг 1: Обнаружен SSL-сертификат. Попытка подключения с SSL (verify-full)...")
                     with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
                         fp.write(ssl_cert_data)
                         temp_cert_file = fp.name
-                    db_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
-                    add_log(f"Сертификат сохранен во временный файл: {temp_cert_file}")
-                else:
-                    add_log("SSL-сертификат не предоставлен. Попытка подключения без SSL.", "WARNING")
-                    db_params['sslmode'] = 'disable'
+                    
+                    ssl_params = db_params.copy()
+                    ssl_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
+                    add_log(f"Сертификат сохранен во временный файл: {temp_cert_file}", "DEBUG")
 
-                # 3. Попытка подключения
-                add_log("Попытка подключения к базе данных...")
+                    try:
+                        conn = psycopg2.connect(**ssl_params)
+                        add_log("УСПЕХ: SSL-соединение с базой данных успешно установлено!", "SUCCESS")
+                        return # Если успешно, выходим из функции
+                    except Exception as ssl_error:
+                        add_log(f"ОШИБКА SSL: {ssl_error}", "ERROR")
+                        add_log("Шаг 2: Попытка подключения без SSL (по паролю)...", "INFO")
+                        # Удаляем SSL параметры для второй попытки
+                        db_params.pop('sslmode', None)
+                        db_params.pop('sslrootcert', None)
+                else:
+                    add_log("SSL-сертификат не предоставлен. Попытка подключения без SSL (по паролю)...", "WARNING")
+                
+                # Эта часть выполнится, если SSL не указан или если SSL-подключение не удалось
+                db_params['sslmode'] = 'disable'
+                add_log("Попытка подключения к базе данных без SSL...", "DEBUG")
                 conn = psycopg2.connect(**db_params)
-                add_log("УСПЕХ: Соединение с базой данных успешно установлено!", "SUCCESS")
+                add_log("УСПЕХ: Соединение без SSL успешно установлено!", "SUCCESS")
 
             except Exception as e:
                 add_log(f"ОШИБКА: {e}", "ERROR")
             finally:
-                if conn: conn.close()
+                if conn: 
+                    conn.close()
+                    add_log("Соединение закрыто.", "DEBUG")
                 if temp_cert_file and os.path.exists(temp_cert_file):
                     os.remove(temp_cert_file)
                     add_log(f"Временный файл сертификата удален.")
