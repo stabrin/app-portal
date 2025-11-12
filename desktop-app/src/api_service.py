@@ -154,3 +154,19 @@ class ApiService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при отправке сведений об использовании: {e}", exc_info=True)
             raise
+
+    def create_utilisation_report(self, payload: dict):
+        """
+        Отправляет запрос на создание отчета об использовании (нанесении).
+        """
+        logger.info(f"Отправка запроса на создание отчета. Payload: {payload}")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/report/create"
+            headers = self._get_auth_headers()
+            # Увеличиваем таймаут, так как операция может быть долгой
+            response = requests.post(url, headers=headers, json=payload, timeout=120)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при создании отчета об использовании: {e}", exc_info=True)
+            raise

@@ -1827,7 +1827,7 @@ class ApiIntegrationDialog(tk.Toplevel):
                             
                             # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
                             self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
-                            time.sleep(20)
+                            time.sleep(5)
                     conn.commit()
                 # --- ИСПРАВЛЕНИЕ: Прерываем выполнение после обработки 'delta' ---
                 # Это предотвращает "проваливание" в блок для 'dmkod', если статус заказа 'delta'.
@@ -1902,10 +1902,30 @@ class ApiIntegrationDialog(tk.Toplevel):
 
     def _prepare_report_task(self):
         # self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку отчета..."))
+        # --- ИСПРАВЛЕНИЕ: Заменяем заглушку на реальную логику из веб-приложения ---
+        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку отчета..."))
         try:
-            # Логика аналогична `prepare_report` из routes.py
-            # self.after(0, lambda: self._append_log("Отправка запросов на подготовку отчета..."))
-            time.sleep(5) # Эмуляция работы
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(
+                        "SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL ORDER BY id",
+                        (self.order_id,)
+                    )
+                    details_to_process = cur.fetchall()
+
+            if not details_to_process:
+                raise Exception("Не найдено позиций с ID тиража (api_id) для подготовки отчета.")
+
+            self.after(0, lambda: self._append_log(f"Найдено {len(details_to_process)} позиций для подготовки отчета."))
+
+            for i, detail in enumerate(details_to_process):
+                payload = {"printrun_id": detail['api_id']}
+                self.after(0, lambda i=i, d=detail: self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {d['gtin']} (ID тиража: {d['api_id']}) ---"))
+                
+                # Вызываем новый метод в ApiService
+                self.api_service.create_utilisation_report(payload)
+                
+                self.after(0, lambda d=detail: self._append_log(f"  Запрос для тиража {d['api_id']} успешно отправлен."))
 
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -1914,7 +1934,6 @@ class ApiIntegrationDialog(tk.Toplevel):
             
             self.order_data['api_status'] = 'Отчет подготовлен'
             self.after(0, lambda: self._display_api_response(200, "Отчет успешно подготовлен!"))
-            self.after(0, self._update_buttons_state)
 
         except Exception as e:
             self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
