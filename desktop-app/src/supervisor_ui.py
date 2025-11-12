@@ -224,9 +224,9 @@ def open_clients_management_window(parent_widget):
                         raise ConnectionError("Не удалось установить соединение с базой данных клиента.")
                     
                     if update_client_db_schema(client_conn):
-                    messagebox.showinfo("Успех", "Схема базы данных клиента успешно обновлена.", parent=editor_window)
-                else:
-                    messagebox.showerror("Ошибка", "Произошла ошибка при обновлении схемы. Подробности в app.log.", parent=editor_window)
+                        messagebox.showinfo("Успех", "Схема базы данных клиента успешно обновлена.", parent=editor_window)
+                    else:
+                        messagebox.showerror("Ошибка", "Произошла ошибка при обновлении схемы. Подробности в app.log.", parent=editor_window)
 
             except Exception as e:
                 error_details = traceback.format_exc()
@@ -247,17 +247,17 @@ def open_clients_management_window(parent_widget):
                 from .db_connector import get_client_db_connection
                 user_info_for_client_db = {'client_db_config': db_data}
                 with get_client_db_connection(user_info_for_client_db) as client_conn:
-                with client_conn.cursor() as cur:
-                    query = sql.SQL("""
-                        INSERT INTO users (username, password_hash, is_admin, is_active)
-                        VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (username) DO UPDATE SET
-                            password_hash = EXCLUDED.password_hash,
-                            is_admin = EXCLUDED.is_admin,
-                            is_active = EXCLUDED.is_active;
-                    """)
-                    cur.execute(query, (user_login, password_hash, is_admin, is_active))
-                client_conn.commit()
+                    with client_conn.cursor() as cur:
+                        query = sql.SQL("""
+                            INSERT INTO users (username, password_hash, is_admin, is_active)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (username) DO UPDATE SET
+                                password_hash = EXCLUDED.password_hash,
+                                is_admin = EXCLUDED.is_admin,
+                                is_active = EXCLUDED.is_active;
+                        """)
+                        cur.execute(query, (user_login, password_hash, is_admin, is_active))
+                    client_conn.commit()
                 logging.info(f"Пользователь '{user_login}' успешно синхронизирован с БД клиента '{db_data['db_name']}'.")
                 return True
             except Exception as e:
@@ -610,20 +610,20 @@ def open_clients_management_window(parent_widget):
                     from .db_connector import get_client_db_connection
                     user_info_for_client_db = {'client_db_config': data_to_save}
                     with get_client_db_connection(user_info_for_client_db) as client_conn:
-                    with client_conn.cursor() as cur:
-                        # --- ИСПРАВЛЕНИЕ: Сохраняем все необходимые ключи, а не только последние три ---
-                        settings_to_sync = [
-                            ('DB_HOST', data_to_save['db_host']), ('DB_PORT', str(data_to_save['db_port'])),
-                            ('DB_NAME', data_to_save['db_name']), ('DB_USER', data_to_save['db_user']),
-                            ('DB_PASSWORD', data_to_save['db_password']), 
-                            ('LOCAL_SERVER_ADDRESS', data_to_save['local_server_address']), ('LOCAL_SERVER_PORT', str(data_to_save['local_server_port'])),
-                            ('API_BASE_URL', data_to_save['api_base_url']),
-                            ('API_EMAIL', data_to_save['api_email']), ('API_PASSWORD', data_to_save['api_password'])
-                        ]
-                        from psycopg2.extras import execute_values
-                        upsert_query = "INSERT INTO ap_settings (setting_key, setting_value) VALUES %s ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW();"
-                        execute_values(cur, upsert_query, settings_to_sync)
-                    client_conn.commit()
+                        with client_conn.cursor() as cur:
+                            # --- ИСПРАВЛЕНИЕ: Сохраняем все необходимые ключи, а не только последние три ---
+                            settings_to_sync = [
+                                ('DB_HOST', data_to_save['db_host']), ('DB_PORT', str(data_to_save['db_port'])),
+                                ('DB_NAME', data_to_save['db_name']), ('DB_USER', data_to_save['db_user']),
+                                ('DB_PASSWORD', data_to_save['db_password']), 
+                                ('LOCAL_SERVER_ADDRESS', data_to_save['local_server_address']), ('LOCAL_SERVER_PORT', str(data_to_save['local_server_port'])),
+                                ('API_BASE_URL', data_to_save['api_base_url']),
+                                ('API_EMAIL', data_to_save['api_email']), ('API_PASSWORD', data_to_save['api_password'])
+                            ]
+                            from psycopg2.extras import execute_values
+                            upsert_query = "INSERT INTO ap_settings (setting_key, setting_value) VALUES %s ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW();"
+                            execute_values(cur, upsert_query, settings_to_sync)
+                        client_conn.commit()
                     logging.info("Настройки API успешно синхронизированы с БД клиента.")
                 except Exception as sync_err:
                     logging.error(f"Ошибка синхронизации настроек с БД клиента: {sync_err}")
