@@ -7,7 +7,7 @@ import os
 import babel.numbers
 import jinja2
 # import _cffi_backend
-import mx.DateTime
+# import mx.DateTime
 
 # Добавляем папку desktop-app в путь, чтобы Python мог найти пакет 'src'.
 # Это необходимо для запуска как из исходников, так и после сборки PyInstaller.
