@@ -7,7 +7,7 @@ from contextlib import contextmanager
 
 from dotenv import load_dotenv
 
-from .utils import resource_path # Импортируем нашу новую функцию
+from .utils import project_root_path # --- ИЗМЕНЕНИЕ: Импортируем новую функцию для доступа к корню проекта ---
 
 @contextmanager
 def get_main_db_connection():
@@ -27,8 +27,8 @@ def get_main_db_connection():
         "sslmode": 'verify-full'
     }
 
-    # --- ИСПРАВЛЕНИЕ: Используем универсальную функцию для поиска ресурса ---
-    cert_path = resource_path(os.path.join('secrets', 'postgres', 'server.crt'))
+    # --- ИЗМЕНЕНИЕ: Используем project_root_path для доступа к папке secrets в корне проекта ---
+    cert_path = project_root_path(os.path.join('secrets', 'postgres', 'server.crt'))
 
     if not os.path.exists(cert_path):
         raise FileNotFoundError(f"Сертификат сервера не найден по пути: {cert_path}")
