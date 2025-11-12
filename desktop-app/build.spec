@@ -60,8 +60,8 @@ exe = EXE(
     strip=False,
     upx=True,
     runtime_tmpdir=None,
-    console=False, # False - для GUI-приложений, чтобы не открывалась черная консоль. Установите в True для отладки.
-    icon='../assets/icon.ico' # Путь к иконке приложения
+    console=False,  # False - для GUI-приложений, чтобы не открывалась черная консоль. Установите в True для отладки.
+    icon='assets/icon.ico'  # Путь к иконке приложения
 )
 
 # --- Шаг 5: Сборка итоговой папки ---
