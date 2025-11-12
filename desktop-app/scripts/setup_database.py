@@ -117,6 +117,8 @@ def initialize_main_database():
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_base_url VARCHAR(255);")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_email VARCHAR(255);")
                 cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS api_password VARCHAR(255);")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS local_server_address VARCHAR(255);")
+                cur.execute("ALTER TABLE clients ADD COLUMN IF NOT EXISTS local_server_port INTEGER;")
                 
                 logger.info("Создаю таблицу 'users' со связью с 'clients'...")
                 cur.execute("""

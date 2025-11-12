@@ -436,6 +436,14 @@ def update_client_db_schema(conn):
             EXECUTE PROCEDURE trigger_set_timestamp();
         """),
     ]
+    
+    # --- НОВЫЙ БЛОК: Добавляем значения по умолчанию для SSCC в ap_settings ---
+    # Это гарантирует, что при инициализации базы у нас будут базовые настройки для генерации SSCC.
+    ap_settings_defaults = [
+        sql.SQL("INSERT INTO ap_settings (setting_key, setting_value) VALUES ('SSCC_GCP_1', '4604060') ON CONFLICT (setting_key) DO NOTHING;"),
+        sql.SQL("INSERT INTO ap_settings (setting_key, setting_value) VALUES ('SSCC_PRIMARY_GCP_LIMIT', '9900000') ON CONFLICT (setting_key) DO NOTHING;"),
+        sql.SQL("INSERT INTO ap_settings (setting_key, setting_value) VALUES ('SSCC_WARNING_PERCENT', '80') ON CONFLICT (setting_key) DO NOTHING;"),
+    ]
 
 
 
@@ -454,7 +462,7 @@ def update_client_db_schema(conn):
     ]
 
     # Объединяем все команды
-    all_commands = sql_commands + ap_tables_commands + visibility_commands
+    all_commands = sql_commands + ap_tables_commands + ap_settings_defaults + visibility_commands
 
     try:
         with conn.cursor() as cur:

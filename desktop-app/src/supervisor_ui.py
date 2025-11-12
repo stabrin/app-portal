@@ -128,7 +128,7 @@ def open_clients_management_window(parent_widget):
         client_data_frame.pack(fill=tk.X, pady=5)
 
         entries = {}
-        fields = ["Имя", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль", "API Base URL", "API Email", "API Password"]
+        fields = ["Имя", "DB Хост", "DB Порт", "DB Имя", "DB Пользователь", "DB Пароль", "API Base URL", "API Email", "API Password", "Локальный адрес сервера", "Локальный порт сервера"]
 
         for i, field in enumerate(fields):
             ttk.Label(client_data_frame, text=field + ":").grid(row=i, column=0, padx=5, pady=2, sticky='w')
@@ -517,10 +517,17 @@ def open_clients_management_window(parent_widget):
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password FROM clients WHERE id = %s", (client_id,))
+                        # --- ИЗМЕНЕНИЕ: Запрашиваем новые поля ---
+                        cur.execute("""
+                            SELECT name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, 
+                                   api_base_url, api_email, api_password, 
+                                   local_server_address, local_server_port 
+                            FROM clients WHERE id = %s
+                        """, (client_id,))
                         client_data = cur.fetchone()
                 if client_data:
                     # ИСПРАВЛЕНИЕ: Используем числовые индексы для доступа к данным из кортежа client_data
-                    db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "API Base URL": 7, "API Email": 8, "API Password": 9}
+                    db_field_map = {"Имя": 0, "DB Хост": 1, "DB Порт": 2, "DB Имя": 3, "DB Пользователь": 4, "DB Пароль": 5, "API Base URL": 7, "API Email": 8, "API Password": 9, "Локальный адрес сервера": 10, "Локальный порт сервера": 11}
                     for field in fields:
                         if field in db_field_map:
                             idx = db_field_map[field]
@@ -548,17 +555,19 @@ def open_clients_management_window(parent_widget):
                 'db_ssl_cert': ssl_cert_text.get('1.0', 'end-1c'),
                 'api_base_url': entries['API Base URL'].get(),
                 'api_email': entries['API Email'].get(),
-                'api_password': entries['API Password'].get()
+                'api_password': entries['API Password'].get(),
+                'local_server_address': entries['Локальный адрес сервера'].get(),
+                'local_server_port': int(entries['Локальный порт сервера'].get() or 0)
             }
 
             try:
                 with get_main_db_connection() as conn:
                     with conn.cursor() as cur:
                         if client_id:
-                            query = sql.SQL("UPDATE clients SET name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, db_ssl_cert=%s, api_base_url=%s, api_email=%s, api_password=%s WHERE id=%s")
+                            query = sql.SQL("UPDATE clients SET name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, db_ssl_cert=%s, api_base_url=%s, api_email=%s, api_password=%s, local_server_address=%s, local_server_port=%s WHERE id=%s")
                             cur.execute(query, (*data_to_save.values(), client_id))
                         else:
-                            query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
+                            query = sql.SQL("INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password, local_server_address, local_server_port) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id")
                             cur.execute(query, tuple(data_to_save.values()))
                             new_client_id = cur.fetchone()[0]
                             client_id = new_client_id
@@ -597,7 +606,9 @@ def open_clients_management_window(parent_widget):
                         settings_to_sync = [
                             ('DB_HOST', data_to_save['db_host']), ('DB_PORT', str(data_to_save['db_port'])),
                             ('DB_NAME', data_to_save['db_name']), ('DB_USER', data_to_save['db_user']),
-                            ('DB_PASSWORD', data_to_save['db_password']), ('API_BASE_URL', data_to_save['api_base_url']),
+                            ('DB_PASSWORD', data_to_save['db_password']), 
+                            ('LOCAL_SERVER_ADDRESS', data_to_save['local_server_address']), ('LOCAL_SERVER_PORT', str(data_to_save['local_server_port'])),
+                            ('API_BASE_URL', data_to_save['api_base_url']),
                             ('API_EMAIL', data_to_save['api_email']), ('API_PASSWORD', data_to_save['api_password'])
                         ]
                         from psycopg2.extras import execute_values

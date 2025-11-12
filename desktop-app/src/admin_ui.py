@@ -210,7 +210,11 @@ def open_workplace_setup_window(parent_widget, user_info):
             return
 
         # 2. Определяем адрес сервера
-        final_address = server_address_entry.get().strip() or config_data.get('db_host')
+        # --- ИЗМЕНЕНИЕ: Приоритет локального адреса ---
+        # 1. Ручной ввод в поле
+        # 2. Локальный адрес из настроек клиента
+        # 3. Внешний хост БД как запасной вариант
+        final_address = server_address_entry.get().strip() or config_data.get('local_server_address') or config_data.get('db_host')
         if not final_address:
             messagebox.showerror("Ошибка", "Не удалось определить адрес сервера. Введите его вручную или убедитесь, что он есть в конфигурации клиента.", parent=setup_window)
             return

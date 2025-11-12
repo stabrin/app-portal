@@ -113,11 +113,12 @@ class StandaloneLoginWindow(tk.Tk):
                     # и все данные для подключения к ней.
                     query = """
                         SELECT u.name, u.password_hash, u.role, u.client_id,
-                               c.db_name, c.db_host, c.db_port, c.db_user, c.db_password, c.db_ssl_cert,
-                               c.api_base_url, c.api_email, c.api_password
+                               c.db_name, c.db_host, c.db_port, c.db_user, c.db_password, 
+                               c.db_ssl_cert, c.api_base_url, c.api_email, c.api_password,
+                               c.local_server_address, c.local_server_port
                         FROM users u
                         LEFT JOIN clients c ON u.client_id = c.id
-                        WHERE u.login = %s AND (u.role = 'супервизор' OR u.role = 'администратор')
+                        WHERE u.login = %s AND u.is_active = TRUE AND (u.role = 'супервизор' OR u.role = 'администратор')
                     """
                     cur.execute(query, (login,))
                     user_data = cur.fetchone()
@@ -125,7 +126,7 @@ class StandaloneLoginWindow(tk.Tk):
             if user_data:
                 (user_name, hashed_password, user_role, client_id, db_name, db_host, 
                  db_port, db_user, db_password, db_ssl_cert, api_base_url, 
-                 api_email, api_password) = user_data
+                 api_email, api_password, local_server_address, local_server_port) = user_data
 
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
@@ -160,7 +161,9 @@ class StandaloneLoginWindow(tk.Tk):
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
-                            "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert
+                            "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert,
+                            "local_server_address": local_server_address, 
+                            "local_server_port": local_server_port
                         }
                         # --- НОВЫЙ БЛОК: Сохраняем конфигурацию API в user_info ---
                         user_info['client_api_config'] = {
