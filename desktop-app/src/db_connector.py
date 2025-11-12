@@ -120,6 +120,10 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
     conn = None
     try:
         conn_params = base_params.copy()
+        # --- ИСПРАВЛЕНИЕ: Удаляем из параметров подключения служебное поле, которое не понимает psycopg2 ---
+        # Это поле используется только для передачи содержимого сертификата в этот метод.
+        conn_params.pop('db_ssl_cert_content', None)
+
         conn_params['sslmode'] = ssl_mode
         conn_params['connect_timeout'] = 5 # Добавим таймаут для быстрых проверок
 
