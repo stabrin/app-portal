@@ -17,20 +17,15 @@ logging.basicConfig(
     ]
 )
 
-# --- ИМПОРТ ИЗ ОСНОВНОГО ПРИЛОЖЕНИЯ ---
-# Добавляем папку 'src' в sys.path, чтобы импортировать SshTunnelProcess
+# --- ИЗМЕНЕНИЕ: Убираем манипуляции с sys.path, так как скрипт теперь запускается в контексте приложения ---
 import sys
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-src_path = os.path.join(project_root, 'src') # Добавляем src в путь
-if src_path not in sys.path:
-    sys.path.insert(0, src_path)
 
 # Загружаем переменные окружения из файла .env в корне проекта
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 dotenv_path = os.path.join(project_root, '..', '.env') # Ищем .env в корне app-portal
 load_dotenv(dotenv_path=dotenv_path)
 
-# --- ИЗМЕНЕНИЕ: Импортируем функцию подключения из db_connector ---
-from db_connector import get_main_db_connection
+from src.db_connector import get_main_db_connection
 
 # --- ЧТЕНИЕ КОНФИГУРАЦИИ ---
 
@@ -111,6 +106,6 @@ def initialize_main_database():
 
 if __name__ == "__main__":
     success, message = initialize_main_database()
-    print(message)
+    print(message) # Выводим сообщение в stdout, чтобы subprocess мог его перехватить
     if not success:
         sys.exit(1)

@@ -15,18 +15,24 @@ import bcrypt
 # --- ИСПРАВЛЕНИЕ: Используем абсолютный импорт, так как 'scripts' - это пакет верхнего уровня ---
 from .db_connector import get_main_db_connection
 from .utils import resource_path
-# --- ИЗМЕНЕНИЕ: Импортируем функции напрямую ---
-from scripts.setup_client_database import update_client_db_schema
-from scripts.setup_database import initialize_main_database
+# --- ИЗМЕНЕНИЕ: Убираем прямой импорт скриптов, чтобы избежать ImportError ---
+# Вместо этого будем запускать их как отдельные процессы.
+from scripts.setup_client_database import update_client_db_schema # Этот импорт оставляем, он не вызывает проблем
 
 def run_db_setup():
     """
-    Запускает функцию initialize_main_database для создания/обновления главной БД.
+    Запускает скрипт 'setup_database.py' в отдельном процессе для создания/обновления главной БД.
     """
     try:
         logging.debug("Запуск функции run_db_setup для инициализации главной БД.")
-        # Вызываем импортированную функцию напрямую
-        success, message = initialize_main_database()
+        # --- ИЗМЕНЕНИЕ: Запускаем скрипт через subprocess ---
+        script_path = resource_path(os.path.join('scripts', 'setup_database.py'))
+        # Запускаем с помощью python.exe, чтобы гарантировать правильное окружение
+        result = subprocess.run([sys.executable, script_path], capture_output=True, text=True, check=False, encoding='utf-8')
+        
+        success = result.returncode == 0
+        message = result.stdout.strip() or result.stderr.strip()
+
         if success:
             logging.info(f"Результат инициализации БД: {message}")
             messagebox.showinfo("Успех", message)
