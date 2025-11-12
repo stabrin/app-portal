@@ -271,6 +271,65 @@ def open_clients_management_window(parent_widget):
                 if client_conn: client_conn.close()
                 if temp_cert_file and os.path.exists(temp_cert_file): os.remove(temp_cert_file)
 
+        def _run_ping_test():
+            """Выполняет тестовое SSL-подключение к БД клиента и показывает лог."""
+            log_window = tk.Toplevel(editor_window)
+            log_window.title("Лог Пинг-теста")
+            log_window.geometry("700x450")
+            log_window.grab_set()
+            
+            log_text = tk.Text(log_window, wrap="word", padx=10, pady=10, state="disabled")
+            log_text.pack(expand=True, fill=tk.BOTH)
+
+            def add_log(message, level="INFO"):
+                log_text.config(state="normal")
+                log_text.insert(tk.END, f"[{level}] {message}\n")
+                log_text.see(tk.END)
+                log_text.config(state="disabled")
+                log_window.update_idletasks()
+
+            temp_cert_file = None
+            conn = None
+            try:
+                add_log("Начало пинг-теста...")
+                
+                # 1. Собираем данные из полей ввода
+                db_params = {
+                    'host': entries['DB Хост'].get(),
+                    'port': int(entries['DB Порт'].get() or 5432),
+                    'dbname': entries['DB Имя'].get(),
+                    'user': entries['DB Пользователь'].get(),
+                    'password': entries['DB Пароль'].get(),
+                    'connect_timeout': 5 # Короткий таймаут для теста
+                }
+                add_log(f"Параметры подключения: host={db_params['host']}, port={db_params['port']}, dbname={db_params['dbname']}, user={db_params['user']}")
+
+                # 2. Обрабатываем SSL-сертификат
+                ssl_cert_data = ssl_cert_text.get('1.0', 'end-1c').strip()
+                if ssl_cert_data:
+                    add_log("Обнаружен SSL-сертификат. Используется режим 'verify-full'.")
+                    with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
+                        fp.write(ssl_cert_data)
+                        temp_cert_file = fp.name
+                    db_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
+                    add_log(f"Сертификат сохранен во временный файл: {temp_cert_file}")
+                else:
+                    add_log("SSL-сертификат не предоставлен. Попытка подключения без SSL.", "WARNING")
+                    db_params['sslmode'] = 'disable'
+
+                # 3. Попытка подключения
+                add_log("Попытка подключения к базе данных...")
+                conn = psycopg2.connect(**db_params)
+                add_log("УСПЕХ: Соединение с базой данных успешно установлено!", "SUCCESS")
+
+            except Exception as e:
+                add_log(f"ОШИБКА: {e}", "ERROR")
+            finally:
+                if conn: conn.close()
+                if temp_cert_file and os.path.exists(temp_cert_file):
+                    os.remove(temp_cert_file)
+                    add_log(f"Временный файл сертификата удален.")
+
         def add_user():
             if not client_id: return
 
@@ -555,6 +614,9 @@ def open_clients_management_window(parent_widget):
         
         btn_init_db = ttk.Button(bottom_buttons_frame, text="Инициализировать/Обновить БД клиента", command=run_client_db_setup, state="disabled" if not client_id else "normal")
         btn_init_db.pack(side=tk.LEFT, padx=5)
+
+        btn_ping_test = ttk.Button(bottom_buttons_frame, text="Пинг-тест", command=_run_ping_test)
+        btn_ping_test.pack(side=tk.LEFT, padx=5)
 
         ttk.Button(bottom_buttons_frame, text="Закрыть", command=editor_window.destroy).pack(side=tk.RIGHT)
         ttk.Button(bottom_buttons_frame, text="Сохранить", command=save_client).pack(side=tk.RIGHT, padx=5)
