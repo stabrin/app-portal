@@ -1817,13 +1817,17 @@ class ApiIntegrationDialog(tk.Toplevel):
                             # Вызов API
                             response_data = self.api_service.upload_utilisation_data(payload)
                             
-                            # Генерируем ID для отслеживания
-                            generated_upload_id = (self.order_id * 1000) + (i + 1)
-                            cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (generated_upload_id, result['id']))
+                            # --- ИСПРАВЛЕНИЕ: Получаем ID из ответа API ---
+                            upload_id_from_api = response_data.get('utilisation_upload_id')
+                            if not upload_id_from_api:
+                                raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
+
+                            # Обновляем запись в delta_result, используя ID из API
+                            cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, result['id']))
                             
                             # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
-                            # self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
-                            time.sleep(5)
+                            self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
+                            time.sleep(20)
                     conn.commit()
 
             elif order_status == 'dmkod':
@@ -1865,11 +1869,15 @@ class ApiIntegrationDialog(tk.Toplevel):
                             
                             response_data = self.api_service.upload_utilisation_data(payload)
                             
-                            generated_upload_id = (self.order_id * 1000) + (i + 1)
-                            cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (generated_upload_id, detail['detail_id']))
+                            # --- ИСПРАВЛЕНИЕ: Получаем ID из ответа API ---
+                            upload_id_from_api = response_data.get('utilisation_upload_id')
+                            if not upload_id_from_api:
+                                raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
+
+                            cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, detail['detail_id']))
 
                             # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
-                            # self.after(0, lambda: self._append_log("  Пауза 5 секунд..."))
+                            self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
                             time.sleep(5)
                     conn.commit()
 
