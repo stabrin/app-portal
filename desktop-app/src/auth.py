@@ -210,6 +210,28 @@ def main():
     # Его mainloop будет блокировать выполнение до закрытия окна.
     login_app = StandaloneLoginWindow(on_auth_complete)
     login_app.mainloop()
+    
+    # --- ИСПРАВЛЕНИЕ: Добавляем глобальные привязки для Copy/Paste ---
+    # Этот код решает проблему с неработающими Ctrl+C/Ctrl+V в русской раскладке.
+    # Он выполняется один раз после закрытия окна логина, но до открытия
+    # основного окна, и устанавливает правила для всех виджетов Entry и Text.
+    try:
+        # Используем 'login_app' как ссылку на корневой элемент tk, чтобы получить доступ к bind_class
+        # Это сработает, даже если окно уже уничтожено.
+        root = login_app
+        
+        # Для клавиши 'C' (копировать)
+        # 46 - это стандартный keycode для физической клавиши 'C' в Tkinter на Windows
+        root.bind_class("Entry", "<Control-KeyPress-46>", lambda event: event.widget.event_generate("<<Copy>>"))
+        root.bind_class("Text", "<Control-KeyPress-46>", lambda event: event.widget.event_generate("<<Copy>>"))
+
+        # Для клавиши 'V' (вставить)
+        # 47 - это стандартный keycode для физической клавиши 'V' в Tkinter на Windows
+        root.bind_class("Entry", "<Control-KeyPress-47>", lambda event: event.widget.event_generate("<<Paste>>"))
+        root.bind_class("Text", "<Control-KeyPress-47>", lambda event: event.widget.event_generate("<<Paste>>"))
+        logging.info("Глобальные привязки для Copy/Paste успешно установлены.")
+    except Exception as e:
+        logging.error(f"Не удалось установить глобальные привязки для Copy/Paste: {e}")
 
     user_info = user_info_container.get('result')
 
