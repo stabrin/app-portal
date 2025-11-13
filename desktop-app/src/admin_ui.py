@@ -2402,6 +2402,11 @@ class OrderEditorDialog(tk.Toplevel):
             if not all(col in df.columns for col in required_columns):
                 raise ValueError(f'В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.')
 
+            # --- ИСПРАВЛЕНИЕ: Добавляем ведущий ноль к 13-значным GTIN ---
+            # Это решает проблему, когда в файле от "Дельты" GTIN представлен
+            # в формате EAN-13 (13 символов) вместо GTIN-14.
+            df['Barcode'] = df['Barcode'].apply(lambda x: '0' + str(x) if isinstance(x, str) and len(x) == 13 else x)
+
             df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
             df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
             df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
