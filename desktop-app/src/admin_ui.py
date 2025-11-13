@@ -2476,7 +2476,9 @@ class OrderEditorDialog(tk.Toplevel):
                 df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
                 
                 cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
-                gtin_to_printrun_map = {row['gtin']: row['api_id'] for row in cur.fetchall()}
+                # --- ИСПРАВЛЕНИЕ: Гарантируем, что ключ (GTIN) является строкой ---
+                # Это решает проблему, когда GTIN с ведущим нулем обрабатывался как число.
+                gtin_to_printrun_map = {str(row['gtin']): row['api_id'] for row in cur.fetchall()}
                 if not gtin_to_printrun_map:
                     raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
 
