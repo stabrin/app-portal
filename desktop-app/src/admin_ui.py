@@ -2415,18 +2415,16 @@ class OrderEditorDialog(tk.Toplevel):
                 unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
                 unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
                 
-                # --- ИСПРАВЛЕНИЕ: Более надежный способ сбора данных об упаковках ---
-                # Это решает проблему, когда паллеты терялись, если в файле были и короба, и паллеты.
-                all_packages_data = []
+                packages_to_insert = []
                 if not unique_boxes.empty:
-                    for sscc in unique_boxes['sscc']:
-                        all_packages_data.append({'sscc': sscc, 'level': 1})
+                    unique_boxes['level'] = 1
+                    packages_to_insert.append(unique_boxes)
                 if not unique_pallets.empty:
-                    for sscc in unique_pallets['sscc']:
-                        all_packages_data.append({'sscc': sscc, 'level': 2})
+                    unique_pallets['level'] = 2
+                    packages_to_insert.append(unique_pallets)
 
-                if all_packages_data:
-                    all_packages_df = pd.DataFrame(all_packages_data)
+                if packages_to_insert:
+                    all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
                     all_packages_df['owner'] = 'delta'
                     
                     # Устанавливаем связи "короб-паллета"
@@ -2486,18 +2484,18 @@ class OrderEditorDialog(tk.Toplevel):
                 
                 grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
 
-                # --- ИСПРАВЛЕНИЕ: Заменяем .apply на list comprehension для надежности и производительности ---
-                # Это решает ошибку "ValueError: Cannot set a DataFrame with multiple columns to the single column codes_json".
+                # --- ИСПРАВЛЕНИЕ: Полностью переписанная логика для устранения SyntaxError ---
+                # Используем list comprehension для надежного и быстрого создания JSON.
+                # Это решает ошибку с несоответствием скобок.
                 grouped_for_api['codes_json'] = [
                     json.dumps({
-                            "production_date": str(row['production_date']),
-                            "expiration_date": str(row['expiration_date'])
+                        "include": [{"code": code.replace('\x1d', '')} for code in row.DataMatrix],
+                        "attributes": {
+                            "production_date": str(row.production_date),
+                            "expiration_date": str(row.expiration_date)
                         }
-                        "attributes": {"production_date": str(row.production_date), "expiration_date": str(row.expiration_date)}
-
-                         "include": [{"code": c} for c in cleaned_codes],
-                         "attributes": {"production_date": str(row.production_date), "expiration_date": str(row.expiration_date)}
-                     })                    for row, cleaned_codes in zip(grouped_for_api.itertuples(), [[code.replace('\x1d', '') for code in dm_list] for dm_list in grouped_for_api['DataMatrix']])
+                    })
+                    for row in grouped_for_api.itertuples()
                 ]
                 grouped_for_api['order_id'] = self.order_id
                 grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
