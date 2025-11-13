@@ -2503,10 +2503,10 @@ class OrderEditorDialog(tk.Toplevel):
                 logging.info(f"[Delta Import] Сохранено {len(delta_result_df)} сгруппированных записей в 'delta_result'.")
             
                 # 6. Фиксируем все изменения в одной транзакции
-                conn.commit()
+                    # conn.commit() теперь управляется контекстным менеджером 'with conn'
                 messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
         except Exception as e:
-            if conn: 
+            if conn and not conn.closed: 
                 try:
                     conn.rollback()
                 except psycopg2.InterfaceError:
@@ -2514,7 +2514,7 @@ class OrderEditorDialog(tk.Toplevel):
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
         finally:
-            if conn: conn.close()
+            pass # Соединение будет закрыто и возвращено в пул автоматически
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""
