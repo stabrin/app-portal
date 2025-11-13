@@ -1829,11 +1829,15 @@ class ApiIntegrationDialog(tk.Toplevel):
                             self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
                             time.sleep(5)
                     conn.commit()
-                # --- ИСПРАВЛЕНИЕ: Прерываем выполнение после обработки 'delta' ---
-                # Это предотвращает "проваливание" в блок для 'dmkod', если статус заказа 'delta'.
-                # Также это решает проблему, когда задержка из этого блока применялась к 'dmkod'.
+                
+                # Обновляем статус заказа после успешной обработки
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
+                    conn.commit()
+                self.order_data['api_status'] = 'Сведения подготовлены'
+                self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
                 return
-
             elif order_status == 'dmkod':
                 # Логика для статуса 'dmkod'
                 with self._get_client_db_connection() as conn:
@@ -1849,49 +1853,50 @@ class ApiIntegrationDialog(tk.Toplevel):
 
                 if not details_to_process:
                     self.after(0, lambda: self._display_api_response(200, "Нет новых тиражей для отправки сведений."))
+                    # Обновляем статус, даже если нет данных
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
+                        conn.commit()
+                    self.order_data['api_status'] = 'Сведения подготовлены'
+                    self.after(0, lambda: self._display_api_response(200, "Статус заказа обновлен: 'Сведения подготовлены' (нет новых тиражей)."))
+                    return
+                else: # Если данные есть, обрабатываем их и обновляем статус
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            for i, detail in enumerate(details_to_process):
+                                attributes = {}
+                                if detail.get('production_date'):
+                                    attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
+                                if detail.get('expiry_date'):
+                                    attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
+                                if detail.get('fias_code'):
+                                    attributes['fias_id'] = detail['fias_code']
+
+                                payload = {"all_from_printrun": detail['api_id']}
+                                if attributes:
+                                    payload['attributes'] = attributes
+                                
+                                response_data = self.api_service.upload_utilisation_data(payload)
+                                
+                                upload_id_from_api = response_data.get('utilisation_upload_id')
+                                if not upload_id_from_api:
+                                    raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
+
+                                cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, detail['detail_id']))
+                                self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
+                                time.sleep(5)
+                        conn.commit()
+
+                    # Обновляем статус заказа после успешной обработки
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
+                        conn.commit()
+                    self.order_data['api_status'] = 'Сведения подготовлены'
+                    self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
                     return
 
-                # self.after(0, lambda: self._append_log(f"Найдено {len(details_to_process)} тиражей для обработки."))
-
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        for i, detail in enumerate(details_to_process):
-                            attributes = {}
-                            if detail.get('production_date'):
-                                attributes['production_date'] = detail['production_date'].strftime('%Y-%m-%d')
-                            if detail.get('expiry_date'):
-                                attributes['expiration_date'] = detail['expiry_date'].strftime('%Y-%m-%d')
-                            # --- ДОБАВЛЕНО: Используем fias_code, если он есть ---
-                            if detail.get('fias_code'):
-                                attributes['fias_id'] = detail['fias_code']
-
-                            payload = {"all_from_printrun": detail['api_id']}
-                            if attributes:
-                                payload['attributes'] = attributes
-
-                            # self.after(0, lambda i=i, p=payload: self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка данных: {json.dumps(p)} ---"))
-                            
-                            response_data = self.api_service.upload_utilisation_data(payload)
-                            
-                            # --- ИСПРАВЛЕНИЕ: Получаем ID из ответа API ---
-                            upload_id_from_api = response_data.get('utilisation_upload_id')
-                            if not upload_id_from_api:
-                                raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
-
-                            cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, detail['detail_id']))
-
-                            # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
-                            self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
-                            time.sleep(5)
-                    conn.commit()
-
-            # Обновляем статус заказа после успешной обработки
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
-                conn.commit()
-            self.order_data['api_status'] = 'Сведения подготовлены'
-            self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
         except Exception as e:
             self.after(0, lambda err=e: self._display_api_response(500, f"КРИТИЧЕСКАЯ ОШИБКА: {err}\n\n{traceback.format_exc()}"))
         finally:
