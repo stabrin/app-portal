@@ -2487,8 +2487,6 @@ class OrderEditorDialog(tk.Toplevel):
                     unmapped_gtins = df_for_json[df_for_json['printrun_id'].isnull()]['gtin'].unique()
                     raise ValueError(f"Ошибка: Для GTIN(ов) {list(unmapped_gtins)} из файла не найден соответствующий ID тиража в заказе.")
 
-                df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
-                
                 grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
 
                 # --- ИСПРАВЛЕНИЕ: Полностью переписанная логика для устранения SyntaxError ---
