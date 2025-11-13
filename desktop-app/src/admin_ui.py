@@ -2415,16 +2415,18 @@ class OrderEditorDialog(tk.Toplevel):
                 unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
                 unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
                 
-                packages_to_insert = []
+                # --- ИСПРАВЛЕНИЕ: Более надежный способ сбора данных об упаковках ---
+                # Это решает проблему, когда паллеты терялись, если в файле были и короба, и паллеты.
+                all_packages_data = []
                 if not unique_boxes.empty:
-                    unique_boxes['level'] = 1
-                    packages_to_insert.append(unique_boxes)
+                    for sscc in unique_boxes['sscc']:
+                        all_packages_data.append({'sscc': sscc, 'level': 1})
                 if not unique_pallets.empty:
-                    unique_pallets['level'] = 2
-                    packages_to_insert.append(unique_pallets)
+                    for sscc in unique_pallets['sscc']:
+                        all_packages_data.append({'sscc': sscc, 'level': 2})
 
-                if packages_to_insert:
-                    all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
+                if all_packages_data:
+                    all_packages_df = pd.DataFrame(all_packages_data)
                     all_packages_df['owner'] = 'delta'
                     
                     # Устанавливаем связи "короб-паллета"
@@ -2487,14 +2489,21 @@ class OrderEditorDialog(tk.Toplevel):
                 def create_payload(row):
                     cleaned_codes = [code.replace('\x1d', '') for code in row['DataMatrix']]
                     return json.dumps({
+                # --- ИСПРАВЛЕНИЕ: Заменяем .apply на list comprehension для надежности и производительности ---
+                # Это решает ошибку "ValueError: Cannot set a DataFrame with multiple columns to the single column codes_json".
+                grouped_for_api['codes_json'] = [
+                    json.dumps({
                         "include": [{"code": c} for c in cleaned_codes],
                         "attributes": {
                             "production_date": str(row['production_date']),
                             "expiration_date": str(row['expiration_date'])
                         }
+                        "attributes": {"production_date": str(row.production_date), "expiration_date": str(row.expiration_date)}
                     })
 
                 grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
+                    for row, cleaned_codes in zip(grouped_for_api.itertuples(), [[code.replace('\x1d', '') for code in dm_list] for dm_list in grouped_for_api['DataMatrix']])
+                ]
                 grouped_for_api['order_id'] = self.order_id
                 grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
                 grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
