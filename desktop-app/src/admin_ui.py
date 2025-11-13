@@ -1804,39 +1804,46 @@ class ApiIntegrationDialog(tk.Toplevel):
 
                 if not results_to_process:
                     self.after(0, lambda: self._display_api_response(200, "Нет новых данных от 'Дельта' для отправки."))
+                    # Обновляем статус, даже если нет данных
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
+                        conn.commit()
+                    self.order_data['api_status'] = 'Сведения подготовлены'
+                    self.after(0, lambda: self._display_api_response(200, "Статус заказа обновлен: 'Сведения подготовлены' (нет новых данных от 'Дельта')."))
                     return
+                else: # Если данные есть, обрабатываем их и обновляем статус
+                    # self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
 
-                # self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            for i, result in enumerate(results_to_process):
+                                payload = result['codes_json']
+                                # self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
+                                
+                                # Вызов API
+                                response_data = self.api_service.upload_utilisation_data(payload)
+                                
+                                # --- ИСПРАВЛЕНИЕ: Получаем ID из ответа API ---
+                                upload_id_from_api = response_data.get('utilisation_upload_id')
+                                if not upload_id_from_api:
+                                    raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
 
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        for i, result in enumerate(results_to_process):
-                            payload = result['codes_json']
-                            # self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
-                            
-                            # Вызов API
-                            response_data = self.api_service.upload_utilisation_data(payload)
-                            
-                            # --- ИСПРАВЛЕНИЕ: Получаем ID из ответа API ---
-                            upload_id_from_api = response_data.get('utilisation_upload_id')
-                            if not upload_id_from_api:
-                                raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
-
-                            # Обновляем запись в delta_result, используя ID из API
-                            cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, result['id']))
-                            
-                            # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
-                            self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
-                            time.sleep(5)
-                    conn.commit()
-                
-                # Обновляем статус заказа после успешной обработки
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
-                    conn.commit()
-                self.order_data['api_status'] = 'Сведения подготовлены'
-                self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
+                                # Обновляем запись в delta_result, используя ID из API
+                                cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, result['id']))
+                                
+                                # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
+                                self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
+                                time.sleep(5)
+                        conn.commit()
+                    
+                    # Обновляем статус заказа после успешной обработки
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
+                        conn.commit()
+                    self.order_data['api_status'] = 'Сведения подготовлены'
+                    self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
                 return
             elif order_status == 'dmkod':
                 # Логика для статуса 'dmkod'
