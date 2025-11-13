@@ -2486,23 +2486,18 @@ class OrderEditorDialog(tk.Toplevel):
                 
                 grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
 
-                def create_payload(row):
-                    cleaned_codes = [code.replace('\x1d', '') for code in row['DataMatrix']]
-                    return json.dumps({
                 # --- ИСПРАВЛЕНИЕ: Заменяем .apply на list comprehension для надежности и производительности ---
                 # Это решает ошибку "ValueError: Cannot set a DataFrame with multiple columns to the single column codes_json".
                 grouped_for_api['codes_json'] = [
                     json.dumps({
-                        "include": [{"code": c} for c in cleaned_codes],
-                        "attributes": {
                             "production_date": str(row['production_date']),
                             "expiration_date": str(row['expiration_date'])
                         }
                         "attributes": {"production_date": str(row.production_date), "expiration_date": str(row.expiration_date)}
-                    })
 
-                grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
-                    for row, cleaned_codes in zip(grouped_for_api.itertuples(), [[code.replace('\x1d', '') for code in dm_list] for dm_list in grouped_for_api['DataMatrix']])
+                         "include": [{"code": c} for c in cleaned_codes],
+                         "attributes": {"production_date": str(row.production_date), "expiration_date": str(row.expiration_date)}
+                     })                    for row, cleaned_codes in zip(grouped_for_api.itertuples(), [[code.replace('\x1d', '') for code in dm_list] for dm_list in grouped_for_api['DataMatrix']])
                 ]
                 grouped_for_api['order_id'] = self.order_id
                 grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
