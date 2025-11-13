@@ -2482,6 +2482,10 @@ class OrderEditorDialog(tk.Toplevel):
                 if not gtin_to_printrun_map:
                     raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
 
+                # --- ИСПРАВЛЕНИЕ: Принудительно приводим GTIN к строковому типу ---
+                # Это решает проблему с потерей ведущих нулей, когда pandas ошибочно
+                # обрабатывает GTIN как число.
+                df_for_json['gtin'] = df_for_json['gtin'].astype(str)
                 df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
                 # --- ИСПРАВЛЕНИЕ: Проверяем, что все GTIN были сопоставлены ---
                 # Это предотвращает молчаливую потерю данных, если для GTIN из файла нет тиража.
