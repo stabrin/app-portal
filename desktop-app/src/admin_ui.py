@@ -2430,7 +2430,10 @@ class OrderEditorDialog(tk.Toplevel):
                     # Устанавливаем связи "короб-паллета"
                     box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
                     box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
-                    find_parent_sscc = lambda row: box_to_pallet_sscc_map.get(row['sscc']) if row['level'] == 1 else None
+                    
+                    def find_parent_sscc(row):
+                        if row['level'] == 1: return box_to_pallet_sscc_map.get(row['sscc'])
+                        return None
                     all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
 
                     # Используем UPSERT для безопасной вставки
@@ -2467,20 +2470,27 @@ class OrderEditorDialog(tk.Toplevel):
                 items_to_upload = items_df[columns_to_save]
                 upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
                 logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
-    
+
                 # 5. Подготовка данных для delta_result
                 df_for_json = df.copy()
                 df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
-                    
+                
                 cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
                 gtin_to_printrun_map = {row['gtin']: row['api_id'] for row in cur.fetchall()}
                 if not gtin_to_printrun_map:
                     raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
-    
+
                 df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
-                    
+                # --- ИСПРАВЛЕНИЕ: Проверяем, что все GTIN были сопоставлены ---
+                # Это предотвращает молчаливую потерю данных, если для GTIN из файла нет тиража.
+                if df_for_json['printrun_id'].isnull().any():
+                    unmapped_gtins = df_for_json[df_for_json['printrun_id'].isnull()]['gtin'].unique()
+                    raise ValueError(f"Ошибка: Для GTIN(ов) {list(unmapped_gtins)} из файла не найден соответствующий ID тиража в заказе.")
+
+                df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
+                
                 grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
-    
+
                 # --- ИСПРАВЛЕНИЕ: Полностью переписанная логика для устранения SyntaxError ---
                 # Используем list comprehension для надежного и быстрого создания JSON.
                 # Это решает ошибку с несоответствием скобок.
@@ -2497,24 +2507,23 @@ class OrderEditorDialog(tk.Toplevel):
                 grouped_for_api['order_id'] = self.order_id
                 grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
                 grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
-    
+
                 delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
                 upsert_data_to_db(cur, 'delta_result', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
                 logging.info(f"[Delta Import] Сохранено {len(delta_result_df)} сгруппированных записей в 'delta_result'.")
+
+                # # 6. Обновление статуса заказа
+                # cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
             
-                # 6. Фиксируем все изменения в одной транзакции
-                    # conn.commit() теперь управляется контекстным менеджером 'with conn'
-                messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
+            conn.commit()
+            messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
+
         except Exception as e:
-            if conn and not conn.closed: 
-                try:
-                    conn.rollback()
-                except psycopg2.InterfaceError:
-                    logging.warning("Не удалось откатить транзакцию, возможно, соединение уже закрыто.")
+            if conn: conn.rollback()
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
         finally:
-            pass # Соединение будет закрыто и возвращено в пул автоматически
+            if conn: conn.close()
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""
