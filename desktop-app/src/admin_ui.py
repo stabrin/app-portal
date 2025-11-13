@@ -1965,6 +1965,11 @@ class OrderEditorDialog(tk.Toplevel):
         self._create_widgets()
         self._load_details()
 
+        # --- НОВОВВЕДЕНИЕ: Добавляем прогресс-бар для длительных операций ---
+        self.progress_bar = ttk.Progressbar(self, orient='horizontal', mode='determinate')
+        # Он будет показан только во время выполнения импорта.
+        # self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
+
     def _get_client_db_connection(self):
         return PrintingService._get_client_db_connection(self.user_info)
 
@@ -2387,6 +2392,12 @@ class OrderEditorDialog(tk.Toplevel):
             logging.info("[Delta Import] Импорт отменен пользователем.")
             return
 
+        # --- НОВОВВЕДЕНИЕ: Показываем и настраиваем прогресс-бар ---
+        self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
+        self.progress_bar['value'] = 0
+        self.progress_bar['maximum'] = 100
+        self.update_idletasks()
+
         # 1. Валидация имени файла
         expected_filename_part = f"order_{self.order_id}.csv"
         if expected_filename_part not in os.path.basename(filepath):
@@ -2412,8 +2423,13 @@ class OrderEditorDialog(tk.Toplevel):
             df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
             df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
 
-            conn = self._get_client_db_connection()
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            self.progress_bar['value'] = 10
+            self.update_idletasks()
+
+            # --- ИСПРАВЛЕНИЕ: Используем новый метод подключения к БД через пул ---
+            # Это решает проблему с созданием лишних подключений.
+            with get_client_db_connection(self.user_info) as conn:
+              with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 from .utils import upsert_data_to_db
                 
                 # 3. Создание упаковок (короба и паллеты)
@@ -2454,6 +2470,9 @@ class OrderEditorDialog(tk.Toplevel):
                     cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
                     logging.info("[Delta Import] Связи 'короб-паллета' обновлены.")
 
+                self.progress_bar['value'] = 30
+                self.update_idletasks()
+
                 # 4. Создание товаров (items)
                 from .aggregation_service import parse_datamatrix
                 parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
@@ -2475,6 +2494,9 @@ class OrderEditorDialog(tk.Toplevel):
                 items_to_upload = items_df[columns_to_save]
                 upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
                 logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
+
+                self.progress_bar['value'] = 80
+                self.update_idletasks()
 
                 # 5. Подготовка данных для delta_result
                 df_for_json = df.copy()
@@ -2526,15 +2548,13 @@ class OrderEditorDialog(tk.Toplevel):
                 # # 6. Обновление статуса заказа
                 # cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
             
-            conn.commit()
-            messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
+              # 6. Фиксируем все изменения в одной транзакции
+              # conn.commit() теперь управляется контекстным менеджером 'with conn'
+              messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
 
         except Exception as e:
-            if conn: conn.rollback()
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
-        finally:
-            if conn: conn.close()
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""
