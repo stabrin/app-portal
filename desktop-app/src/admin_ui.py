@@ -175,6 +175,7 @@ def open_print_management_window(parent_widget):
 
 def open_workplace_setup_window(parent_widget, user_info):
     """Открывает окно для настройки рабочих мест."""
+    logging.debug("Выбран пункт меню 'Настройка/Настройка рабочих мест'. Открытие окна...")
     setup_window = tk.Toplevel(parent_widget)
     setup_window.title("Настройка рабочих мест")
     setup_window.geometry("600x500")
