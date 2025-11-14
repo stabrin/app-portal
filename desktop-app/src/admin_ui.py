@@ -3459,28 +3459,32 @@ class AdminWindow(tk.Tk):
             top_paned_window.pack(fill=tk.BOTH, expand=True)
 
             # 5. Левая панель вверху (управление)
-            left_pane = ttk.LabelFrame(top_paned_window, text="Управление", padding=10)
-            top_paned_window.add(left_pane, weight=1) # 1/3 ширины
+            left_pane = ttk.Frame(top_paned_window)
+            top_paned_window.add(left_pane, weight=2) # 2/3 ширины
 
             # 6. Правая панель вверху (таблица)
-            right_pane = ttk.Frame(top_paned_window)
-            top_paned_window.add(right_pane, weight=2) # 2/3 ширины
+            right_pane = ttk.LabelFrame(top_paned_window, text="Управление", padding=10)
+            top_paned_window.add(right_pane, weight=1) # 1/3 ширины
 
-            # --- Заполнение правой панели (таблица заказов) ---
+            # --- Заполнение левой панели (таблица заказов и ее элементы управления) ---
+            order_controls_frame = ttk.Frame(left_pane)
+            order_controls_frame.pack(fill=tk.X, padx=5, pady=5)
+
             cols = ('date', 'client', 'status', 'notes', 'actions')
-            tree = ttk.Treeview(right_pane, columns=cols, show='headings')
+            tree = ttk.Treeview(left_pane, columns=cols, show='headings')
             tree.heading('date', text='Дата')
             tree.heading('client', text='Клиент')
             tree.heading('status', text='Статус')
             tree.heading('notes', text='Комментарий')
             tree.heading('actions', text='Действия')
+
             tree.column('date', width=100, anchor=tk.CENTER)
             tree.column('client', width=300, anchor=tk.W)
             tree.column('status', width=100, anchor=tk.CENTER)
             tree.column('notes', width=300, anchor=tk.W)
             tree.column('actions', width=100, anchor=tk.CENTER)
             tree.pack(expand=True, fill="both", side="left")
-            scrollbar = ttk.Scrollbar(right_pane, orient="vertical", command=tree.yview)
+            scrollbar = ttk.Scrollbar(left_pane, orient="vertical", command=tree.yview)
             tree.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side="right", fill="y")
 
@@ -3557,9 +3561,11 @@ class AdminWindow(tk.Tk):
 
             tree.bind("<Button-3>", show_context_menu)
 
-            # --- Заполнение левой панели (управление) ---
-            ttk.Button(left_pane, text="Обновить", command=load_data).pack(fill=tk.X, pady=5)
-            # Можно добавить другие кнопки управления сюда
+            # --- Заполнение элементов управления над таблицей ---
+            ttk.Button(order_controls_frame, text="Обновить", command=load_data).pack(side=tk.LEFT)
+
+            # --- Заполнение правой панели (управление) ---
+            ttk.Label(right_pane, text="Блок управления в разработке.").pack(expand=True)
 
             # --- Заполнение нижней панели (статистика) ---
             ttk.Label(bottom_pane, text="Раздел статистики в разработке.").pack(expand=True)
