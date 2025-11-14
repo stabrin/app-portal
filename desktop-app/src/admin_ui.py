@@ -3562,30 +3562,38 @@ class AdminWindow(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
 
+            def on_management_tab_change(event):
+                """Обработчик переключения вкладок в панели управления."""
+                selected_tab_index = management_notebook.index(management_notebook.select())
+                selected_order_id = tree.focus()
+
+                if not selected_order_id:
+                    return
+
+                if selected_tab_index == 0: # Вкладка "Редактирование"
+                    open_correct_editor(selected_order_id)
+                elif selected_tab_index == 1: # Вкладка "АПИ"
+                    ApiIntegrationDialog(self, self.user_info, selected_order_id)
+
             def on_order_select(event=None):
                 """Обработчик выбора строки в таблице. Активирует/деактивирует кнопки."""
                 # Очищаем панель управления
                 placeholder_label.pack_forget()
                 management_notebook.pack_forget()
-                for widget in edit_tab.winfo_children(): widget.destroy()
-                for widget in api_tab.winfo_children(): widget.destroy()
 
                 selected_item = tree.focus()
                 if not selected_item:
                     placeholder_label.pack(expand=True, fill="both")
+                    management_notebook.unbind("<<NotebookTabChanged>>") # Отвязываем событие
                     return
 
                 order_id = selected_item
                 order_status = tree.item(order_id, "values")[2]
 
-                # Показываем notebook
+                # Показываем notebook и привязываем событие
                 management_notebook.pack(fill="both", expand=True)
-
-                # Заполняем вкладку "Редактирование"
-                ttk.Button(edit_tab, text="Редактировать заказ", command=lambda: open_correct_editor(order_id)).pack(fill=tk.X, pady=5)
-
-                # Заполняем вкладку "АПИ"
-                ttk.Button(api_tab, text="Интеграция с АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, order_id)).pack(fill=tk.X, pady=5)
+                management_notebook.bind("<<NotebookTabChanged>>", on_management_tab_change)
+                management_notebook.select(edit_tab) # Выбираем первую вкладку по умолчанию
 
                 # Управляем состоянием вкладки "АПИ"
                 if order_status in ('delta', 'dmkod'):
