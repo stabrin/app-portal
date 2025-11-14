@@ -3562,24 +3562,33 @@ class AdminWindow(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
 
-            def on_management_tab_change(event):
+            def on_management_tab_change(event=None):
                 """Обработчик переключения вкладок в панели управления."""
                 selected_tab_index = management_notebook.index(management_notebook.select())
                 selected_order_id = tree.focus()
 
                 if not selected_order_id:
                     return
-
-                if selected_tab_index == 0: # Вкладка "Редактирование"
-                    open_correct_editor(selected_order_id)
-                elif selected_tab_index == 1: # Вкладка "АПИ"
-                    ApiIntegrationDialog(self, self.user_info, selected_order_id)
+                
+                target_tab = management_notebook.nametowidget(management_notebook.select())
+                # Очищаем вкладку, только если она пустая (чтобы не пересоздавать интерфейс)
+                if not target_tab.winfo_children():
+                    if selected_tab_index == 0: # Вкладка "Редактирование"
+                        scenario_data = tree.item(selected_order_id, "values")[2] # Пример, нужна реальная логика
+                        editor_frame = OrderEditorFrame(target_tab, self.user_info, selected_order_id, {})
+                        editor_frame.pack(fill="both", expand=True)
+                    elif selected_tab_index == 1: # Вкладка "АПИ"
+                        api_frame = ApiIntegrationFrame(target_tab, self.user_info, selected_order_id)
+                        api_frame.pack(fill="both", expand=True)
 
             def on_order_select(event=None):
                 """Обработчик выбора строки в таблице. Активирует/деактивирует кнопки."""
-                # Очищаем панель управления
+                # Очищаем панель управления и вкладки
                 placeholder_label.pack_forget()
                 management_notebook.pack_forget()
+                for tab in (edit_tab, api_tab):
+                    for widget in tab.winfo_children():
+                        widget.destroy()
 
                 selected_item = tree.focus()
                 if not selected_item:
@@ -3593,7 +3602,7 @@ class AdminWindow(tk.Tk):
                 # Показываем notebook и привязываем событие
                 management_notebook.pack(fill="both", expand=True)
                 management_notebook.bind("<<NotebookTabChanged>>", on_management_tab_change)
-                management_notebook.select(edit_tab) # Выбираем первую вкладку по умолчанию
+                on_management_tab_change() # Вызываем обработчик для первой активной вкладки
 
                 # Управляем состоянием вкладки "АПИ"
                 if order_status in ('delta', 'dmkod'):
@@ -3834,7 +3843,7 @@ class ScenarioEditorDialog(tk.Toplevel):
             self.marking_frame.pack_forget()
             self.aggregation_frame.pack_forget()
 
-    def _on_ok(self):
+    def _on_ok(self, close_on_save=True):
         """Собирает данные из виджетов и формирует результат."""
         name = self.name_entry.get().strip()
         if not name:
@@ -3863,7 +3872,7 @@ class ScenarioEditorDialog(tk.Toplevel):
             'name': name,
             'scenario_data': scenario_data
         }
-        self.destroy()
+        if close_on_save: self.destroy()
 
 class NewNotificationDialog(tk.Toplevel):
     """Диалог для создания/редактирования уведомления."""
@@ -3940,14 +3949,13 @@ class NewNotificationDialog(tk.Toplevel):
         self.result = (name, arrival_date)
         self.destroy()
 
-class CalendarDialog(tk.Toplevel):
+class CalendarDialog(tk.Toplevel): # Этот класс остается Toplevel, так как он всегда должен быть модальным
     def __init__(self, parent, initial_date=None): # Переименованный класс
         super().__init__(parent)
         self.title("Выберите дату")
         self.transient(parent)
         self.grab_set()
         self.result = None
-
         if initial_date:
             self._current_date = initial_date
         else:
@@ -3956,18 +3964,17 @@ class CalendarDialog(tk.Toplevel):
         self._create_widgets()
         self._update_calendar()
 
-    def _create_widgets(self):
+    def _create_widgets(self): # Этот метод остается без изменений
         nav_frame = ttk.Frame(self)
         nav_frame.pack(pady=5)
         ttk.Button(nav_frame, text="<", command=self._prev_month).pack(side=tk.LEFT)
         self.month_year_label = ttk.Label(nav_frame, font=("Arial", 12, "bold"), width=20, anchor="center")
         self.month_year_label.pack(side=tk.LEFT, padx=10)
         ttk.Button(nav_frame, text=">", command=self._next_month).pack(side=tk.LEFT)
-
         self.calendar_frame = ttk.Frame(self)
         self.calendar_frame.pack(padx=10, pady=10)
 
-    def _update_calendar(self):
+    def _update_calendar(self): # Этот метод остается без изменений
         for widget in self.calendar_frame.winfo_children():
             widget.destroy()
 
