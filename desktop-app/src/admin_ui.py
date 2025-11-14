@@ -3498,24 +3498,22 @@ class AdminWindow(tk.Tk):
             # 6. Правая панель вверху (таблица)
             right_pane = ttk.LabelFrame(top_paned_window, text="Управление", padding=10)
             top_paned_window.add(right_pane, weight=1) # 1/3 ширины
-
+ 
             # --- Заполнение левой панели (таблица заказов и ее элементы управления) ---
             order_controls_frame = ttk.Frame(left_pane)
             order_controls_frame.pack(fill=tk.X, padx=5, pady=5)
-
-            cols = ('date', 'client', 'status', 'notes', 'actions')
+ 
+            cols = ('date', 'client', 'status', 'notes')
             tree = ttk.Treeview(left_pane, columns=cols, show='headings')
             tree.heading('date', text='Дата')
             tree.heading('client', text='Клиент')
             tree.heading('status', text='Статус')
             tree.heading('notes', text='Комментарий')
-            tree.heading('actions', text='Действия')
-
+ 
             tree.column('date', width=100, anchor=tk.CENTER)
             tree.column('client', width=300, anchor=tk.W)
             tree.column('status', width=100, anchor=tk.CENTER)
             tree.column('notes', width=300, anchor=tk.W)
-            tree.column('actions', width=100, anchor=tk.CENTER)
             tree.pack(expand=True, fill="both", side="left")
             scrollbar = ttk.Scrollbar(left_pane, orient="vertical", command=tree.yview)
             tree.configure(yscrollcommand=scrollbar.set)
@@ -3555,7 +3553,7 @@ class AdminWindow(tk.Tk):
                             cur.execute(query)
                             for order in cur.fetchall():
                                 client_display = f"{order['client_name']} заказ № {order['id']}"
-                                values = (order['order_date'], client_display, order['status'], order['notes'], "...")
+                                values = (order['order_date'], client_display, order['status'], order['notes'])
                                 tag = ''
                                 if order['api_status'] == 'Отчет подготовлен': tag = 'pink_row'
                                 elif order['api_status'] == 'Коды скачаны': tag = 'green_row'
@@ -3655,23 +3653,7 @@ class AdminWindow(tk.Tk):
                 management_notebook.pack(fill="both", expand=True)
                 management_notebook.tab(api_tab, state="normal" if order_status in ('delta', 'dmkod') else "disabled")
 
-            def show_context_menu(event):
-                # (логика контекстного меню остается прежней)
-                item_id = tree.identify_row(event.y)
-                if not item_id: return
-                tree.selection_set(item_id)
-                order_status = tree.item(item_id, "values")[2]
-                menu = tk.Menu(parent, tearoff=0)
-                menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_correct_editor(item_id))
-                menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
-                if order_status in ('delta', 'dmkod'):
-                    menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
-                if not is_archive:
-                    menu.add_separator()
-                    menu.add_command(label="Перенести в архив", command=lambda: move_to_archive(item_id, order_status))
-                menu.post(event.x_root, event.y_root)            
  
-            tree.bind("<Button-3>", show_context_menu)
             tree.bind("<<TreeviewSelect>>", on_order_select) # Привязываем обработчик выбора
 
             # --- Заполнение элементов управления над таблицей ---
