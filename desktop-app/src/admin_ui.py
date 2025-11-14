@@ -3441,47 +3441,58 @@ class AdminWindow(tk.Tk):
         notebook.add(archive_frame, text="Архив")
 
         def _create_orders_view(parent, is_archive):
-            """Вспомогательная функция для создания представления (таблицы) заказов."""
-            view_frame = ttk.Frame(parent)
-            view_frame.pack(expand=True, fill="both")
+            """Создает представление заказов с новой компоновкой."""
+            # 1. Основной PanedWindow (вертикальный)
+            main_paned_window = ttk.PanedWindow(parent, orient=tk.VERTICAL)
+            main_paned_window.pack(fill=tk.BOTH, expand=True)
 
-            controls_frame = ttk.Frame(view_frame)
-            controls_frame.pack(fill=tk.X, pady=5)
+            # 2. Верхняя панель (для управления и таблицы)
+            top_pane = ttk.Frame(main_paned_window)
+            main_paned_window.add(top_pane, weight=2) # 2/3 высоты
 
+            # 3. Нижняя панель (для статистики)
+            bottom_pane = ttk.LabelFrame(main_paned_window, text="Статистика", padding=5)
+            main_paned_window.add(bottom_pane, weight=1) # 1/3 высоты
+
+            # 4. Разделение верхней панели (горизонтальное)
+            top_paned_window = ttk.PanedWindow(top_pane, orient=tk.HORIZONTAL)
+            top_paned_window.pack(fill=tk.BOTH, expand=True)
+
+            # 5. Левая панель вверху (управление)
+            left_pane = ttk.LabelFrame(top_paned_window, text="Управление", padding=10)
+            top_paned_window.add(left_pane, weight=1) # 1/3 ширины
+
+            # 6. Правая панель вверху (таблица)
+            right_pane = ttk.Frame(top_paned_window)
+            top_paned_window.add(right_pane, weight=2) # 2/3 ширины
+
+            # --- Заполнение правой панели (таблица заказов) ---
             cols = ('date', 'client', 'status', 'notes', 'actions')
-            tree = ttk.Treeview(view_frame, columns=cols, show='headings')
-
-            # Настройка заголовков и ширины колонок
+            tree = ttk.Treeview(right_pane, columns=cols, show='headings')
             tree.heading('date', text='Дата')
             tree.heading('client', text='Клиент')
             tree.heading('status', text='Статус')
             tree.heading('notes', text='Комментарий')
             tree.heading('actions', text='Действия')
-
-            # Установка ширины в процентах (эмуляция через weight)
-            # Для Treeview это не работает, поэтому задаем абсолютные значения,
-            # которые можно будет подогнать при изменении размера окна.
             tree.column('date', width=100, anchor=tk.CENTER)
             tree.column('client', width=300, anchor=tk.W)
             tree.column('status', width=100, anchor=tk.CENTER)
             tree.column('notes', width=300, anchor=tk.W)
             tree.column('actions', width=100, anchor=tk.CENTER)
-
             tree.pack(expand=True, fill="both", side="left")
-
-            scrollbar = ttk.Scrollbar(view_frame, orient="vertical", command=tree.yview)
+            scrollbar = ttk.Scrollbar(right_pane, orient="vertical", command=tree.yview)
             tree.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side="right", fill="y")
 
-            # Настройка тегов для подсветки строк
             tree.tag_configure('pink_row', background='lightpink')
             tree.tag_configure('green_row', background='lightgreen')
             tree.tag_configure('yellow_row', background='lightyellow')
             tree.tag_configure('blue_row', background='lightblue')
 
+            # --- Функции для работы с данными и UI ---
             def load_data():
-                for i in tree.get_children():
-                    tree.delete(i)
+                # (логика загрузки данных остается прежней)
+                for i in tree.get_children(): tree.delete(i)
                 try:
                     with get_client_db_connection(self.user_info) as conn:
                         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -3491,86 +3502,71 @@ class AdminWindow(tk.Tk):
                             for order in cur.fetchall():
                                 client_display = f"{order['client_name']} заказ № {order['id']}"
                                 values = (order['order_date'], client_display, order['status'], order['notes'], "...")
-                                
                                 tag = ''
                                 if order['api_status'] == 'Отчет подготовлен': tag = 'pink_row'
                                 elif order['api_status'] == 'Коды скачаны': tag = 'green_row'
                                 elif order['api_status'] == 'Запрос создан': tag = 'yellow_row'
                                 elif order['status'] == 'completed': tag = 'blue_row'
-
                                 tree.insert('', 'end', iid=order['id'], values=values, tags=(tag,))
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось загрузить заказы: {e}", parent=parent)
 
             def move_to_archive(order_id, current_status):
+                # (логика архивации остается прежней)
                 if messagebox.askyesno("Подтверждение", "Переместить заказ в архив?", parent=parent):
                     try:
                         new_status = f"Архив_{current_status}"
                         with get_client_db_connection(self.user_info) as conn:
                             with conn.cursor() as cur:
-                                # 1. Обновляем статус самого заказа
                                 cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, order_id))
                                 result = cur.fetchone()
                                 notification_id = result[0] if result else None
-                                logging.info(f"Заказ ID {order_id} перемещен в архив. Связанное уведомление ID: {notification_id}")
-
-                                # 2. Если заказ связан с уведомлением, архивируем и его
                                 if notification_id:
                                     cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
-                                    logging.info(f"Статус уведомления о поставке ID {notification_id} также изменен на 'В архиве'.")
-
                             conn.commit()
-                        load_data() # Обновляем текущую вкладку
+                        load_data()
                         # TODO: Нужно обновить и другую вкладку тоже
                     except Exception as e:
                         messagebox.showerror("Ошибка", f"Не удалось архивировать заказ: {e}", parent=parent)
 
             def show_context_menu(event):
+                # (логика контекстного меню остается прежней)
                 item_id = tree.identify_row(event.y)
                 if not item_id: return
                 tree.selection_set(item_id)
-                
-                # Получаем статус заказа
                 order_status = tree.item(item_id, "values")[2]
-
                 menu = tk.Menu(parent, tearoff=0)
-                
                 def open_correct_editor(order_id):
-                    """Проверяет сценарий и открывает соответствующий редактор."""
                     try:
                         with get_client_db_connection(self.user_info) as conn:
                             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                                cur.execute("""
-                                    SELECT s.scenario_data FROM orders o
-                                    JOIN ap_marking_scenarios s ON o.scenario_id = s.id
-                                    WHERE o.id = %s
-                                """, (order_id,))
+                                cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
                                 result = cur.fetchone()
                         scenario_data = result['scenario_data'] if result else {}
-                        # "Редактировать" всегда открывает OrderEditorDialog, передавая ему сценарий
                         OrderEditorDialog(self, self.user_info, order_id, scenario_data)
                     except Exception as e:
                         messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
-
-                # --- ИСПРАВЛЕНИЕ: Используем правильное имя функции ---
                 menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_correct_editor(item_id))
                 menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
-
                 if order_status in ('delta', 'dmkod'):
                     menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
-
                 if not is_archive:
                     menu.add_separator()
                     menu.add_command(label="Перенести в архив", command=lambda: move_to_archive(item_id, order_status))
-                
                 menu.post(event.x_root, event.y_root)
 
             tree.bind("<Button-3>", show_context_menu)
-            ttk.Button(controls_frame, text="Обновить", command=load_data).pack(side=tk.LEFT)
-            
+
+            # --- Заполнение левой панели (управление) ---
+            ttk.Button(left_pane, text="Обновить", command=load_data).pack(fill=tk.X, pady=5)
+            # Можно добавить другие кнопки управления сюда
+
+            # --- Заполнение нижней панели (статистика) ---
+            ttk.Label(bottom_pane, text="Раздел статистики в разработке.").pack(expand=True)
+
             # Первоначальная загрузка
             load_data()
-            return load_data # Возвращаем функцию обновления для использования в других местах
+            return load_data
 
         # Создаем обе вкладки
         refresh_in_progress = _create_orders_view(in_progress_frame, is_archive=False)
