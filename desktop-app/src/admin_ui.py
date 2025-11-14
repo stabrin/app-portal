@@ -3562,49 +3562,38 @@ class AdminWindow(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
 
-            # --- ИЗМЕНЕНИЕ: Убираем on_management_tab_change, так как логика теперь в on_order_select ---
+            def on_management_tab_change(event):
+                """Обработчик переключения вкладок в панели управления."""
+                selected_tab_index = management_notebook.index(management_notebook.select())
+                selected_order_id = tree.focus()
+
+                if not selected_order_id:
+                    return
+
+                if selected_tab_index == 0: # Вкладка "Редактирование"
+                    open_correct_editor(selected_order_id)
+                elif selected_tab_index == 1: # Вкладка "АПИ"
+                    ApiIntegrationDialog(self, self.user_info, selected_order_id)
 
             def on_order_select(event=None):
                 """Обработчик выбора строки в таблице. Активирует/деактивирует кнопки."""
-                # Очищаем панель управления и вкладки
+                # Очищаем панель управления
                 placeholder_label.pack_forget()
                 management_notebook.pack_forget()
-                for tab in (edit_tab, api_tab):
-                    for widget in tab.winfo_children():
-                        widget.destroy()
 
                 selected_item = tree.focus()
                 if not selected_item:
                     placeholder_label.pack(expand=True, fill="both")
+                    management_notebook.unbind("<<NotebookTabChanged>>") # Отвязываем событие
                     return
 
                 order_id = selected_item
                 order_status = tree.item(order_id, "values")[2]
 
-                # --- НОВАЯ ЛОГИКА: Получаем данные и создаем фреймы сразу ---
-                try:
-                    with get_client_db_connection(self.user_info) as conn:
-                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                            cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
-                            result = cur.fetchone()
-                    scenario_data = result['scenario_data'] if result else {}
-                    post_processing_mode = scenario_data.get('post_processing')
-
-                    # Создаем фрейм редактора и встраиваем его во вкладку "Редактирование"
-                    editor_frame = OrderEditorFrame(edit_tab, self.user_info, order_id, scenario_data)
-                    editor_frame.pack(fill="both", expand=True)
-
-                    # Создаем фрейм API и встраиваем его во вкладку "АПИ"
-                    api_frame = ApiIntegrationFrame(api_tab, self.user_info, order_id, post_processing_mode)
-                    api_frame.pack(fill="both", expand=True)
-
-                except Exception as e:
-                    messagebox.showerror("Ошибка", f"Не удалось создать интерфейсы управления: {e}", parent=self)
-                    placeholder_label.pack(expand=True, fill="both") # Показываем заглушку в случае ошибки
-                    return
-
-                # Показываем notebook
+                # Показываем notebook и привязываем событие
                 management_notebook.pack(fill="both", expand=True)
+                management_notebook.bind("<<NotebookTabChanged>>", on_management_tab_change)
+                management_notebook.select(edit_tab) # Выбираем первую вкладку по умолчанию
 
                 # Управляем состоянием вкладки "АПИ"
                 if order_status in ('delta', 'dmkod'):
@@ -3620,9 +3609,9 @@ class AdminWindow(tk.Tk):
                 order_status = tree.item(item_id, "values")[2]
                 menu = tk.Menu(parent, tearoff=0)
                 menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_correct_editor(item_id))
-                menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
+                menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}", parent=parent))
                 if order_status in ('delta', 'dmkod'):
-                    menu.add_command(label="АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, item_id))
+                    menu.add_command(label="АПИ", command=lambda: messagebox.showinfo("Инфо", "Действие 'АПИ' теперь доступно на панели управления справа.", parent=parent))
                 if not is_archive:
                     menu.add_separator()
                     menu.add_command(label="Перенести в архив", command=lambda: move_to_archive(item_id, order_status))
@@ -3845,7 +3834,7 @@ class ScenarioEditorDialog(tk.Toplevel):
             self.marking_frame.pack_forget()
             self.aggregation_frame.pack_forget()
 
-    def _on_ok(self, close_on_save=True):
+    def _on_ok(self):
         """Собирает данные из виджетов и формирует результат."""
         name = self.name_entry.get().strip()
         if not name:
@@ -3874,7 +3863,7 @@ class ScenarioEditorDialog(tk.Toplevel):
             'name': name,
             'scenario_data': scenario_data
         }
-        if close_on_save: self.destroy()
+        self.destroy()
 
 class NewNotificationDialog(tk.Toplevel):
     """Диалог для создания/редактирования уведомления."""
