@@ -1983,7 +1983,8 @@ class OrderEditorDialog(tk.Toplevel):
         # self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
 
     def _get_client_db_connection(self):
-        return PrintingService._get_client_db_connection(self.user_info)
+        # ИСПРАВЛЕНИЕ: Используем централизованный метод для получения соединения из пула
+        return get_client_db_connection(self.user_info)
 
     def _create_widgets(self):
         main_frame = ttk.Frame(self, padding="10")
@@ -2567,6 +2568,11 @@ class OrderEditorDialog(tk.Toplevel):
         except Exception as e:
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
+        finally:
+            # --- НОВОВВЕДЕНИЕ: Прячем прогресс-бар после завершения ---
+            self.progress_bar.pack_forget()
+            self.update_idletasks()
+
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""
@@ -3772,7 +3778,8 @@ class ScenarioEditorDialog(tk.Toplevel):
         self.widgets = {}
 
         # Инициализация данных
-        self.item_data = item_data if item_data else {}
+        # --- ИСПРАВЛЕНИЕ: Глубокое копирование, чтобы изменения в редакторе не затрагивали кэш ---
+        self.item_data = json.loads(json.dumps(item_data)) if item_data else {}
         self.scenario_data = self.item_data.get('scenario_data', {})
 
         # --- Создание виджетов ---
