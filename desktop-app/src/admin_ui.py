@@ -3488,11 +3488,21 @@ class AdminWindow(tk.Tk):
             tree.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side="right", fill="y")
 
-            # --- НОВЫЙ БЛОК: Создаем кнопки в панели управления ---
-            btn_edit_order = ttk.Button(right_pane, text="Редактировать", state="disabled")
-            btn_edit_order.pack(fill=tk.X, pady=5)
-            btn_api_order = ttk.Button(right_pane, text="АПИ", state="disabled")
-            btn_api_order.pack(fill=tk.X, pady=5)
+            # --- НОВЫЙ БЛОК: Создаем виджеты в панели управления ---
+            # Заглушка, которая видна, когда ничего не выбрано
+            placeholder_label = ttk.Label(right_pane, text="Выберите заказ для управления", anchor="center")
+            placeholder_label.pack(expand=True, fill="both")
+
+            # Notebook, который будет содержать вкладки
+            management_notebook = ttk.Notebook(right_pane)
+            # management_notebook.pack(fill="both", expand=True) # pack будет вызываться в on_order_select
+
+            # Вкладка "Редактирование"
+            edit_tab = ttk.Frame(management_notebook, padding=10)
+            management_notebook.add(edit_tab, text="Редактирование")
+            # Вкладка "АПИ"
+            api_tab = ttk.Frame(management_notebook, padding=10)
+            management_notebook.add(api_tab, text="АПИ")
 
             tree.tag_configure('pink_row', background='lightpink')
             tree.tag_configure('green_row', background='lightgreen')
@@ -3554,23 +3564,34 @@ class AdminWindow(tk.Tk):
 
             def on_order_select(event=None):
                 """Обработчик выбора строки в таблице. Активирует/деактивирует кнопки."""
+                # Очищаем панель управления
+                placeholder_label.pack_forget()
+                management_notebook.pack_forget()
+                for widget in edit_tab.winfo_children(): widget.destroy()
+                for widget in api_tab.winfo_children(): widget.destroy()
+
                 selected_item = tree.focus()
                 if not selected_item:
-                    btn_edit_order.config(state="disabled", command=None)
-                    btn_api_order.config(state="disabled", command=None)
+                    placeholder_label.pack(expand=True, fill="both")
                     return
 
                 order_id = selected_item
                 order_status = tree.item(order_id, "values")[2]
 
-                # Кнопка "Редактировать" всегда активна при выборе
-                btn_edit_order.config(state="normal", command=lambda: open_correct_editor(order_id))
+                # Показываем notebook
+                management_notebook.pack(fill="both", expand=True)
 
-                # Кнопка "АПИ" активна только для определенных статусов
+                # Заполняем вкладку "Редактирование"
+                ttk.Button(edit_tab, text="Редактировать заказ", command=lambda: open_correct_editor(order_id)).pack(fill=tk.X, pady=5)
+
+                # Заполняем вкладку "АПИ"
+                ttk.Button(api_tab, text="Интеграция с АПИ", command=lambda: ApiIntegrationDialog(self, self.user_info, order_id)).pack(fill=tk.X, pady=5)
+
+                # Управляем состоянием вкладки "АПИ"
                 if order_status in ('delta', 'dmkod'):
-                    btn_api_order.config(state="normal", command=lambda: ApiIntegrationDialog(self, self.user_info, order_id))
+                    management_notebook.tab(api_tab, state="normal")
                 else:
-                    btn_api_order.config(state="disabled", command=None)
+                    management_notebook.tab(api_tab, state="disabled")
 
             def show_context_menu(event):
                 # (логика контекстного меню остается прежней)
