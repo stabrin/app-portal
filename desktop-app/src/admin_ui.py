@@ -1438,6 +1438,9 @@ class ApiIntegrationFrame(ttk.Frame):
         self.split_runs_btn = ttk.Button(flow_panel, text="Разбить на тиражи", command=self._split_runs)
         self.split_runs_btn.pack(side=tk.LEFT, padx=2)
         self.prepare_json_btn = ttk.Button(flow_panel, text="Подготовить JSON", command=self._prepare_json)
+        # --- НОВЫЙ БЛОК: Кнопка для подписания ЭЦП ---
+        self.sign_and_send_btn = ttk.Button(flow_panel, text="Подписать и отправить", command=self._sign_with_eds)
+        # Кнопка будет показана/скрыта в _update_buttons_state
         self.prepare_json_btn.pack(side=tk.LEFT, padx=2)
         self.download_codes_btn = ttk.Button(flow_panel, text="Скачать коды", command=self._download_codes)
         self.download_codes_btn.pack(side=tk.LEFT, padx=2)
@@ -1478,12 +1481,21 @@ class ApiIntegrationFrame(ttk.Frame):
             api_order_id = self.order_data.get('api_order_id')
             api_status = self.order_data.get('api_status')
 
-            # Кнопка "Запросить коды" активна, если заказа в API еще нет или нет статуса запроса
-            self.request_codes_btn.config(state="normal" if not api_status else "disabled")
-            # Кнопка "Разбить на тиражи" активна, если статус 'Запрос создан'
-            self.split_runs_btn.config(state="normal" if api_status == 'Запрос создан' else "disabled")
+            # --- ИЗМЕНЕНИЕ: Управляем видимостью кнопок, а не только состоянием ---
+            # Прячем все кнопки и показываем только нужные для текущего статуса
+            for btn in [self.request_codes_btn, self.sign_and_send_btn, self.split_runs_btn, self.prepare_json_btn]:
+                btn.pack_forget()
+
+            if not api_status:
+                self.request_codes_btn.pack(side=tk.LEFT, padx=2)
+            elif api_status == 'Запрос создан':
+                # Вместо "Разбить на тиражи" теперь показываем "Подписать"
+                self.sign_and_send_btn.pack(side=tk.LEFT, padx=2)
+            elif api_status == 'Запрос подписан': # Новый гипотетический статус
+                self.split_runs_btn.pack(side=tk.LEFT, padx=2)
+
             # Кнопка "Подготовить JSON" активна, если статус 'Тиражи созданы'
-            self.prepare_json_btn.config(state="normal" if api_status == 'Тиражи созданы' else "disabled")
+            self.prepare_json_btn.pack(side=tk.LEFT, padx=2)
             # Кнопка "Скачать коды" активна для нескольких статусов
             self.download_codes_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен'] else "disabled")
             self.prepare_report_data_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны'] else "disabled")
@@ -1953,6 +1965,10 @@ class ApiIntegrationFrame(ttk.Frame):
     def _import_integration_file(self):
         """Заглушка для загрузки интеграционного файла."""
         messagebox.showinfo("В разработке", "Функционал 'Загрузить интеграционный файл' находится в разработке.", parent=self)
+
+    def _sign_with_eds(self):
+        """Заглушка для функции подписания ЭЦП."""
+        messagebox.showinfo("В разработке", "Функционал подписания с помощью ЭЦП находится в разработке.\n\nНа данный момент подписание необходимо выполнять в веб-интерфейсе ДМ.Код.", parent=self)
 
 
 class OrderEditorFrame(ttk.Frame):

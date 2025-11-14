@@ -1,5 +1,6 @@
 # src/api_service.py
 
+import functools
 import os
 import requests
 import logging
@@ -30,14 +31,51 @@ class ApiService:
             raise ConnectionError("Отсутствует токен доступа к API.")
         return {'Authorization': f'Bearer {access_token}'}
 
+    def _refresh_token(self):
+        """Обновляет access и refresh токены, используя текущий refresh токен."""
+        refresh_token = self.user_info.get('api_refresh_token')
+        if not refresh_token:
+            logger.error("Refresh token не найден. Невозможно обновить токен доступа.")
+            raise ConnectionError("Refresh token отсутствует.")
+
+        logger.info("Токен доступа истек или невалиден. Попытка обновления...")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/user/token/refresh"
+            response = requests.post(url, json={'refresh': refresh_token})
+            response.raise_for_status()
+            
+            new_tokens = response.json()
+            self.user_info['api_access_token'] = new_tokens['access']
+            self.user_info['api_refresh_token'] = new_tokens['refresh']
+            
+            logger.info("Токены успешно обновлены.")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Не удалось обновить токен: {e}", exc_info=True)
+            # Если обновление не удалось, возможно, refresh-токен тоже истек.
+            # В этом случае нужно будет перелогиниться.
+            raise ConnectionError("Не удалось обновить токен. Требуется повторная авторизация.") from e
+
+    def _api_request(self, method, url, **kwargs):
+        """Обертка для всех API-запросов с автоматическим обновлением токена."""
+        try:
+            headers = self._get_auth_headers()
+            response = requests.request(method, url, headers=headers, **kwargs)
+            response.raise_for_status()
+            return response
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401: # Unauthorized
+                self._refresh_token()
+                headers = self._get_auth_headers() # Получаем новые заголовки
+                return requests.request(method, url, headers=headers, **kwargs)
+            raise # Перебрасываем другие HTTP ошибки
+
     def get_participants(self):
         """Получает список участников (клиентов) из API."""
         logger.info("Получение списка участников из API...")
         try:
             participants_url = f"{self.api_base_url.rstrip('/')}/psp/participants"
-            headers = self._get_auth_headers()
-            response = requests.get(participants_url, headers=headers)
-            response.raise_for_status()
+            response = self._api_request('get', participants_url)
             return response.json().get('participants', [])
         except requests.exceptions.RequestException as e:
             logger.error(f"Не удалось получить список участников из API: {e}", exc_info=True)
@@ -48,9 +86,7 @@ class ApiService:
         logger.info(f"Отправка запроса на создание заказа в API. Payload: {payload}")
         try:
             url = f"{self.api_base_url.rstrip('/')}/psp/order/create"
-            headers = self._get_auth_headers()
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
+            response = self._api_request('post', url, json=payload, timeout=30)
             logger.info(f"Заказ успешно создан в API. Ответ: {response.json()}")
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -62,9 +98,7 @@ class ApiService:
         logger.info(f"Отправка запроса на создание suborder. Payload: {payload}")
         try:
             url = f"{self.api_base_url.rstrip('/')}/psp/suborders/create"
-            headers = self._get_auth_headers()
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
+            response = self._api_request('post', url, json=payload, timeout=30)
             logger.info(f"Запрос на коды успешно отправлен. Ответ: {response.json()}")
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -76,10 +110,8 @@ class ApiService:
         logger.info(f"Запрос деталей заказа ID {api_order_id} из API.")
         try:
             url = f"{self.api_base_url.rstrip('/')}/psp/orders"
-            headers = self._get_auth_headers()
             # GET-запрос с телом в JSON
-            response = requests.get(url, headers=headers, json={"order_id": api_order_id}, timeout=30)
-            response.raise_for_status()
+            response = self._api_request('get', url, json={"order_id": api_order_id}, timeout=30)
             logger.info(f"Детали заказа {api_order_id} успешно получены.")
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -91,9 +123,7 @@ class ApiService:
         logger.info(f"Отправка запроса на создание тиража. Payload: {payload}")
         try:
             url = f"{self.api_base_url.rstrip('/')}/psp/printrun/create"
-            headers = self._get_auth_headers()
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
+            response = self._api_request('post', url, json=payload, timeout=30)
             logger.info(f"Тираж успешно создан. Ответ: {response.json()}")
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -105,9 +135,7 @@ class ApiService:
         logger.info(f"Отправка запроса на подготовку JSON для тиража. Payload: {payload}")
         try:
             url = f"{self.api_base_url.rstrip('/')}/psp/printrun/json/create"
-            headers = self._get_auth_headers()
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
+            response = self._api_request('post', url, json=payload, timeout=30)
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при запросе JSON для тиража: {e}", exc_info=True)
@@ -118,9 +146,7 @@ class ApiService:
         logger.info(f"Отправка запроса на скачивание кодов для тиража. Payload: {payload}")
         try:
             url = f"{self.api_base_url.rstrip('/')}/psp/printrun/json/download"
-            headers = self._get_auth_headers()
-            response = requests.get(url, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
+            response = self._api_request('get', url, json=payload, timeout=60)
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при скачивании кодов для тиража: {e}", exc_info=True)
@@ -144,12 +170,9 @@ class ApiService:
 
             # --- ИЗМЕНЕНИЕ: Используем единый эндпоинт согласно вашему требованию ---
             url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload"
-            
-            headers = self._get_auth_headers() # Получаем базовые заголовки
             # Используем параметр `json`, который автоматически кодирует словарь в JSON
             # и устанавливает правильный заголовок 'Content-Type: application/json'.
-            response = requests.post(url, headers=headers, json=payload_dict, timeout=240)
-            response.raise_for_status()
+            response = self._api_request('post', url, json=payload_dict, timeout=240)
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при отправке сведений об использовании: {e}", exc_info=True)
@@ -162,10 +185,8 @@ class ApiService:
         logger.info(f"Отправка запроса на создание отчета. Payload: {payload}")
         try:
             url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/report/create"
-            headers = self._get_auth_headers()
             # Увеличиваем таймаут, так как операция может быть долгой
-            response = requests.post(url, headers=headers, json=payload, timeout=120)
-            response.raise_for_status()
+            response = self._api_request('post', url, json=payload, timeout=120)
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при создании отчета об использовании: {e}", exc_info=True)
