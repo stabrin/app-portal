@@ -1429,37 +1429,36 @@ class ApiIntegrationFrame(ttk.Frame):
         frame = ttk.Frame(self, padding="15")
         frame.pack(fill=tk.BOTH, expand=True)
 
-        # --- ИЗМЕНЕНИЕ: Возвращаем панель с кнопками, как в веб-интерфейсе ---
-        actions_panel = ttk.Frame(frame)
-        actions_panel.pack(fill=tk.X, pady=5)
+        # --- ИЗМЕНЕНИЕ: Реорганизация кнопок в несколько логических рядов ---
+        # Ряд 1: Основной флоу получения кодов
+        flow_panel = ttk.Frame(frame)
+        flow_panel.pack(fill=tk.X, pady=2)
+        self.request_codes_btn = ttk.Button(flow_panel, text="Запросить коды", command=self._request_codes_flow)
+        self.request_codes_btn.pack(side=tk.LEFT, padx=2)
+        self.split_runs_btn = ttk.Button(flow_panel, text="Разбить на тиражи", command=self._split_runs)
+        self.split_runs_btn.pack(side=tk.LEFT, padx=2)
+        self.prepare_json_btn = ttk.Button(flow_panel, text="Подготовить JSON", command=self._prepare_json)
+        self.prepare_json_btn.pack(side=tk.LEFT, padx=2)
+        self.download_codes_btn = ttk.Button(flow_panel, text="Скачать коды", command=self._download_codes)
+        self.download_codes_btn.pack(side=tk.LEFT, padx=2)
 
-        self.request_codes_btn = ttk.Button(actions_panel, text="Запросить коды", command=self._request_codes_flow)
-        self.request_codes_btn.pack(side=tk.LEFT, padx=2, pady=2)
-
-        self.split_runs_btn = ttk.Button(actions_panel, text="Разбить на тиражи", command=self._split_runs)
-        self.split_runs_btn.pack(side=tk.LEFT, padx=2, pady=2)
-
-        self.prepare_json_btn = ttk.Button(actions_panel, text="Подготовить JSON", command=self._prepare_json)
-        self.prepare_json_btn.pack(side=tk.LEFT, padx=2, pady=2)
-
-        self.download_codes_btn = ttk.Button(actions_panel, text="Скачать коды", command=self._download_codes)
-        self.download_codes_btn.pack(side=tk.LEFT, padx=2, pady=2)
-
-        # Вторая строка кнопок для отчетов
-        reports_panel = ttk.Frame(frame)
-        reports_panel.pack(fill=tk.X, pady=5)
-        self.prepare_report_data_btn = ttk.Button(reports_panel, text="Подготовить сведения", command=self._prepare_report_data)
-        self.prepare_report_data_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        # Ряд 2: Флоу отчетности
+        reporting_panel = ttk.Frame(frame)
+        reporting_panel.pack(fill=tk.X, pady=2)
+        self.prepare_report_data_btn = ttk.Button(reporting_panel, text="Подготовить сведения", command=self._prepare_report_data)
+        self.prepare_report_data_btn.pack(side=tk.LEFT, padx=2)
+        self.prepare_report_btn = ttk.Button(reporting_panel, text="Подготовить отчет", command=self._prepare_report)
+        self.prepare_report_btn.pack(side=tk.LEFT, padx=2)
 
         # --- НОВЫЙ БЛОК: Кнопки в зависимости от post_processing_mode ---
+        # Ряд 3: Интеграция с внешним ПО (появляется только при необходимости)
         if self.post_processing_mode == "Внешнее ПО":
-            self.export_integration_file_btn = ttk.Button(reports_panel, text="Выгрузить интеграционный файл", command=self._export_integration_file)
-            self.export_integration_file_btn.pack(side=tk.LEFT, padx=2, pady=2)
-            self.import_integration_file_btn = ttk.Button(reports_panel, text="Загрузить интеграционный файл", command=self._import_integration_file)
-            self.import_integration_file_btn.pack(side=tk.LEFT, padx=2, pady=2)
-
-        self.prepare_report_btn = ttk.Button(reports_panel, text="Подготовить отчет", command=self._prepare_report)
-        self.prepare_report_btn.pack(side=tk.LEFT, padx=2, pady=2)
+            integration_panel = ttk.Frame(frame)
+            integration_panel.pack(fill=tk.X, pady=2)
+            self.export_integration_file_btn = ttk.Button(integration_panel, text="Выгрузить интеграционный файл", command=self._export_integration_file)
+            self.export_integration_file_btn.pack(side=tk.LEFT, padx=2)
+            self.import_integration_file_btn = ttk.Button(integration_panel, text="Загрузить интеграционный файл", command=self._import_integration_file)
+            self.import_integration_file_btn.pack(side=tk.LEFT, padx=2)
         
         # --- НОВЫЙ БЛОК: Поле для вывода ответа от API ---
         response_frame = ttk.LabelFrame(frame, text="Ответ API")
@@ -2012,6 +2011,13 @@ class OrderEditorFrame(ttk.Frame):
         controls_frame_3.pack(fill=tk.X, pady=2)
         ttk.Button(controls_frame_3, text="Скачать отчет декларанта", command=self._download_declarator_report).pack(side=tk.LEFT, padx=2)
 
+        # --- НОВЫЙ БЛОК: Кнопка архивации в самом низу ---
+        archive_frame = ttk.Frame(main_frame)
+        # Размещаем этот фрейм в самом низу, с отступом сверху
+        archive_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(10, 0))
+        ttk.Separator(archive_frame).pack(fill=tk.X, pady=5)
+        ttk.Button(archive_frame, text="Перенести в архив", command=self._move_to_archive, style="Danger.TButton").pack(side=tk.RIGHT)
+
 
         # ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
 
@@ -2078,6 +2084,32 @@ class OrderEditorFrame(ttk.Frame):
 
         entry.bind("<FocusOut>", on_focus_out)
         entry.bind("<Return>", on_focus_out)
+
+    def _move_to_archive(self):
+        """
+        Перемещает текущий заказ в архив.
+        Функционал адаптирован из `_create_orders_view`.
+        """
+        if not messagebox.askyesno("Подтверждение", f"Вы уверены, что хотите переместить заказ №{self.order_id} в архив?", parent=self):
+            return
+
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # Получаем текущий статус, чтобы правильно сформировать архивный
+                    cur.execute("SELECT status FROM orders WHERE id = %s", (self.order_id,))
+                    current_status = cur.fetchone()['status']
+                    new_status = f"Архив_{current_status}"
+
+                    cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, self.order_id))
+                    result = cur.fetchone()
+                    notification_id = result['notification_id'] if result else None
+                    if notification_id:
+                        cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
+                conn.commit()
+            messagebox.showinfo("Успех", "Заказ успешно перемещен в архив. Обновите список заказов.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось архивировать заказ: {e}", parent=self)
 
     def _save_changes(self):
         """Собирает данные из Treeview и сохраняет их в БД."""
