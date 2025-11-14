@@ -33,6 +33,7 @@ logging.basicConfig(
 from .db_connector import get_main_db_connection, get_client_db_connection
 from .api_service import ApiService
 from .supply_notification_service import SupplyNotificationService
+from .order_service import OrderService
 import bcrypt
 import psycopg2
 import psycopg2.extras
@@ -3442,6 +3443,9 @@ class AdminWindow(tk.Tk):
 
         def _create_orders_view(parent, is_archive):
             """Создает представление заказов с новой компоновкой."""
+            # --- НОВЫЙ БЛОК: Инициализация сервиса заказов ---
+            order_service = OrderService(lambda: get_client_db_connection(self.user_info))
+
             # 1. Основной PanedWindow (вертикальный)
             main_paned_window = ttk.PanedWindow(parent, orient=tk.VERTICAL)
             main_paned_window.pack(fill=tk.BOTH, expand=True)
@@ -3635,11 +3639,7 @@ class AdminWindow(tk.Tk):
                 order_status = tree.item(order_id, "values")[2]
 
                 try:
-                    with get_client_db_connection(self.user_info) as conn:
-                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                            cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
-                            result = cur.fetchone()
-                    scenario_data = result['scenario_data'] if result else {}
+                    scenario_data = order_service.get_order_scenario(order_id)
                     post_processing_mode = scenario_data.get('post_processing')
 
                     OrderEditorFrame(edit_tab, self.user_info, order_id, scenario_data).pack(fill="both", expand=True)
