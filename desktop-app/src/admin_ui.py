@@ -3488,6 +3488,12 @@ class AdminWindow(tk.Tk):
             tree.configure(yscrollcommand=scrollbar.set)
             scrollbar.pack(side="right", fill="y")
 
+            # --- НОВЫЙ БЛОК: Создаем кнопки в панели управления ---
+            btn_edit_order = ttk.Button(right_pane, text="Редактировать", state="disabled")
+            btn_edit_order.pack(fill=tk.X, pady=5)
+            btn_api_order = ttk.Button(right_pane, text="АПИ", state="disabled")
+            btn_api_order.pack(fill=tk.X, pady=5)
+
             tree.tag_configure('pink_row', background='lightpink')
             tree.tag_configure('green_row', background='lightgreen')
             tree.tag_configure('yellow_row', background='lightyellow')
@@ -3495,6 +3501,7 @@ class AdminWindow(tk.Tk):
 
             # --- Функции для работы с данными и UI ---
             def load_data():
+                on_order_select() # Сбрасываем состояние кнопок при обновлении
                 # (логика загрузки данных остается прежней)
                 for i in tree.get_children(): tree.delete(i)
                 try:
@@ -3533,6 +3540,38 @@ class AdminWindow(tk.Tk):
                     except Exception as e:
                         messagebox.showerror("Ошибка", f"Не удалось архивировать заказ: {e}", parent=parent)
 
+            def open_correct_editor(order_id):
+                """Проверяет сценарий и открывает соответствующий редактор."""
+                try:
+                    with get_client_db_connection(self.user_info) as conn:
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                            cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
+                            result = cur.fetchone()
+                    scenario_data = result['scenario_data'] if result else {}
+                    OrderEditorDialog(self, self.user_info, order_id, scenario_data)
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
+
+            def on_order_select(event=None):
+                """Обработчик выбора строки в таблице. Активирует/деактивирует кнопки."""
+                selected_item = tree.focus()
+                if not selected_item:
+                    btn_edit_order.config(state="disabled", command=None)
+                    btn_api_order.config(state="disabled", command=None)
+                    return
+
+                order_id = selected_item
+                order_status = tree.item(order_id, "values")[2]
+
+                # Кнопка "Редактировать" всегда активна при выборе
+                btn_edit_order.config(state="normal", command=lambda: open_correct_editor(order_id))
+
+                # Кнопка "АПИ" активна только для определенных статусов
+                if order_status in ('delta', 'dmkod'):
+                    btn_api_order.config(state="normal", command=lambda: ApiIntegrationDialog(self, self.user_info, order_id))
+                else:
+                    btn_api_order.config(state="disabled", command=None)
+
             def show_context_menu(event):
                 # (логика контекстного меню остается прежней)
                 item_id = tree.identify_row(event.y)
@@ -3540,16 +3579,6 @@ class AdminWindow(tk.Tk):
                 tree.selection_set(item_id)
                 order_status = tree.item(item_id, "values")[2]
                 menu = tk.Menu(parent, tearoff=0)
-                def open_correct_editor(order_id):
-                    try:
-                        with get_client_db_connection(self.user_info) as conn:
-                            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                                cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
-                                result = cur.fetchone()
-                        scenario_data = result['scenario_data'] if result else {}
-                        OrderEditorDialog(self, self.user_info, order_id, scenario_data)
-                    except Exception as e:
-                        messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
                 menu.add_command(label="Редактировать", command=lambda item_id=item_id: open_correct_editor(item_id))
                 menu.add_command(label="Создать ТЗ", command=lambda: messagebox.showinfo("Инфо", f"Создать ТЗ для заказа {item_id}"))
                 if order_status in ('delta', 'dmkod'):
@@ -3560,12 +3589,10 @@ class AdminWindow(tk.Tk):
                 menu.post(event.x_root, event.y_root)
 
             tree.bind("<Button-3>", show_context_menu)
+            tree.bind("<<TreeviewSelect>>", on_order_select) # Привязываем обработчик выбора
 
             # --- Заполнение элементов управления над таблицей ---
             ttk.Button(order_controls_frame, text="Обновить", command=load_data).pack(side=tk.LEFT)
-
-            # --- Заполнение правой панели (управление) ---
-            ttk.Label(right_pane, text="Блок управления в разработке.").pack(expand=True)
 
             # --- Заполнение нижней панели (статистика) ---
             ttk.Label(bottom_pane, text="Раздел статистики в разработке.").pack(expand=True)
