@@ -3577,25 +3577,50 @@ class AdminWindow(tk.Tk):
 
             def on_order_select(event=None):
                 """Обработчик выбора строки в таблице. Активирует/деактивирует кнопки."""
+                logging.debug("on_order_select: Сработал обработчик выбора заказа.")
                 # Очищаем панель управления
                 placeholder_label.pack_forget()
                 management_notebook.pack_forget()
+                for tab in (edit_tab, api_tab):
+                    for widget in tab.winfo_children():
+                        widget.destroy()
 
                 selected_item = tree.focus()
                 if not selected_item:
+                    logging.debug("on_order_select: Заказ не выбран (tree.focus() пуст). Выход из функции.")
                     placeholder_label.pack(expand=True, fill="both")
-                    management_notebook.unbind("<<NotebookTabChanged>>") # Отвязываем событие
                     return
 
                 order_id = selected_item
                 order_status = tree.item(order_id, "values")[2]
+                logging.debug(f"on_order_select: Выбран заказ ID: {order_id}, Статус: {order_status}")
 
-                # Показываем notebook и привязываем событие
+                try:
+                    logging.debug(f"on_order_select: Запрос данных сценария для заказа ID {order_id}...")
+                    with get_client_db_connection(self.user_info) as conn:
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                            cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
+                            result = cur.fetchone()
+                    scenario_data = result['scenario_data'] if result else {}
+                    post_processing_mode = scenario_data.get('post_processing')
+                    logging.debug(f"on_order_select: Данные сценария получены. post_processing_mode: '{post_processing_mode}'.")
+
+                    logging.debug(f"on_order_select: Создание OrderEditorDialog для заказа ID {order_id}...")
+                    OrderEditorDialog(edit_tab, self.user_info, order_id, scenario_data)
+                    logging.debug("on_order_select: OrderEditorDialog успешно создан.")
+
+                    logging.debug(f"on_order_select: Создание ApiIntegrationDialog для заказа ID {order_id}...")
+                    ApiIntegrationDialog(api_tab, self.user_info, order_id, post_processing_mode)
+                    logging.debug("on_order_select: ApiIntegrationDialog успешно создан.")
+
+                except Exception as e:
+                    logging.error(f"on_order_select: КРИТИЧЕСКАЯ ОШИБКА при создании интерфейсов управления: {e}", exc_info=True)
+                    messagebox.showerror("Ошибка", f"Не удалось создать интерфейсы управления: {e}\n\nПодробности в файле app.log", parent=self)
+                    placeholder_label.pack(expand=True, fill="both")
+                    return
+
+                logging.debug("on_order_select: Отображение notebook и настройка вкладок.")
                 management_notebook.pack(fill="both", expand=True)
-                management_notebook.bind("<<NotebookTabChanged>>", on_management_tab_change)
-                management_notebook.select(edit_tab) # Выбираем первую вкладку по умолчанию
-
-                # Управляем состоянием вкладки "АПИ"
                 if order_status in ('delta', 'dmkod'):
                     management_notebook.tab(api_tab, state="normal")
                 else:
