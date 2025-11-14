@@ -3562,24 +3562,7 @@ class AdminWindow(tk.Tk):
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось определить сценарий заказа: {e}", parent=self)
 
-            def on_management_tab_change(event=None):
-                """Обработчик переключения вкладок в панели управления."""
-                selected_tab_index = management_notebook.index(management_notebook.select())
-                selected_order_id = tree.focus()
-
-                if not selected_order_id:
-                    return
-                
-                target_tab = management_notebook.nametowidget(management_notebook.select())
-                # Очищаем вкладку, только если она пустая (чтобы не пересоздавать интерфейс)
-                if not target_tab.winfo_children():
-                    if selected_tab_index == 0: # Вкладка "Редактирование"
-                        scenario_data = tree.item(selected_order_id, "values")[2] # Пример, нужна реальная логика
-                        editor_frame = OrderEditorFrame(target_tab, self.user_info, selected_order_id, {})
-                        editor_frame.pack(fill="both", expand=True)
-                    elif selected_tab_index == 1: # Вкладка "АПИ"
-                        api_frame = ApiIntegrationFrame(target_tab, self.user_info, selected_order_id)
-                        api_frame.pack(fill="both", expand=True)
+            # --- ИЗМЕНЕНИЕ: Убираем on_management_tab_change, так как логика теперь в on_order_select ---
 
             def on_order_select(event=None):
                 """Обработчик выбора строки в таблице. Активирует/деактивирует кнопки."""
@@ -3593,16 +3576,35 @@ class AdminWindow(tk.Tk):
                 selected_item = tree.focus()
                 if not selected_item:
                     placeholder_label.pack(expand=True, fill="both")
-                    management_notebook.unbind("<<NotebookTabChanged>>") # Отвязываем событие
                     return
 
                 order_id = selected_item
                 order_status = tree.item(order_id, "values")[2]
 
-                # Показываем notebook и привязываем событие
+                # --- НОВАЯ ЛОГИКА: Получаем данные и создаем фреймы сразу ---
+                try:
+                    with get_client_db_connection(self.user_info) as conn:
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                            cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
+                            result = cur.fetchone()
+                    scenario_data = result['scenario_data'] if result else {}
+                    post_processing_mode = scenario_data.get('post_processing')
+
+                    # Создаем фрейм редактора и встраиваем его во вкладку "Редактирование"
+                    editor_frame = OrderEditorFrame(edit_tab, self.user_info, order_id, scenario_data)
+                    editor_frame.pack(fill="both", expand=True)
+
+                    # Создаем фрейм API и встраиваем его во вкладку "АПИ"
+                    api_frame = ApiIntegrationFrame(api_tab, self.user_info, order_id, post_processing_mode)
+                    api_frame.pack(fill="both", expand=True)
+
+                except Exception as e:
+                    messagebox.showerror("Ошибка", f"Не удалось создать интерфейсы управления: {e}", parent=self)
+                    placeholder_label.pack(expand=True, fill="both") # Показываем заглушку в случае ошибки
+                    return
+
+                # Показываем notebook
                 management_notebook.pack(fill="both", expand=True)
-                management_notebook.bind("<<NotebookTabChanged>>", on_management_tab_change)
-                on_management_tab_change() # Вызываем обработчик для первой активной вкладки
 
                 # Управляем состоянием вкладки "АПИ"
                 if order_status in ('delta', 'dmkod'):
