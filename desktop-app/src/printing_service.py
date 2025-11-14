@@ -1840,9 +1840,8 @@ class ImageSelectionDialog(tk.Toplevel if tk else object):
         self._load_images()
 
     def _get_client_db_connection(self):
-        # Используем метод из основного сервиса
-        logging.debug("ImageSelectionDialog: Создание подключения к БД клиента через PrintingService.")
-        return PrintingService._get_client_db_connection(self.user_info)
+        from .db_connector import get_client_db_connection
+        return get_client_db_connection(self.user_info)
 
     def _load_images(self):
         """Загружает изображения из БД и отображает их."""

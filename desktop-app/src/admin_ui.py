@@ -1391,20 +1391,16 @@ class NotificationEditorDialog(tk.Toplevel):
             messagebox.showinfo("Успех", "Уведомление успешно сохранено.", parent=self)
             if self.on_save_callback:
                 self.on_save_callback()
-            self.destroy()
+            self.destroy() # type: ignore
 
         except Exception as e:
             logging.error(f"Ошибка сохранения уведомления: {e}", exc_info=True)
             messagebox.showerror("Ошибка", f"Не удалось сохранить уведомление: {e}", parent=self)
 
-class ApiIntegrationDialog(tk.Toplevel):
-    """Диалоговое окно для интеграции с API ДМкод."""
+class ApiIntegrationFrame(ttk.Frame):
+    """Фрейм для интеграции с API ДМкод, встраиваемый во вкладку."""
     def __init__(self, parent, user_info, order_id, post_processing_mode=None):
         super().__init__(parent)
-        self.title(f"Интеграция с API для заказа №{order_id}")
-        self.geometry("600x500")
-        self.transient(parent)
-        self.grab_set()
         self.post_processing_mode = post_processing_mode
 
         self.user_info = user_info
@@ -1416,15 +1412,15 @@ class ApiIntegrationDialog(tk.Toplevel):
         self._create_widgets()
 
     def _get_client_db_connection(self):
-        return PrintingService._get_client_db_connection(self.user_info)
+        return get_client_db_connection(self.user_info)
 
     def _load_order_data(self):
         """Загружает данные заказа для определения состояния кнопок."""
         try:
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("SELECT * FROM orders WHERE id = %s", (self.order_id,))
-                    self.order_data = cur.fetchone()
+                    cur.execute("SELECT * FROM orders WHERE id = %s", (self.order_id,)) # type: ignore
+                    self.order_data = cur.fetchone() # type: ignore
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить данные заказа: {e}", parent=self)
             self.destroy()
@@ -1960,15 +1956,10 @@ class ApiIntegrationDialog(tk.Toplevel):
         messagebox.showinfo("В разработке", "Функционал 'Загрузить интеграционный файл' находится в разработке.", parent=self)
 
 
-
-class OrderEditorDialog(tk.Toplevel):
-    """Диалоговое окно для редактирования деталей заказа."""
+class OrderEditorFrame(ttk.Frame):
+    """Фрейм для редактирования деталей заказа, встраиваемый во вкладку."""
     def __init__(self, parent, user_info, order_id, scenario_data=None):
         super().__init__(parent)
-        self.title(f"Редактор заказа №{order_id}")
-        self.geometry("800x600")
-        self.transient(parent)
-        self.grab_set()
 
         self.user_info = user_info
         self.order_id = order_id
@@ -1983,7 +1974,6 @@ class OrderEditorDialog(tk.Toplevel):
         # self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
 
     def _get_client_db_connection(self):
-        # ИСПРАВЛЕНИЕ: Используем централизованный метод для получения соединения из пула
         return get_client_db_connection(self.user_info)
 
     def _create_widgets(self):
@@ -2018,7 +2008,7 @@ class OrderEditorDialog(tk.Toplevel):
         ttk.Button(controls_frame, text="Скачать отчет декларанта", command=self._download_declarator_report).pack(side=tk.LEFT, padx=2)
 
 
-        ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
+        # ttk.Button(controls_frame, text="Закрыть", command=self.destroy).pack(side=tk.RIGHT, padx=2)
 
         tree_frame = ttk.Frame(main_frame)
         tree_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -3610,14 +3600,14 @@ class AdminWindow(tk.Tk):
                     scenario_data = result['scenario_data'] if result else {}
                     post_processing_mode = scenario_data.get('post_processing')
                     logging.debug(f"on_order_select: Данные сценария получены. post_processing_mode: '{post_processing_mode}'.")
-
-                    logging.debug(f"on_order_select: Создание OrderEditorDialog для заказа ID {order_id}...")
-                    OrderEditorDialog(edit_tab, self.user_info, order_id, scenario_data)
-                    logging.debug("on_order_select: OrderEditorDialog успешно создан.")
-
-                    logging.debug(f"on_order_select: Создание ApiIntegrationDialog для заказа ID {order_id}...")
-                    ApiIntegrationDialog(api_tab, self.user_info, order_id, post_processing_mode)
-                    logging.debug("on_order_select: ApiIntegrationDialog успешно создан.")
+ 
+                    logging.debug(f"on_order_select: Создание OrderEditorFrame для заказа ID {order_id}...")
+                    OrderEditorFrame(edit_tab, self.user_info, order_id, scenario_data).pack(fill="both", expand=True)
+                    logging.debug("on_order_select: OrderEditorFrame успешно создан и упакован.")
+ 
+                    logging.debug(f"on_order_select: Создание ApiIntegrationFrame для заказа ID {order_id}...")
+                    ApiIntegrationFrame(api_tab, self.user_info, order_id, post_processing_mode).pack(fill="both", expand=True)
+                    logging.debug("on_order_select: ApiIntegrationFrame успешно создан и упакован.")
 
                 except Exception as e:
                     logging.error(f"on_order_select: КРИТИЧЕСКАЯ ОШИБКА при создании интерфейсов управления: {e}", exc_info=True)
@@ -3625,12 +3615,8 @@ class AdminWindow(tk.Tk):
                     placeholder_label.pack(expand=True, fill="both")
                     return
 
-                logging.debug("on_order_select: Отображение notebook и настройка вкладок.")
                 management_notebook.pack(fill="both", expand=True)
-                if order_status in ('delta', 'dmkod'):
-                    management_notebook.tab(api_tab, state="normal")
-                else:
-                    management_notebook.tab(api_tab, state="disabled")
+                management_notebook.tab(api_tab, state="normal" if order_status in ('delta', 'dmkod') else "disabled")
 
             def show_context_menu(event):
                 # (логика контекстного меню остается прежней)
@@ -3647,7 +3633,7 @@ class AdminWindow(tk.Tk):
                     menu.add_separator()
                     menu.add_command(label="Перенести в архив", command=lambda: move_to_archive(item_id, order_status))
                 menu.post(event.x_root, event.y_root)            
-
+ 
             tree.bind("<Button-3>", show_context_menu)
             tree.bind("<<TreeviewSelect>>", on_order_select) # Привязываем обработчик выбора
 
