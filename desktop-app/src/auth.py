@@ -182,12 +182,30 @@ class StandaloneLoginWindow(tk.Toplevel):
                         "role": "администратор",
                         "client_id": 0,
                         "client_db_config": client_db_config,
+                        # --- ИЗМЕНЕНИЕ: Добавляем получение токена API ---
                         "client_api_config": {
                             "api_base_url": settings_from_db.get('API_BASE_URL'),
                             "api_email": settings_from_db.get('API_EMAIL'),
                             "api_password": settings_from_db.get('API_PASSWORD')
                         }
                     }
+
+                    try:
+                        api_base_url = settings_from_db.get('API_BASE_URL')
+                        if not api_base_url:
+                            raise ValueError("API_BASE_URL не настроен в базе данных клиента.")
+                        token_url = f"{api_base_url.rstrip('/')}/user/token"
+                        api_credentials = {"email": settings_from_db.get('API_EMAIL'), "password": settings_from_db.get('API_PASSWORD')}
+                        response = requests.get(token_url, json=api_credentials, timeout=10)
+                        response.raise_for_status()
+                        tokens = response.json()
+                        user_info['api_access_token'] = tokens.get('access')
+                        user_info['api_refresh_token'] = tokens.get('refresh')
+                        logging.info("Токен API успешно получен в офлайн-режиме.")
+                    except Exception as e:
+                        logging.error(f"Аутентификация в API в офлайн-режиме провалена: {e}")
+                        messagebox.showwarning("Предупреждение API", f"Не удалось получить токен API в офлайн-режиме: {e}", parent=self)
+
                     logging.info(f"Локальная аутентификация для '{login}' прошла успешно.")
                     self.on_complete_callback(user_info)
                     self.destroy()
