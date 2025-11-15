@@ -8,6 +8,7 @@ import logging
 import bcrypt
 import traceback
 import requests
+import configparser
 
 # --- Настройка путей для импорта ---
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -92,15 +93,95 @@ class StandaloneLoginWindow(tk.Tk):
         if not login or not password:
             messagebox.showerror("Ошибка", "Логин и пароль не могут быть пустыми.", parent=self)
             return
+        
+        # --- НОВАЯ ЛОГИКА: Проверка на локальный режим ---
+        config_path = os.path.join(project_root, 'config.ini')
+        cert_path = os.path.join(project_root, 'cert.pem')
+        
+        if os.path.exists(config_path):
+            logging.info("Обнаружен файл config.ini. Запуск в локальном режиме.")
+            self._local_auth(login, password, config_path, cert_path)
+        else:
+            logging.info("Файл config.ini не найден. Запуск в стандартном (онлайн) режиме.")
+            self._online_auth(login, password)
 
+    def _local_auth(self, login, password, config_path, cert_path):
+        """Аутентификация в локальном режиме по файлу конфигурации."""
+        try:
+            # 1. Чтение config.ini
+            config = configparser.ConfigParser()
+            config.read(config_path, encoding='utf-8')
+            db_section = config['database']
+
+            # 2. Расшифровка пароля
+            def xor_cipher(data, key):
+                return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(data, key * (len(data) // len(key) + 1)))
+            
+            encryption_key = "TildaKodSecretKey"
+            encrypted_password = db_section.get('password')
+            decrypted_password = xor_cipher(encrypted_password, encryption_key)
+
+            # 3. Формирование конфигурации для подключения
+            client_db_config = {
+                "db_name": db_section.get('dbname'),
+                "db_host": db_section.get('host'),
+                "db_port": db_section.getint('port'),
+                "db_user": db_section.get('user'),
+                "db_password": decrypted_password,
+                "db_ssl_cert": None,
+                "id": 0 # ID клиента неизвестен в этом режиме
+            }
+
+            if os.path.exists(cert_path):
+                with open(cert_path, 'r', encoding='utf-8') as f:
+                    client_db_config["db_ssl_cert"] = f.read()
+
+            # 4. Подключение к БД клиента и проверка пользователя
+            from .db_connector import get_client_db_connection
+            user_info_for_connection = {'client_db_config': client_db_config}
+
+            with get_client_db_connection(user_info_for_connection) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT username, password_hash, is_admin FROM public.users WHERE username = %s AND is_active = TRUE", (login,))
+                    user_data = cur.fetchone()
+
+            if user_data:
+                user_name, hashed_password, is_admin = user_data
+                if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                    if not is_admin:
+                        messagebox.showerror("Ошибка", "Для локального входа требуются права администратора.", parent=self)
+                        return
+
+                    user_info = {
+                        "name": user_name,
+                        "role": "администратор",
+                        "client_id": 0,
+                        "client_db_config": client_db_config,
+                        "client_api_config": {} # API недоступно в локальном режиме
+                    }
+                    logging.info(f"Локальная аутентификация для '{login}' прошла успешно.")
+                    self.on_complete_callback(user_info)
+                    self.destroy()
+                else:
+                    messagebox.showerror("Ошибка", "Неверный пароль.", parent=self)
+            else:
+                messagebox.showerror("Ошибка", "Пользователь не найден или неактивен в базе данных клиента.", parent=self)
+        
+        except Exception as e:
+            error_details = traceback.format_exc()
+            logging.error(f"Ошибка локальной авторизации: {e}\n{error_details}")
+            messagebox.showerror("Критическая ошибка", f"Ошибка при локальной авторизации: {e}\nПодробности в app.log.", parent=self)
+            self.on_complete_callback(None) # Сообщаем о провале
+            self.destroy() # И закрываемся
+
+    def _online_auth(self, login, password):
+        """Аутентификация в стандартном (онлайн) режиме через главную БД."""
         try:
             logging.debug("Попытка подключения к главной базе данных для получения данных пользователя...")
             with get_main_db_connection() as conn:
                 logging.debug("Успешное подключение к главной базе данных.")
                 with conn.cursor() as cur:
                     logging.debug("Выполнение запроса для получения данных пользователя, клиента и API.")
-                    # --- ИЗМЕНЕНИЕ: Динамически проверяем наличие новых колонок ---
-                    # Это предотвратит падение приложения, если схема БД еще не обновлена.
                     cur.execute("""
                         SELECT column_name FROM information_schema.columns 
                         WHERE table_name='clients' AND column_name='local_server_address';
@@ -127,67 +208,50 @@ class StandaloneLoginWindow(tk.Tk):
                  db_port, db_user, db_password, db_ssl_cert, api_base_url, 
                  api_email, api_password, local_server_address, local_server_port) = user_data
 
-                logging.debug(f"Проверка пароля для пользователя '{login}'.")
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
                     user_info = {"name": user_name, "role": user_role}
                     logging.info(f"Пароль верен. Пользователь '{login}' успешно аутентифицирован. Роль: {user_role}.")
 
-                    # Если это администратор, добавляем всю информацию о его клиенте
-                    # --- ИСПРАВЛЕНИЕ: Читаем SSL-сертификат из активного соединения ---
                     if user_role == 'администратор':
-                        # --- ПЕРЕМЕЩЕННЫЙ БЛОК: Получаем API токен только для администратора ---
                         try:
                             logging.info("Попытка получить токен API для администратора...")
                             if not api_base_url:
-                                logging.error("API_BASE_URL не задан для этого клиента в базе данных.")
-                                messagebox.showwarning("Предупреждение API", "URL для подключения к API не настроен для этого клиента.", parent=self)
                                 raise ValueError("API_BASE_URL не настроен.")
                             token_url = f"{api_base_url.rstrip('/')}/user/token"
-                            api_credentials = {
-                                "email": api_email,
-                                "password": api_password
-                            }
+                            api_credentials = {"email": api_email, "password": api_password}
                             response = requests.get(token_url, json=api_credentials, timeout=10)
                             response.raise_for_status()
-
                             tokens = response.json()
                             user_info['api_access_token'] = tokens.get('access')
                             user_info['api_refresh_token'] = tokens.get('refresh')
-                            logging.info("Токен API успешно получен и сохранен в user_info.")
-
-                        except requests.exceptions.RequestException as e:
+                            logging.info("Токен API успешно получен.")
+                        except Exception as e:
                             logging.error(f"Аутентификация в API провалена: {e}")
                             messagebox.showwarning("Предупреждение API", f"Не удалось получить токен API: {e}", parent=self)
 
-                        logging.debug("Формирование конфигурации БД клиента для user_info.")
                         user_info['client_id'] = client_id
                         user_info['client_db_config'] = {
                             "db_name": db_name, "db_host": db_host, "db_port": db_port,
                             "db_user": db_user, "db_password": db_password, "db_ssl_cert": db_ssl_cert, "id": client_id,
-                            "local_server_address": local_server_address, 
-                            "local_server_port": local_server_port
+                            "local_server_address": local_server_address, "local_server_port": local_server_port
                         }
-                        # --- НОВЫЙ БЛОК: Сохраняем конфигурацию API в user_info ---
                         user_info['client_api_config'] = {
                             "api_base_url": api_base_url, "api_email": api_email, "api_password": api_password
                         }
-                    logging.debug("Вызов on_complete_callback и уничтожение окна входа.")
-                    self.on_complete_callback(user_info) # Сначала вызываем callback
-                    self.destroy() # Затем уничтожаем окно
+
+                    self.on_complete_callback(user_info)
+                    self.destroy()
                 else:
-                    logging.warning(f"Неверный пароль для пользователя '{login}'.")
                     messagebox.showerror("Ошибка", "Неверный пароль.", parent=self)
-                    # Не закрываем окно, даем пользователю еще попытку
             else:
-                logging.warning(f"Пользователь '{login}' не найден в базе данных или неактивен.")
                 messagebox.showerror("Ошибка", "Пользователь не найден или не имеет прав доступа.", parent=self)
 
         except Exception as e:
             error_details = traceback.format_exc()
-            logging.error(f"Ошибка авторизации: {e}\n{error_details}")
+            logging.error(f"Ошибка онлайн авторизации: {e}\n{error_details}")
             messagebox.showerror("Критическая ошибка", f"Ошибка подключения к базе данных.\nПодробности в app.log.", parent=self)
-            self.on_complete_callback(None) # Сообщаем о провале
-            self.destroy() # И закрываемся
+            self.on_complete_callback(None)
+            self.destroy()
 
     def _on_closing(self):
         """При закрытии окна вызываем callback с None."""
