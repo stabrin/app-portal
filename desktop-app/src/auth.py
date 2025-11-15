@@ -57,7 +57,9 @@ class StandaloneLoginWindow(tk.Tk):
         super().__init__()
         self.on_complete_callback = on_complete_callback
 
-        self.title("Тест Авторизации")
+        # --- ИЗМЕНЕНИЕ: Динамический заголовок окна ---
+        config_path = os.path.join(project_root, 'config.ini')
+        self.title(f"{config_path} Вход | Путь для config.ini:")
         self.resizable(False, False)
 
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
