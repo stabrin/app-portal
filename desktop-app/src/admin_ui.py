@@ -1505,11 +1505,7 @@ class ApiIntegrationFrame(ttk.Frame):
         if self.post_processing_mode == "Внешнее ПО":
             integration_panel = ttk.Frame(frame)
             integration_panel.pack(fill=tk.X, pady=2)
-            self.export_integration_file_btn = ttk.Button(integration_panel, text="Выгрузить интеграционный файл", command=self._export_integration_file)
-            self.export_integration_file_btn.pack(side=tk.LEFT, padx=2)
-            self.import_integration_file_btn = ttk.Button(integration_panel, text="Загрузить интеграционный файл", command=self._import_integration_file)
-            self.import_integration_file_btn.pack(side=tk.LEFT, padx=2)
-        
+       
         # --- НОВЫЙ БЛОК: Поле для вывода ответа от API ---
         response_frame = ttk.LabelFrame(frame, text="Ответ API")
         response_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
@@ -2004,19 +2000,6 @@ class ApiIntegrationFrame(ttk.Frame):
         except Exception as e:
             self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
             self.after(0, self._update_buttons_state)
-
-    def _export_integration_file(self):
-        """Заглушка для выгрузки интеграционного файла."""
-        messagebox.showinfo("В разработке", "Функционал 'Выгрузить интеграционный файл' находится в разработке.", parent=self)
-
-    def _import_integration_file(self):
-        """Заглушка для загрузки интеграционного файла."""
-        messagebox.showinfo("В разработке", "Функционал 'Загрузить интеграционный файл' находится в разработке.", parent=self)
-
-    def _sign_with_eds(self):
-        """Заглушка для функции подписания ЭЦП."""
-        messagebox.showinfo("В разработке", "Функционал подписания с помощью ЭЦП находится в разработке.\n\nНа данный момент подписание необходимо выполнять в веб-интерфейсе ДМ.Код.", parent=self)
-
 
 class OrderEditorFrame(ttk.Frame):
     """Фрейм для редактирования деталей заказа, встраиваемый во вкладку."""
