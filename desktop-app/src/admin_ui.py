@@ -269,13 +269,6 @@ def open_workplace_setup_window(parent_widget, user_info):
     workplaces_frame = ttk.Frame(notebook, padding="10")
     notebook.add(workplaces_frame, text="Рабочие места")
 
-    # --- НОВАЯ ЛОГИКА ДЛЯ ВКЛАДКИ "РАБОЧИЕ МЕСТА" ---
-
-    def get_client_db_connection(): # Эта функция локальна для open_workplace_setup_window
-        """Вспомогательная функция для подключения к БД клиента."""
-        # Используем централизованный метод из db_connector
-        return get_client_db_connection(user_info)
-
     def load_warehouses():
         """Загружает и отображает склады и количество рабочих мест в них."""
         for i in warehouses_tree.get_children():
@@ -283,7 +276,7 @@ def open_workplace_setup_window(parent_widget, user_info):
         
         try:
             with get_client_db_connection() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("""
                         SELECT warehouse_name, COUNT(*) as workplace_count
                         FROM ap_workplaces
@@ -291,7 +284,7 @@ def open_workplace_setup_window(parent_widget, user_info):
                         ORDER BY warehouse_name;
                     """)
                     for row in cur.fetchall():
-                        warehouses_tree.insert('', 'end', values=row)
+                        warehouses_tree.insert('', 'end', values=(row['warehouse_name'], row['workplace_count']))
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось загрузить список складов: {e}", parent=setup_window)
 
