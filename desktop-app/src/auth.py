@@ -8,6 +8,7 @@ import logging
 import bcrypt
 import traceback
 import requests
+import base64
 import configparser
 
 # --- Настройка путей для импорта ---
