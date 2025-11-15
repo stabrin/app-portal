@@ -2035,6 +2035,17 @@ class OrderEditorFrame(ttk.Frame):
         # Он будет показан только во время выполнения импорта.
         # self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
 
+    def _sanitize_filename_part(self, text: str) -> str:
+        """Очищает строку для безопасного использования в имени файла."""
+        if not isinstance(text, str) or not text.strip():
+            # Возвращаем имя по умолчанию, если текст пустой
+            return "report"
+        # Удаляем недопустимые символы
+        sanitized = re.sub(r'[\\/*?:"<>|]', "", text)
+        # Заменяем пробелы и прочие разделители на подчеркивание
+        sanitized = re.sub(r'[\s\.]+', '_', sanitized)
+        return sanitized.strip('_')
+
     def _get_client_db_connection(self):
         return get_client_db_connection(self.user_info)
 
@@ -2327,16 +2338,6 @@ class OrderEditorFrame(ttk.Frame):
         """
         logging.info(f"Запуск формирования отчета декларанта для заказа ID: {self.order_id}")
 
-        def sanitize_filename_part(text):
-            """Очищает строку для безопасного использования в имени файла."""
-            if not isinstance(text, str) or not text.strip():
-                return "declarator_report"
-            # Удаляем недопустимые символы
-            sanitized = re.sub(r'[\\/*?:"<>|]', "", text)
-            # Заменяем пробелы и прочие разделители на подчеркивание
-            sanitized = re.sub(r'[\s\.]+', '_', sanitized)
-            return sanitized.strip('_')
-
         try:
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -2400,7 +2401,7 @@ class OrderEditorFrame(ttk.Frame):
                 return val
             df = df.applymap(clean_illegal_chars)
 
-            report_name = sanitize_filename_part(order_info.get('notes') if order_info else '')
+            report_name = self._sanitize_filename_part(order_info.get('notes') if order_info else '')
 
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
@@ -2421,6 +2422,11 @@ class OrderEditorFrame(ttk.Frame):
         logging.info(f"Запуск экспорта данных в формате 'Дельта' для заказа ID: {self.order_id}")
         try:
             with self._get_client_db_connection() as conn:
+                # --- НОВЫЙ БЛОК: Получаем 'notes' для имени файла ---
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT notes FROM orders WHERE id = %s", (self.order_id,))
+                    order_info = cur.fetchone()
+                # --- КОНЕЦ НОВОГО БЛОКА ---
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute(
                         """
@@ -2463,7 +2469,11 @@ class OrderEditorFrame(ttk.Frame):
                     return
 
                 df = pd.DataFrame(all_rows)
-                filepath = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV (Tab-separated)", "*.csv")], initialfile=f"delta_export_order_{self.order_id}.csv", parent=self)
+                # --- ИЗМЕНЕНИЕ: Используем новую логику для имени файла ---
+                report_name = self._sanitize_filename_part(order_info.get('notes') if order_info else '')
+                initial_filename = f"{report_name}_order_{self.order_id}.csv"
+                
+                filepath = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV (Tab-separated)", "*.csv")], initialfile=initial_filename, parent=self)
                 if not filepath: return
 
                 # --- ИСПРАВЛЕНИЕ: Добавляем quoting=csv.QUOTE_NONE, чтобы pandas не экранировал спецсимволы ---
