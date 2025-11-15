@@ -2018,6 +2018,10 @@ class OrderEditorFrame(ttk.Frame):
         # Он будет показан только во время выполнения импорта.
         # self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
 
+    def _sign_with_eds(self):
+        """Заглушка для функции подписания ЭЦП."""
+        messagebox.showinfo("В разработке", "Функционал подписания запроса с помощью ЭЦП находится в разработке.", parent=self)
+
     def _sanitize_filename_part(self, text: str) -> str:
         """Очищает строку для безопасного использования в имени файла."""
         if not isinstance(text, str) or not text.strip():
