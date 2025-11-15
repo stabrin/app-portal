@@ -66,8 +66,8 @@ class StandaloneLoginWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         self.bind('<Return>', lambda event: self._verify_login())
 
-        self.transient(self.master) # Окно будет поверх главного
-        self.grab_set() # Модальное поведение
+        # self.transient(self.master) # Окно будет поверх главного
+        # self.grab_set() # Модальное поведение - убираем, чтобы избежать блокировки
 
         self._create_widgets()
 
