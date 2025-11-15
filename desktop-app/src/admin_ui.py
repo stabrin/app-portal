@@ -978,32 +978,6 @@ class CodeUploadFrame(ttk.Frame):
             "Полная реализация этой функции в процессе.",
             parent=self
         )
-    buttons_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
-
-    ttk.Button(buttons_frame, text="Создать", command=create_user).pack(fill=tk.X, pady=2)
-    ttk.Button(buttons_frame, text="Сменить пароль", command=change_password).pack(fill=tk.X, pady=2)
-    ttk.Button(buttons_frame, text="Блок/Разблок", command=toggle_activity).pack(fill=tk.X, pady=2)
-    ttk.Button(buttons_frame, text="Удалить", command=delete_user).pack(fill=tk.X, pady=2)
-    ttk.Separator(buttons_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-    ttk.Button(buttons_frame, text="QR-код для входа", command=generate_qr).pack(fill=tk.X, pady=2)
-
-    # Правая панель с таблицей
-    tree_frame = ttk.Frame(main_frame)
-    tree_frame.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
-
-    cols = ('id', 'name', 'login', 'is_active')
-    users_tree = ttk.Treeview(tree_frame, columns=cols, show='headings')
-    users_tree.heading('id', text='ID')
-    users_tree.heading('name', text='Имя')
-    users_tree.heading('login', text='Логин')
-    users_tree.heading('is_active', text='Активен')
-    users_tree.column('id', width=40, anchor=tk.CENTER)
-    users_tree.column('name', width=200)
-    users_tree.column('login', width=150)
-    users_tree.column('is_active', width=80, anchor=tk.CENTER)
-    users_tree.pack(expand=True, fill=tk.BOTH)
-
-    load_users()
 
 class AddClientDialog(tk.Toplevel):
     """Диалог для добавления нового клиента в локальный справочник."""
