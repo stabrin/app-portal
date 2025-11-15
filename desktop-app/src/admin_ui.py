@@ -901,6 +901,84 @@ def open_user_management_window(parent_widget, user_info):
         # --- ИСПРАВЛЕНИЕ: Используем глобальную функцию для отображения последовательности QR-кодов ---
         display_qr_sequence(f"Настройка для: {name}", chunks, users_window)
 
+class CodeUploadFrame(ttk.Frame):
+    """Фрейм для загрузки файлов с кодами маркировки."""
+    def __init__(self, parent, user_info, order_id):
+        super().__init__(parent)
+        self.user_info = user_info
+        self.order_id = order_id
+
+        self._create_widgets()
+
+    def _create_widgets(self):
+        main_frame = ttk.Frame(self, padding="15")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(main_frame, text="Загрузите файлы с кодами маркировки (csv, txt):").pack(anchor="w")
+
+        # Поле для выбора файлов
+        file_entry_frame = ttk.Frame(main_frame)
+        file_entry_frame.pack(fill=tk.X, pady=5)
+        self.file_path_var = tk.StringVar()
+        ttk.Entry(file_entry_frame, textvariable=self.file_path_var, state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(file_entry_frame, text="Обзор...", command=self._select_files).pack(side=tk.LEFT, padx=(5,0))
+
+        # Настройки агрегации
+        agg_frame = ttk.LabelFrame(main_frame, text="Настройки агрегации", padding="10")
+        agg_frame.pack(fill=tk.X, pady=10)
+        
+        self.aggregation_mode_var = tk.StringVar(value="none")
+        ttk.Radiobutton(agg_frame, text="Без агрегации", variable=self.aggregation_mode_var, value="none").pack(anchor="w")
+        
+        level1_frame = ttk.Frame(agg_frame)
+        level1_frame.pack(fill=tk.X)
+        ttk.Radiobutton(level1_frame, text="Агрегация в короба:", variable=self.aggregation_mode_var, value="level1").pack(side=tk.LEFT)
+        self.level1_qty_var = tk.StringVar(value="10")
+        ttk.Entry(level1_frame, textvariable=self.level1_qty_var, width=5).pack(side=tk.LEFT)
+
+        # Кнопка запуска
+        ttk.Button(main_frame, text="Запустить обработку", command=self._run_processing).pack(pady=10)
+
+    def _select_files(self):
+        filepaths = filedialog.askopenfilenames(
+            title="Выберите файлы с кодами",
+            filetypes=[("Текстовые файлы", "*.txt *.csv"), ("Все файлы", "*.*")],
+            parent=self
+        )
+        if filepaths:
+            self.file_path_var.set(";".join(filepaths))
+
+    def _run_processing(self):
+        filepaths = self.file_path_var.get().split(";")
+        if not all(filepaths):
+            messagebox.showwarning("Внимание", "Не выбраны файлы для загрузки.", parent=self)
+            return
+
+        # --- НОВАЯ ЛОГИКА: Адаптация run_aggregation_process из datamatrix-app ---
+        # В desktop-app у нас нет объекта `file`, поэтому мы будем читать файлы напрямую
+        # и передавать их содержимое. Для этого нам нужно будет адаптировать
+        # `run_aggregation_process` или создать новую функцию.
+        # Пока что выведем заглушку.
+
+        # TODO: Реализовать логику обработки файлов, аналогичную `run_aggregation_process`
+        # из `datamatrix-app/app/services/aggregation_service.py`.
+        # Это потребует переноса и адаптации функций:
+        # - run_aggregation_process
+        # - parse_datamatrix / parse_tobacco_dm
+        # - read_and_increment_counter
+        # - generate_sscc
+        # - upsert_data_to_db
+
+        messagebox.showinfo(
+            "В разработке",
+            f"Запущена обработка для заказа №{self.order_id}.\n"
+            f"Файлы: {len(filepaths)} шт.\n"
+            f"Режим агрегации: {self.aggregation_mode_var.get()}\n"
+            f"Кол-во в коробе: {self.level1_qty_var.get() if self.aggregation_mode_var.get() == 'level1' else 'N/A'}\n\n"
+            "Полная реализация этой функции в процессе.",
+            parent=self
+        )
+
     # --- Виджеты окна ---
     main_frame = ttk.Frame(users_window, padding="10")
     main_frame.pack(expand=True, fill=tk.BOTH)
@@ -2657,6 +2735,10 @@ class AdminWindow(tk.Tk):
         # Добавляем вкладки в контейнер
         notebook.add(supply_notice_frame, text="Уведомление о поставке")
         notebook.add(orders_frame, text="Заказы")
+        # --- НОВЫЙ БЛОК: Добавляем вкладку "Загрузка кодов" ---
+        # Она будет скрыта по умолчанию и будет появляться только для определенных сценариев.
+        self.code_upload_frame = ttk.Frame(notebook, padding="10")
+        notebook.add(self.code_upload_frame, text="Загрузка кодов", state="hidden")
         notebook.add(catalogs_frame, text="Справочники")
         notebook.add(reports_frame, text="Отчеты")
         notebook.add(admin_frame, text="Администрирование")
@@ -3526,6 +3608,11 @@ class AdminWindow(tk.Tk):
             # management_notebook.pack(fill="both", expand=True) # pack будет вызываться в on_order_select
 
             # Вкладка "Редактирование"
+            # --- ИЗМЕНЕНИЕ: Создаем вкладку для загрузки кодов ---
+            # Она будет показана или скрыта в зависимости от сценария.
+            upload_tab = ttk.Frame(management_notebook, padding=10)
+            management_notebook.add(upload_tab, text="Загрузка кодов")
+
             edit_tab = ttk.Frame(management_notebook, padding=10)
             management_notebook.add(edit_tab, text="Редактирование")
             # Вкладка "АПИ"
@@ -3609,7 +3696,7 @@ class AdminWindow(tk.Tk):
                 # Очищаем панель управления
                 placeholder_label.pack_forget()
                 management_notebook.pack_forget()
-                for tab in (edit_tab, api_tab):
+                for tab in (edit_tab, api_tab, upload_tab):
                     for widget in tab.winfo_children():
                         widget.destroy()
 
@@ -3630,6 +3717,8 @@ class AdminWindow(tk.Tk):
                             cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
                             result = cur.fetchone()
                     scenario_data = result['scenario_data'] if result else {}
+                    # --- НОВАЯ ЛОГИКА: Получаем источник кодов ---
+                    dm_source = scenario_data.get('dm_source')
                     post_processing_mode = scenario_data.get('post_processing')
                     logging.debug(f"on_order_select: Данные сценария получены. post_processing_mode: '{post_processing_mode}'.")
  
@@ -3637,9 +3726,15 @@ class AdminWindow(tk.Tk):
                     OrderEditorFrame(edit_tab, self.user_info, order_id, scenario_data).pack(fill="both", expand=True)
                     logging.debug("on_order_select: OrderEditorFrame успешно создан и упакован.")
  
-                    logging.debug(f"on_order_select: Создание ApiIntegrationFrame для заказа ID {order_id}...")
-                    ApiIntegrationFrame(api_tab, self.user_info, order_id, post_processing_mode).pack(fill="both", expand=True)
-                    logging.debug("on_order_select: ApiIntegrationFrame успешно создан и упакован.")
+                    # --- НОВАЯ ЛОГИКА: Создаем нужный фрейм в зависимости от источника ---
+                    if dm_source == "Файлы клиента (csv, txt)":
+                        logging.debug(f"on_order_select: Создание CodeUploadFrame для заказа ID {order_id}...")
+                        CodeUploadFrame(upload_tab, self.user_info, order_id).pack(fill="both", expand=True)
+                        logging.debug("on_order_select: CodeUploadFrame успешно создан.")
+                    else:
+                        logging.debug(f"on_order_select: Создание ApiIntegrationFrame для заказа ID {order_id}...")
+                        ApiIntegrationFrame(api_tab, self.user_info, order_id, post_processing_mode).pack(fill="both", expand=True)
+                        logging.debug("on_order_select: ApiIntegrationFrame успешно создан.")
 
                 except Exception as e:
                     logging.error(f"on_order_select: КРИТИЧЕСКАЯ ОШИБКА при создании интерфейсов управления: {e}", exc_info=True)
@@ -3648,7 +3743,14 @@ class AdminWindow(tk.Tk):
                     return
 
                 management_notebook.pack(fill="both", expand=True)
-                management_notebook.tab(api_tab, state="normal" if order_status in ('delta', 'dmkod') else "disabled")
+                # --- НОВАЯ ЛОГИКА: Показываем/скрываем вкладки ---
+                if dm_source == "Файлы клиента (csv, txt)":
+                    management_notebook.hide(api_tab)
+                    management_notebook.tab(upload_tab, state="normal")
+                else:
+                    management_notebook.hide(upload_tab)
+                    management_notebook.tab(api_tab, state="normal" if order_status in ('delta', 'dmkod') else "disabled")
+
 
  
             tree.bind("<<TreeviewSelect>>", on_order_select) # Привязываем обработчик выбора
@@ -3670,6 +3772,10 @@ class AdminWindow(tk.Tk):
         # При переключении вкладок можно добавить автообновление
         def on_tab_change(event):
             if notebook.index(notebook.select()) == 0:
+                # --- НОВЫЙ БЛОК: Логика для вкладки "Загрузка кодов" ---
+                # Этот блок будет пустым, так как вкладка скрыта по умолчанию
+                pass
+            elif notebook.index(notebook.select()) == 1:
                 refresh_in_progress()
             else:
                 refresh_archive()
