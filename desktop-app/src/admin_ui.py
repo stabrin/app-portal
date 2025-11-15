@@ -214,10 +214,12 @@ def open_workplace_setup_window(parent_widget, user_info):
 
             # 4. Шифруем пароль
             def xor_cipher(data, key):
-                return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(data, key * (len(data) // len(key) + 1)))
+                return bytes([ord(c) ^ ord(k) for c, k in zip(data, key * (len(data) // len(key) + 1))])
 
             encryption_key = "TildaKodSecretKey" # Ключ должен быть таким же в мобильном приложении
-            encrypted_password = xor_cipher(settings_from_db['DB_PASSWORD'], encryption_key)
+            # Шифруем, а затем кодируем в Base64 для безопасного хранения в текстовом файле
+            encrypted_bytes = xor_cipher(settings_from_db['DB_PASSWORD'], encryption_key)
+            encrypted_password_b64 = base64.b64encode(encrypted_bytes).decode('ascii')
 
             # 5. Формируем содержимое ini-файла
             ini_content = (
@@ -226,7 +228,7 @@ def open_workplace_setup_window(parent_widget, user_info):
                 f"port = {settings_from_db['LOCAL_SERVER_PORT']}\n"
                 f"dbname = {settings_from_db['DB_NAME']}\n"
                 f"user = {settings_from_db['DB_USER']}\n"
-                f"password = {encrypted_password}"
+                f"password = {encrypted_password_b64}"
             )
 
             # 6. Запрашиваем у пользователя место для сохранения

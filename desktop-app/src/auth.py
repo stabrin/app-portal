@@ -117,11 +117,13 @@ class StandaloneLoginWindow(tk.Tk):
 
             # 2. Расшифровка пароля
             def xor_cipher(data, key):
-                return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(data, key * (len(data) // len(key) + 1)))
+                return bytes([c ^ ord(k) for c, k in zip(data, key * (len(data) // len(key) + 1))]).decode('utf-8')
             
             encryption_key = "TildaKodSecretKey"
-            encrypted_password = db_section.get('password')
-            decrypted_password = xor_cipher(encrypted_password, encryption_key)
+            encrypted_password_b64 = db_section.get('password')
+            # Сначала декодируем из Base64, а затем расшифровываем
+            encrypted_bytes = base64.b64decode(encrypted_password_b64)
+            decrypted_password = xor_cipher(encrypted_bytes, encryption_key)
 
             # 3. Формирование конфигурации для подключения
             client_db_config = {
