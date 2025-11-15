@@ -102,7 +102,7 @@ class StandaloneLoginWindow(tk.Tk):
             logging.info("Обнаружен файл config.ini. Запуск в локальном режиме.")
             self._local_auth(login, password, config_path, cert_path)
         else:
-            logging.info("Файл config.ini не найден. Запуск в стандартном (онлайн) режиме.")
+            logging.info(f"Файл config.ini не найден по пути '{config_path}'. Запуск в стандартном (онлайн) режиме.")
             self._online_auth(login, password)
 
     def _local_auth(self, login, password, config_path, cert_path):
