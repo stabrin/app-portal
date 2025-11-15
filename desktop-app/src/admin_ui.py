@@ -43,7 +43,7 @@ from .printing_service import PrintingService, LabelEditorWindow, ImageSelection
 import requests
 from datetime import datetime
 import traceback
- 
+import base64
 import zlib, base64 # Для сжатия данных QR-кода (оставляем один раз)
 
 def open_label_editor_window(parent_widget, user_info):

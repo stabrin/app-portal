@@ -48,7 +48,7 @@ logging.basicConfig(
     ]
 )
 
-class StandaloneLoginWindow(tk.Tk):
+class StandaloneLoginWindow(tk.Toplevel):
     """
     Автономное, самодостаточное окно входа.
     После завершения работы (успех, ошибка, закрытие) вызывает callback и самоуничтожается.
@@ -57,13 +57,16 @@ class StandaloneLoginWindow(tk.Tk):
         super().__init__()
         self.on_complete_callback = on_complete_callback
 
-        # --- ИЗМЕНЕНИЕ: Динамический заголовок окна ---
+        # --- ИЗМЕНЕНИЕ: Динамический заголовок окна и делаем его модальным ---
         config_path = os.path.join(project_root, 'config.ini')
         self.title(f"{config_path} Вход | Путь для config.ini:")
         self.resizable(False, False)
 
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
         self.bind('<Return>', lambda event: self._verify_login())
+
+        self.transient(self.master) # Окно будет поверх главного
+        self.grab_set() # Модальное поведение
 
         self._create_widgets()
 
@@ -267,45 +270,39 @@ def main():
     """
     logging.info("Application starting...")
     
-    # --- Этап 1: Авторизация ---
-    user_info_container = {}
-    def on_auth_complete(result):
-        """Callback, который сохраняет результат и уничтожает окно входа."""
-        user_info_container['result'] = result
-        # Не нужно вызывать destroy() здесь, так как окно само себя уничтожает
+    # --- Этап 1: Создание корневого окна и установка глобальных привязок ---
+    # Создаем невидимое корневое окно. Оно будет служить основой для всего приложения.
+    root = tk.Tk()
+    root.withdraw() # Скрываем его
 
-    # Создаем и запускаем окно входа.
-    # Его mainloop будет блокировать выполнение до закрытия окна.
-    login_app = StandaloneLoginWindow(on_auth_complete)
-    login_app.mainloop()
-    
-    # --- ИСПРАВЛЕНИЕ: Добавляем глобальные привязки для Copy/Paste ---
-    # Этот код решает проблему с неработающими Ctrl+C/Ctrl+V в русской раскладке.
-    # Он выполняется один раз после закрытия окна логина, но до открытия
-    # основного окна, и устанавливает правила для всех виджетов Entry и Text.
     try:
-        # Используем 'login_app' как ссылку на корневой элемент tk, чтобы получить доступ к bind_class
-        # Это сработает, даже если окно уже уничтожено.
-        root = login_app
-        
-        # Для клавиши 'C' (копировать)
-        # 46 - это стандартный keycode для физической клавиши 'C' в Tkinter на Windows
+        # Устанавливаем глобальные привязки для Copy/Paste в русской раскладке
+        # 46 - это keycode для 'C', 47 - для 'V' в Tkinter на Windows
         root.bind_class("Entry", "<Control-KeyPress-46>", lambda event: event.widget.event_generate("<<Copy>>"))
         root.bind_class("Text", "<Control-KeyPress-46>", lambda event: event.widget.event_generate("<<Copy>>"))
-
-        # Для клавиши 'V' (вставить)
-        # 47 - это стандартный keycode для физической клавиши 'V' в Tkinter на Windows
         root.bind_class("Entry", "<Control-KeyPress-47>", lambda event: event.widget.event_generate("<<Paste>>"))
         root.bind_class("Text", "<Control-KeyPress-47>", lambda event: event.widget.event_generate("<<Paste>>"))
         logging.info("Глобальные привязки для Copy/Paste успешно установлены.")
     except Exception as e:
         logging.error(f"Не удалось установить глобальные привязки для Copy/Paste: {e}")
 
+    # --- Этап 2: Авторизация ---
+    user_info_container = {}
+    def on_auth_complete(result):
+        """Callback, который сохраняет результат и позволяет основному циклу завершиться."""
+        user_info_container['result'] = result
+        root.quit() # Выходим из mainloop корневого окна
+
+    # Создаем окно входа как дочернее от скрытого корневого окна
+    login_app = StandaloneLoginWindow(on_auth_complete)
+    root.mainloop() # Запускаем главный цикл. Он будет ждать, пока login_app не вызовет root.quit()
+
     user_info = user_info_container.get('result')
 
-    # --- Этап 2: Запуск основного интерфейса ---
+    # --- Этап 3: Запуск основного интерфейса или выход ---
     if not user_info:
         logging.info("Login failed or cancelled. Exiting application.")
+        root.destroy() # Уничтожаем скрытое корневое окно перед выходом
         return
     
     log_message = f"Login successful. User: {user_info['name']}, Role: {user_info['role']}"
@@ -314,6 +311,7 @@ def main():
     logging.info(log_message)
 
     role = user_info.get("role")
+    root.destroy() # Уничтожаем старое корневое окно, т.к. главные окна создают свое.
     app = None
     if role == 'супервизор':
         app = SupervisorWindow(user_info)
