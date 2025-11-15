@@ -229,22 +229,25 @@ def get_client_db_connection(user_info: Dict[str, Any]):
     # --- ИЗМЕНЕНИЕ: Используем ID клиента для идентификации пула ---
     # Предполагаем, что client_db_config содержит 'id' клиента из главной БД.
     # Если его нет, можно использовать, например, db_name как ключ.
-    client_id = db_config.get('id')
-    if not client_id:
-        # В supervisor_ui мы получаем всю строку, так что ID должен быть.
-        # Если его нет, это ошибка в логике передачи данных.
-        raise ValueError("В конфигурации БД клиента отсутствует 'id'.")
+    client_id = db_config.get('id') # Может быть 0 в локальном режиме
 
-    client_pool = get_client_pool(client_id, db_config)
+    # --- ИСПРАВЛЕНИЕ: Для локального режима (id=0) используем db_name как ключ пула ---
+    if client_id == 0:
+        pool_key = db_config.get('db_name')
+    else:
+        pool_key = client_id
+    if not pool_key: raise ValueError("Не удалось определить ключ для пула соединений (ни ID клиента, ни имя БД).")
+
+    client_pool = get_client_pool(pool_key, db_config)
     
-    logging.debug(f"Получение соединения из пула для клиента ID {client_id}...")
+    logging.debug(f"Получение соединения из пула для клиента (ключ: {pool_key})...")
     conn = client_pool.getconn()
-    logging.debug(f"Соединение {id(conn)} получено из пула клиента ID {client_id}.")
+    logging.debug(f"Соединение {id(conn)} получено из пула клиента (ключ: {pool_key}).")
     try:
         yield conn
     finally:
         client_pool.putconn(conn)
-        logging.debug(f"Соединение {id(conn)} возвращено в пул клиента ID {client_id}.")
+        logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
 
 def _get_cert_path(ssl_cert_content: Optional[str]) -> Optional[str]:
     """Создает временный файл для сертификата и возвращает путь к нему."""
