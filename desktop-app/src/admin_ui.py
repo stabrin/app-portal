@@ -188,82 +188,67 @@ def open_workplace_setup_window(parent_widget, user_info):
     config_frame = ttk.Frame(notebook, padding="10")
     notebook.add(config_frame, text="Настроечный код")
 
-    ttk.Label(config_frame, text="Локальный адрес сервера:", font=("Arial", 10, "bold")).pack(anchor="w")
-    ttk.Label(config_frame, text="(например, http://192.168.1.100:8080)", wraplength=400).pack(anchor="w", pady=(0, 5))
-    server_address_entry = ttk.Entry(config_frame, width=60)
-    server_address_entry.pack(fill="x")
+    ttk.Label(config_frame, text="Создание файлов конфигурации для мобильного приложения.", font=("Arial", 10, "bold")).pack(anchor="w")
+    ttk.Label(config_frame, text="Будут созданы файлы 'config.ini' и 'cert.pem' с настройками подключения к базе данных этого клиента.", wraplength=400).pack(anchor="w", pady=(0, 5))
     
-    def generate_server_config_qr():
+    def save_config_files():
         """
-        Новая логика: формирует QR-код для настройки сервера и открывает диалог печати.
-        В QR-код помещаются базовые данные для подключения, но без SSL-сертификата,
-        чтобы код оставался компактным и легко читаемым.
+        Получает данные из БД клиента, формирует ini-файл и файл сертификата,
+        и сохраняет их в выбранную пользователем директорию.
+        """
+        try:
+            # 1. Получаем настройки из БД клиента
+            with get_client_db_connection(user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT setting_key, setting_value FROM ap_settings WHERE setting_key IN ('LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD')")
+                    settings_from_db = {row['setting_key']: row['setting_value'] for row in cur.fetchall()}
 
-        ИЗМЕНЕНИЕ: Теперь генерируется многочастный QR-код для печати,
-        включающий и настройки, и SSL-сертификат для полной офлайн-настройки.
-        - Часть 1: Основные настройки.
-        - Части 2-11: SSL-сертификат, разделенный ровно на 10 частей.
-        """
-        # 1. Получаем конфигурацию БД клиента из user_info
-        config_data = user_info.get('client_db_config', {}).copy()
-        if not config_data:
-            messagebox.showerror("Ошибка", "Конфигурация базы данных клиента не найдена в данных пользователя.", parent=setup_window)
+            # 2. Получаем сертификат из конфигурации, переданной при логине
+            ssl_cert_content = user_info.get('client_db_config', {}).get('db_ssl_cert', '')
+
+            # 3. Проверяем наличие всех данных
+            required_keys = ['LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']
+            if not all(key in settings_from_db for key in required_keys):
+                missing_keys = [key for key in required_keys if key not in settings_from_db]
+                raise ValueError(f"В таблице 'ap_settings' отсутствуют необходимые настройки: {', '.join(missing_keys)}")
+
+            # 4. Шифруем пароль
+            def xor_cipher(data, key):
+                return ''.join(chr(ord(c) ^ ord(k)) for c, k in zip(data, key * (len(data) // len(key) + 1)))
+
+            encryption_key = "TildaKodSecretKey" # Ключ должен быть таким же в мобильном приложении
+            encrypted_password = xor_cipher(settings_from_db['DB_PASSWORD'], encryption_key)
+
+            # 5. Формируем содержимое ini-файла
+            ini_content = (
+                "[database]\n"
+                f"host = {settings_from_db['LOCAL_SERVER_ADDRESS']}\n"
+                f"port = {settings_from_db['LOCAL_SERVER_PORT']}\n"
+                f"dbname = {settings_from_db['DB_NAME']}\n"
+                f"user = {settings_from_db['DB_USER']}\n"
+                f"password = {encrypted_password}\n"
+            )
+
+            # 6. Запрашиваем у пользователя место для сохранения
+            save_path = filedialog.askdirectory(title="Выберите папку для сохранения файлов конфигурации", parent=setup_window)
+            if not save_path:
+                return # Пользователь отменил выбор
+
+            # 7. Сохраняем файлы
+            with open(os.path.join(save_path, 'config.ini'), 'w', encoding='utf-8') as f:
+                f.write(ini_content)
+            if ssl_cert_content:
+                with open(os.path.join(save_path, 'cert.pem'), 'w', encoding='utf-8') as f:
+                    f.write(ssl_cert_content)
+
+            messagebox.showinfo("Успех", f"Файлы 'config.ini' и 'cert.pem' успешно сохранены в папку:\n{save_path}", parent=setup_window)
+
+        except Exception as e:
+            logging.error(f"Ошибка при создании файлов конфигурации: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось создать файлы конфигурации: {e}", parent=setup_window)
             return
 
-        # 2. Определяем адрес сервера
-        # --- ИЗМЕНЕНИЕ: Приоритет локального адреса ---
-        # 1. Ручной ввод в поле
-        # 2. Локальный адрес из настроек клиента
-        # 3. Внешний хост БД как запасной вариант
-        final_address = server_address_entry.get().strip() or config_data.get('local_server_address') or config_data.get('db_host')
-        if not final_address:
-            messagebox.showerror("Ошибка", "Не удалось определить адрес сервера. Введите его вручную или убедитесь, что он есть в конфигурации клиента.", parent=setup_window)
-            return
-
-        # 3. Разделяем данные: основные настройки и сертификат
-        ssl_cert_content = config_data.pop('db_ssl_cert', '') # Извлекаем сертификат
-        
-        main_config = {
-            "type": "server_config_main",
-            "cert_parts_count": 10, # Фиксированное количество частей для сертификата
-            "address": final_address,
-            "db_name": config_data.get("db_name"),
-            "db_user": config_data.get("db_user"),
-            "db_password": config_data.get("db_password"),
-            "db_port": config_data.get("db_port")
-        }
-
-        # 4. Разбиваем сертификат ровно на 10 частей
-        cert_len = len(ssl_cert_content)
-        # Вычисляем размер каждой части с округлением вверх
-        cert_chunk_size = (cert_len + 9) // 10
-        cert_chunks = [ssl_cert_content[i:i + cert_chunk_size] for i in range(0, cert_len, cert_chunk_size)]
-        # Дополняем список пустыми строками, если частей меньше 10
-        cert_chunks.extend([''] * (10 - len(cert_chunks)))
-
-        # 5. Формируем итоговый список данных для печати (1 + 10 этикеток)
-        items_to_print = []
-        # Первая этикетка - основные настройки
-        items_to_print.append({
-            "QR: Конфигурация сервера": json.dumps(main_config, ensure_ascii=False),
-            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
-            "ap_workplaces.warehouse_name": "Настройка сервера (основное)",
-            "ap_workplaces.workplace_number": 0
-        })
-        # Следующие 10 этикеток - части сертификата
-        for i, cert_part in enumerate(cert_chunks):
-            cert_part_data = {"type": "server_config_cert", "part_index": i + 1, "total_parts": 10, "data": cert_part}
-            items_to_print.append({
-                "QR: Конфигурация сервера": json.dumps(cert_part_data, ensure_ascii=False),
-                "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
-                "ap_workplaces.warehouse_name": f"Сертификат (часть {i+1}/10)",
-                "ap_workplaces.workplace_number": 0
-            })
-
-        # 6. Открываем диалог печати, передавая ему список всех 11 частей.
-        PrintWorkplaceLabelsDialog(setup_window, user_info, f"Настройка сервера: {final_address}", items_to_print)
-
-    ttk.Button(config_frame, text="Сгенерировать QR-код", command=generate_server_config_qr).pack(pady=20)
+    ttk.Button(config_frame, text="Сохранить файлы конфигурации", command=save_config_files).pack(pady=20)
 
     # --- Вкладка 2: Рабочие места ---
     workplaces_frame = ttk.Frame(notebook, padding="10")
