@@ -144,7 +144,7 @@ class StandaloneLoginWindow(tk.Tk):
 
             with get_client_db_connection(user_info_for_connection) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT username, password_hash, is_admin FROM public.users WHERE username = %s AND is_active = TRUE", (login,))
+                    cur.execute("SELECT username, password_hash, is_active FROM public.users WHERE username = %s AND is_active = TRUE", (login,))
                     user_data = cur.fetchone()
 
             if user_data:

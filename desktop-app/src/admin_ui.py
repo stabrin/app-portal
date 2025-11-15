@@ -226,7 +226,7 @@ def open_workplace_setup_window(parent_widget, user_info):
                 f"port = {settings_from_db['LOCAL_SERVER_PORT']}\n"
                 f"dbname = {settings_from_db['DB_NAME']}\n"
                 f"user = {settings_from_db['DB_USER']}\n"
-                f"password = {encrypted_password}\n"
+                f"password = {encrypted_password}"
             )
 
             # 6. Запрашиваем у пользователя место для сохранения
