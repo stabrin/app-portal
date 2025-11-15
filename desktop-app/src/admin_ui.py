@@ -2662,7 +2662,7 @@ class OrderEditorFrame(ttk.Frame):
                 # cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
             
               # 6. Фиксируем все изменения в одной транзакции
-              # conn.commit() теперь управляется контекстным менеджером 'with conn'
+              conn.commit() # теперь управляется контекстным менеджером 'with conn'
               messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
 
         except Exception as e:
