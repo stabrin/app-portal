@@ -22,7 +22,7 @@ except ImportError:
 
 # Настройка логирования (оставляем один раз)
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format='%(asctime)s - %(levelname)s - [admin_ui.py] - %(message)s',
     handlers=[
         logging.StreamHandler(),

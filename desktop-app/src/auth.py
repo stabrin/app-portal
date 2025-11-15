@@ -41,8 +41,8 @@ from .admin_ui import AdminWindow
 # --- Настройка логирования (копируем из main_window.py) ---
 log_file_path = os.path.join(project_root, 'app.log')
 logging.basicConfig(
-    level=logging.DEBUG, # Изменено на DEBUG для более подробного логирования
-    format='%(asctime)s - %(levelname)s - [auth_test] - %(message)s', # Добавим маркер для логов
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - [auth.py] - %(message)s',
     handlers=[
         logging.FileHandler(log_file_path, encoding='utf-8'),
         logging.StreamHandler()
