@@ -275,7 +275,7 @@ def open_workplace_setup_window(parent_widget, user_info):
             warehouses_tree.delete(i)
         
         try:
-            with get_client_db_connection() as conn:
+            with get_client_db_connection(user_info) as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("""
                         SELECT warehouse_name, COUNT(*) as workplace_count
@@ -297,7 +297,7 @@ def open_workplace_setup_window(parent_widget, user_info):
         if not count: return
 
         try:
-            with get_client_db_connection() as conn:
+            with get_client_db_connection(user_info) as conn:
                 with conn.cursor() as cur:
                     # Проверка на существование
                     cur.execute("SELECT 1 FROM ap_workplaces WHERE warehouse_name = %s LIMIT 1", (name,))
@@ -337,7 +337,7 @@ def open_workplace_setup_window(parent_widget, user_info):
             return
 
         try:
-            with get_client_db_connection() as conn:
+            with get_client_db_connection(user_info) as conn:
                 with conn.cursor() as cur:
                     if new_count > current_count:
                         # Добавляем новые места
