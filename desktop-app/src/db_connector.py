@@ -77,62 +77,67 @@ def initialize_main_db_pool():
         main_db_pool = pool.ThreadedConnectionPool(1, 5, **db_params)
         logging.info("Пул соединений для главной БД успешно создан.")
 
-def get_client_pool(client_id: int, db_config: Dict[str, Any]) -> pool.ThreadedConnectionPool:
+def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedConnectionPool:
     """
     Возвращает или создает и кэширует пул соединений для конкретной клиентской БД.
     Логика выбора адреса (внешний/внутренний) выполняется один раз при создании пула.
     """
-    if client_id not in client_db_pools:
-        logging.info(f"Пул для клиента ID {client_id} не найден. Начинаю процедуру создания нового пула...")
+    if pool_key not in client_db_pools:
+        logging.info(f"Пул для клиента (ключ: {pool_key}) не найден. Начинаю процедуру создания нового пула...")
         
-        # --- ИЗМЕНЕНИЕ: Восстанавливаем правильный порядок проверки: сначала внешний (SSL), потом внутренний. ---
         conn_params = None
+        is_local_mode = not isinstance(pool_key, int)
 
-        # 1. Попытка с внешним адресом (SSL)
-        try:
-            external_params = {
-                'host': db_config.get('db_host'), 'port': db_config.get('db_port'), 'dbname': db_config.get('db_name'),
-                'user': db_config.get('db_user'), 'password': db_config.get('db_password'),
-                'connect_timeout': 3 # Короткий таймаут, чтобы не "висеть"
-            }
-            if all(external_params.values()):
-                logging.debug(f"Клиент ID {client_id}: [Попытка 1/2] Проверка внешнего адреса: {external_params['host']}:{external_params['port']} с SSL.")
-                with _attempt_db_connection(external_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
-                    if conn:
-                        conn_params = {**external_params, 'sslmode': 'verify-full', 'sslrootcert': _get_cert_path(db_config.get('db_ssl_cert'))}
-                        logging.info(f"Клиент ID {client_id}: Внешний адрес доступен. Пул будет создан с использованием SSL.")
-                    else:
-                        logging.warning(f"Клиент ID {client_id}: Тестовое подключение по внешнему адресу не вернуло объект соединения.")
-        except psycopg2.OperationalError as e:
-            logging.warning(f"Клиент ID {client_id}: Не удалось подключиться по внешнему адресу. Ошибка: {e}")
+        # 1. Попытка с внешним адресом (SSL) - пропускаем в локальном режиме
+        if not is_local_mode:
+            try:
+                external_params = {
+                    'host': db_config.get('db_host'), 'port': db_config.get('db_port'), 'dbname': db_config.get('db_name'),
+                    'user': db_config.get('db_user'), 'password': db_config.get('db_password'),
+                    'connect_timeout': 3 # Короткий таймаут, чтобы не "висеть"
+                }
+                if all(external_params.values()):
+                    logging.debug(f"Клиент (ключ: {pool_key}): [Попытка 1/2] Проверка внешнего адреса: {external_params['host']}:{external_params['port']} с SSL.")
+                    with _attempt_db_connection(external_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
+                        if conn:
+                            conn_params = {**external_params, 'sslmode': 'verify-full', 'sslrootcert': _get_cert_path(db_config.get('db_ssl_cert'))}
+                            logging.info(f"Клиент (ключ: {pool_key}): Внешний адрес доступен. Пул будет создан с использованием SSL.")
+                        else:
+                            logging.warning(f"Клиент (ключ: {pool_key}): Тестовое подключение по внешнему адресу не вернуло объект соединения.")
+            except psycopg2.OperationalError as e:
+                logging.warning(f"Клиент (ключ: {pool_key}): Не удалось подключиться по внешнему адресу. Ошибка: {e}")
 
-        # 2. Попытка с внутренним адресом, если внешний не удался
+        # 2. Попытка с внутренним/локальным адресом, если внешний не удался или мы в локальном режиме
         if not conn_params:
             try:
+                # В локальном режиме local_server_address берется из config.ini и кладется в db_host
+                host_to_try = db_config.get('local_server_address') if not is_local_mode else db_config.get('db_host')
+                port_to_try = db_config.get('local_server_port') if not is_local_mode else db_config.get('db_port')
+
                 local_params = {
-                    'host': db_config.get('local_server_address'), 'port': db_config.get('local_server_port'), 'dbname': db_config.get('db_name'),
+                    'host': host_to_try, 'port': port_to_try, 'dbname': db_config.get('db_name'),
                     'user': db_config.get('db_user'), 'password': db_config.get('db_password'),
                     'connect_timeout': 5
                 }
                 if all(local_params.values()):
-                    logging.debug(f"Клиент ID {client_id}: [Попытка 2/2] Проверка внутреннего адреса: {local_params['host']}:{local_params['port']} без SSL.")
+                    logging.debug(f"Клиент (ключ: {pool_key}): [Попытка 2/2] Проверка адреса: {local_params['host']}:{local_params['port']} без SSL.")
                     with _attempt_db_connection(local_params, None, 'disable') as conn:
                         if conn:
                             conn_params = {**local_params, 'sslmode': 'disable'}
-                            logging.info(f"Клиент ID {client_id}: Внутренний адрес доступен. Пул будет создан без использования SSL.")
+                            logging.info(f"Клиент (ключ: {pool_key}): Адрес доступен. Пул будет создан без использования SSL.")
                         else:
-                            logging.warning(f"Клиент ID {client_id}: Тестовое подключение по внутреннему адресу не вернуло объект соединения.")
+                            logging.warning(f"Клиент (ключ: {pool_key}): Тестовое подключение по этому адресу не вернуло объект соединения.")
             except psycopg2.OperationalError as e:
-                logging.warning(f"Клиент ID {client_id}: Не удалось подключиться по внутреннему адресу. Ошибка: {e}")
+                logging.warning(f"Клиент (ключ: {pool_key}): Не удалось подключиться по этому адресу. Ошибка: {e}")
 
         if not conn_params:
-            logging.error(f"Не удалось создать пул для клиента ID {client_id}. Ни один из адресов (внешний/внутренний) не ответил.")
-            raise ConnectionError(f"Не удалось создать пул соединений для клиента ID {client_id}: ни один из адресов не доступен.")
+            logging.error(f"Не удалось создать пул для клиента (ключ: {pool_key}). Ни один из адресов не ответил.")
+            raise ConnectionError(f"Не удалось создать пул соединений для клиента (ключ: {pool_key}): ни один из адресов не доступен.")
 
-        client_db_pools[client_id] = pool.ThreadedConnectionPool(1, 5, **conn_params)
-        logging.info(f"Пул соединений для клиента ID {client_id} успешно создан. Параметры: host={conn_params.get('host')}, port={conn_params.get('port')}, sslmode={conn_params.get('sslmode')}")
+        client_db_pools[pool_key] = pool.ThreadedConnectionPool(1, 5, **conn_params)
+        logging.info(f"Пул соединений для клиента (ключ: {pool_key}) успешно создан. Параметры: host={conn_params.get('host')}, port={conn_params.get('port')}, sslmode={conn_params.get('sslmode')}")
 
-    return client_db_pools[client_id]
+    return client_db_pools[pool_key]
 
 @contextmanager
 def get_client_db_connection_DEPRECATED(user_info: Dict[str, Any]) -> Optional[psycopg2.extensions.connection]:
