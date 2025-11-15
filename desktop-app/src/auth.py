@@ -277,12 +277,16 @@ def main():
     root.withdraw() # Скрываем его
 
     try:
-        # Устанавливаем глобальные привязки для Copy/Paste в русской раскладке
-        # 46 - это keycode для 'C', 47 - для 'V' в Tkinter на Windows
-        root.bind_class("Entry", "<Control-KeyPress-46>", lambda event: event.widget.event_generate("<<Copy>>"))
-        root.bind_class("Text", "<Control-KeyPress-46>", lambda event: event.widget.event_generate("<<Copy>>"))
-        root.bind_class("Entry", "<Control-KeyPress-47>", lambda event: event.widget.event_generate("<<Paste>>"))
-        root.bind_class("Text", "<Control-KeyPress-47>", lambda event: event.widget.event_generate("<<Paste>>"))
+        # --- ИСПРАВЛЕНИЕ: Используем надежный метод привязки для Copy/Paste ---
+        # Привязываем к символам в обеих раскладках (латиница и кириллица).
+        # Это работает на всех ОС и не зависит от кодов клавиш.
+        for widget_class in ["Entry", "Text"]:
+            root.bind_class(widget_class, "<Control-c>", lambda event: event.widget.event_generate("<<Copy>>"))
+            root.bind_class(widget_class, "<Control-v>", lambda event: event.widget.event_generate("<<Paste>>"))
+            # Добавляем привязки для кириллических 'с' (копировать) и 'в' (вставить)
+            root.bind_class(widget_class, "<Control-с>", lambda event: event.widget.event_generate("<<Copy>>"))
+            root.bind_class(widget_class, "<Control-в>", lambda event: event.widget.event_generate("<<Paste>>"))
+
         logging.info("Глобальные привязки для Copy/Paste успешно установлены.")
     except Exception as e:
         logging.error(f"Не удалось установить глобальные привязки для Copy/Paste: {e}")
