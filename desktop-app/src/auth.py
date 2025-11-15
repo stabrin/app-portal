@@ -60,7 +60,10 @@ class StandaloneLoginWindow(tk.Toplevel):
 
         # --- ИЗМЕНЕНИЕ: Динамический заголовок окна и делаем его модальным ---
         config_path = os.path.join(project_root, 'config.ini')
-        self.title(f"{config_path} Вход | Путь для config.ini:")
+        if os.path.exists(config_path):
+            self.title("Офлайн авторизация")
+        else:
+            self.title("Онлайн авторизация")
         self.resizable(False, False)
 
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -150,12 +153,26 @@ class StandaloneLoginWindow(tk.Toplevel):
 
             with get_client_db_connection(user_info_for_connection) as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT username, password_hash, is_active FROM public.users WHERE username = %s AND is_active = TRUE", (login,))
+                    cur.execute("SELECT username, password_hash, is_admin FROM public.users WHERE username = %s AND is_active = TRUE", (login,))
                     user_data = cur.fetchone()
+
+                    # --- НОВЫЙ БЛОК: Считываем настройки из БД клиента ---
+                    logging.info("Считывание настроек из public.ap_settings в офлайн-режиме...")
+                    cur.execute("""
+                        SELECT setting_key, setting_value FROM public.ap_settings 
+                        WHERE setting_key IN (
+                            'API_BASE_URL', 'API_EMAIL', 'API_PASSWORD', 
+                            'SSCC_GCP_1', 'SSCC_PRIMARY_GCP_LIMIT', 'SSCC_GCP_2', 'SSCC_WARNING_PERCENT'
+                        )
+                    """)
+                    settings_from_db = {row[0]: row[1] for row in cur.fetchall()}
+                    logging.info(f"Настройки из БД клиента загружены: {list(settings_from_db.keys())}")
+                    # --- КОНЕЦ НОВОГО БЛОКА ---
 
             if user_data:
                 user_name, hashed_password, is_admin = user_data
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
+                    # --- ИЗМЕНЕНИЕ: Проверяем поле is_admin, а не is_active ---
                     if not is_admin:
                         messagebox.showerror("Ошибка", "Для локального входа требуются права администратора.", parent=self)
                         return
@@ -165,7 +182,11 @@ class StandaloneLoginWindow(tk.Toplevel):
                         "role": "администратор",
                         "client_id": 0,
                         "client_db_config": client_db_config,
-                        "client_api_config": {} # API недоступно в локальном режиме
+                        "client_api_config": {
+                            "api_base_url": settings_from_db.get('API_BASE_URL'),
+                            "api_email": settings_from_db.get('API_EMAIL'),
+                            "api_password": settings_from_db.get('API_PASSWORD')
+                        }
                     }
                     logging.info(f"Локальная аутентификация для '{login}' прошла успешно.")
                     self.on_complete_callback(user_info)
