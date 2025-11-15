@@ -978,13 +978,6 @@ class CodeUploadFrame(ttk.Frame):
             "Полная реализация этой функции в процессе.",
             parent=self
         )
-
-    # --- Виджеты окна ---
-    main_frame = ttk.Frame(users_window, padding="10")
-    main_frame.pack(expand=True, fill=tk.BOTH)
-
-    # Левая панель с кнопками
-    buttons_frame = ttk.Frame(main_frame)
     buttons_frame.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
 
     ttk.Button(buttons_frame, text="Создать", command=create_user).pack(fill=tk.X, pady=2)
