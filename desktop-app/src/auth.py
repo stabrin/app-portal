@@ -284,8 +284,8 @@ def main():
             root.bind_class(widget_class, "<Control-c>", lambda event: event.widget.event_generate("<<Copy>>"))
             root.bind_class(widget_class, "<Control-v>", lambda event: event.widget.event_generate("<<Paste>>"))
             # Добавляем привязки для кириллических 'с' (копировать) и 'в' (вставить)
-            root.bind_class(widget_class, "<Control-с>", lambda event: event.widget.event_generate("<<Copy>>"))
-            root.bind_class(widget_class, "<Control-в>", lambda event: event.widget.event_generate("<<Paste>>"))
+            root.bind_class(widget_class, "<Control-Cyrillic_es>", lambda event: event.widget.event_generate("<<Copy>>"))
+            root.bind_class(widget_class, "<Control-Cyrillic_ve>", lambda event: event.widget.event_generate("<<Paste>>"))
 
         logging.info("Глобальные привязки для Copy/Paste успешно установлены.")
     except Exception as e:
