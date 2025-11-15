@@ -2,12 +2,14 @@ import os
 import re
 import logging
 from typing import Optional
+import codecs
 import pandas as pd
 from psycopg2.extras import RealDictCursor
 
-from .printing_service import PrintingService # Для получения подключения к БД
+from .db_connector import get_client_db_connection
 from .utils import upsert_data_to_db # Импортируем утилиту
 from .sscc_service import generate_sscc, read_and_increment_counter # Импортируем централизованные функции
+from .printing_service import PrintingService
 
 # Константа-разделитель для кодов DataMatrix
 GS_SEPARATOR = '\x1d'
@@ -182,4 +184,158 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
     finally:
         if conn: conn.close()
 
+    return logs
+
+def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: list, dm_type: str, aggregation_mode: str, level1_qty: int) -> list:
+    """
+    Основная функция, которая выполняет весь процесс, включая агрегацию.
+    Адаптировано из datamatrix-app для десктопного приложения.
+    """
+    logs = [f"Запуск обработки для Заказа №{order_id}..."]
+    
+    if not filepaths:
+        logs.append("ОШИБКА: Не было передано ни одного файла для обработки.")
+        return logs
+
+    all_dm_data = []
+    total_lines_processed = 0
+    total_lines_skipped = 0
+    
+    file_counter = 1 
+    for file_path in filepaths:
+        original_filename = os.path.basename(file_path)
+        logs.append(f"--- Читаю файл №{file_counter}: {original_filename} (Тип кодов: {dm_type}) ---")
+        
+        tirazh_num = str(file_counter) # В десктопной версии номер тиража - это просто порядковый номер файла
+        
+        try:
+            lines = []
+            if dm_type == 'tobacco':
+                logs.append("  -> Использую специфический метод чтения для табачных кодов (codecs.open).")
+                with codecs.open(file_path, 'r', encoding='utf-8-sig') as f:
+                    lines = f.readlines()
+            else: # 'standard'
+                logs.append("  -> Использую стандартный метод чтения (open).")
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+            
+            logs.append(f"  [Отладка] Файл прочитан. Общее количество полученных строк: {len(lines)}")
+
+            for line_num, line in enumerate(lines, 1):
+                dm_string = line.strip()
+                if not dm_string:
+                    continue
+                
+                total_lines_processed += 1
+
+                if dm_type == 'tobacco':
+                    parsed_data = parse_tobacco_dm(dm_string)
+                    if parsed_data is None or parsed_data.get("error"):
+                        error_msg = parsed_data.get("error", "неверный формат") if parsed_data else "неверная длина"
+                        logs.append(f"  -> Пропущена строка {line_num} (табак): {error_msg}")
+                        total_lines_skipped += 1
+                        continue
+                else: # 'standard'
+                    parsed_data = parse_datamatrix(dm_string)
+
+                if not parsed_data.get('gtin'):
+                    logs.append(f"  -> Пропущена строка {line_num}: не удалось распознать GTIN.")
+                    total_lines_skipped += 1
+                    continue
+                    
+                parsed_data['order_id'] = order_id
+                parsed_data['tirage_number'] = tirazh_num
+                all_dm_data.append(parsed_data)
+        
+        except UnicodeDecodeError:
+            logs.append(f"ОШИБКА: Файл '{original_filename}' имеет неверную кодировку (не UTF-8). Файл пропущен.")
+            continue
+        except Exception as e:
+            logs.append(f"ОШИБКА при чтении файла '{original_filename}': {e}. Файл пропущен.")
+            continue
+            
+        file_counter += 1
+
+    if not all_dm_data:
+        logs.append("Не найдено корректных кодов DataMatrix в файлах.")
+        return logs
+        
+    items_df = pd.DataFrame(all_dm_data)
+    logs.append(f"\nВсего найдено и разобрано {len(items_df)} кодов DataMatrix.")
+    logs.append("Проверяю, не были ли эти коды обработаны ранее...")
+    
+    conn = None
+    try:
+        with get_client_db_connection(user_info) as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Проверка на существование кодов
+                dm_to_check = tuple(items_df['datamatrix'].unique())
+                if dm_to_check:
+                    cur.execute("SELECT datamatrix, order_id FROM items WHERE datamatrix IN %s", (dm_to_check,))
+                    existing_codes = cur.fetchall()
+                    if existing_codes:
+                        error_msg = "\nОШИБКА: Обнаружены коды, которые уже были обработаны в других заказах. Процесс прерван. Список кодов и их заказов:\n"
+                        for code in existing_codes:
+                            error_msg += f"  - Код (последние 10 символов): ...{code['datamatrix'][-10:]}, уже в заказе: {code['order_id']}\n"
+                        logs.append(error_msg)
+                        return logs
+                
+                logs.append("Проверка на дубликаты пройдена успешно. Ранее обработанных кодов не найдено.")
+                unique_gtins_in_upload = items_df['gtin'].unique()
+                logs.append(f"\nПроверяю наличие {len(unique_gtins_in_upload)} уникальных GTIN в справочнике...")
+                gtins_tuple = tuple(unique_gtins_in_upload)
+                if not gtins_tuple:
+                     existing_gtins = set()
+                else:
+                    cur.execute("SELECT gtin FROM products WHERE gtin IN %s", (gtins_tuple,))
+                    existing_gtins = {row['gtin'] for row in cur.fetchall()}
+                
+                new_gtins = [gtin for gtin in unique_gtins_in_upload if gtin not in existing_gtins]
+                
+                if new_gtins:
+                    logs.append(f"Найдено {len(new_gtins)} новых GTIN. Создаю для них заглушки...")
+                    new_products_data = [{'gtin': gtin, 'name': f'Товар (GTIN: {gtin})'} for gtin in new_gtins]
+                    new_products_df = pd.DataFrame(new_products_data)
+                    upsert_data_to_db(cur, 'products', new_products_df, 'gtin')
+                else:
+                    logs.append("Все GTIN из загрузки уже есть в справочнике.")
+
+                packages_df = pd.DataFrame()
+                if aggregation_mode == 'level1':
+                    logs.append(f"\nНачинаю агрегацию...")
+                    all_packages = []
+                    items_df['package_id'] = None
+                    
+                    for gtin, group in items_df.groupby('gtin'):
+                        logs.append(f"--- Агрегирую GTIN: {gtin} ({len(group)} шт.) в короба ---")
+                        item_indices = group.index.tolist()
+                        for i in range(0, len(item_indices), level1_qty):
+                            chunk_indices = item_indices[i:i + level1_qty]
+                            box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
+                            if warning and warning not in logs:
+                                logs.append(warning)
+                            items_df.loc[chunk_indices, 'package_id'] = box_id
+                            _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
+                            all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'file_upload', 'level': 1, 'parent_id': None})
+                            logs.append(f"  -> Создан короб (ID: {box_id}, SSCC: {full_sscc}) для {len(chunk_indices)} шт.")
+                    packages_df = pd.DataFrame(all_packages)
+                
+                if not packages_df.empty:
+                    logs.append(f"\nЗагружаю {len(packages_df)} упаковок в 'packages'...")
+                    upsert_data_to_db(cur, 'packages', packages_df, 'id')
+                
+                logs.append(f"Загружаю {len(items_df)} товаров в 'items'...")
+                upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
+                
+                logs.append("\nОбновляю статус заказа на 'completed'...")
+                cur.execute("UPDATE orders SET status = 'completed' WHERE id = %s", (order_id,))
+
+            conn.commit()
+            logs.append("\nПроцесс успешно завершен! Данные и счетчик в БД обновлены.")
+
+    except Exception as e:
+        if conn: conn.rollback()
+        logs.append(f"\nКРИТИЧЕСКАЯ ОШИБКА: {e}")
+        logs.append("Все изменения в базе данных отменены.")
+    
     return logs

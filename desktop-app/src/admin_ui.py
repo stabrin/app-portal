@@ -40,6 +40,7 @@ import psycopg2.extras
 # Импортируем новый сервис печати
 from .printing_service import PrintingService, LabelEditorWindow, ImageSelectionDialog
 
+from .aggregation_service import run_aggregation_process_desktop
 import requests
 from datetime import datetime
 import traceback
@@ -923,6 +924,13 @@ class CodeUploadFrame(ttk.Frame):
         ttk.Entry(file_entry_frame, textvariable=self.file_path_var, state="readonly").pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(file_entry_frame, text="Обзор...", command=self._select_files).pack(side=tk.LEFT, padx=(5,0))
 
+        # --- НОВЫЙ БЛОК: Выбор типа кодов ---
+        dm_type_frame = ttk.Frame(main_frame)
+        dm_type_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(dm_type_frame, text="Тип кодов DataMatrix:").pack(side=tk.LEFT)
+        self.dm_type_var = tk.StringVar(value="standard")
+        ttk.Combobox(dm_type_frame, textvariable=self.dm_type_var, values=["standard", "tobacco"], state="readonly", width=15).pack(side=tk.LEFT, padx=5)
+
         # Настройки агрегации
         agg_frame = ttk.LabelFrame(main_frame, text="Настройки агрегации", padding="10")
         agg_frame.pack(fill=tk.X, pady=10)
@@ -954,30 +962,43 @@ class CodeUploadFrame(ttk.Frame):
             messagebox.showwarning("Внимание", "Не выбраны файлы для загрузки.", parent=self)
             return
 
-        # --- НОВАЯ ЛОГИКА: Адаптация run_aggregation_process из datamatrix-app ---
-        # В desktop-app у нас нет объекта `file`, поэтому мы будем читать файлы напрямую
-        # и передавать их содержимое. Для этого нам нужно будет адаптировать
-        # `run_aggregation_process` или создать новую функцию.
-        # Пока что выведем заглушку.
+        try:
+            level1_qty = int(self.level1_qty_var.get()) if self.aggregation_mode_var.get() == 'level1' else 0
+        except (ValueError, TypeError):
+            messagebox.showerror("Ошибка", "Количество в коробе должно быть целым числом.", parent=self)
+            return
 
-        # TODO: Реализовать логику обработки файлов, аналогичную `run_aggregation_process`
-        # из `datamatrix-app/app/services/aggregation_service.py`.
-        # Это потребует переноса и адаптации функций:
-        # - run_aggregation_process
-        # - parse_datamatrix / parse_tobacco_dm
-        # - read_and_increment_counter
-        # - generate_sscc
-        # - upsert_data_to_db
+        # --- НОВАЯ ЛОГИКА: Запуск обработки в отдельном потоке ---
+        log_window = tk.Toplevel(self)
+        log_window.title(f"Лог обработки заказа №{self.order_id}")
+        log_window.geometry("700x500")
+        log_text = tk.Text(log_window, wrap="word", padx=10, pady=10, state="disabled")
+        log_text.pack(expand=True, fill=tk.BOTH)
 
-        messagebox.showinfo(
-            "В разработке",
-            f"Запущена обработка для заказа №{self.order_id}.\n"
-            f"Файлы: {len(filepaths)} шт.\n"
-            f"Режим агрегации: {self.aggregation_mode_var.get()}\n"
-            f"Кол-во в коробе: {self.level1_qty_var.get() if self.aggregation_mode_var.get() == 'level1' else 'N/A'}\n\n"
-            "Полная реализация этой функции в процессе.",
-            parent=self
-        )
+        def append_log(message):
+            if not log_window.winfo_exists(): return
+            log_text.config(state="normal")
+            log_text.insert(tk.END, message + "\n")
+            log_text.see(tk.END)
+            log_text.config(state="disabled")
+
+        def task():
+            try:
+                logs = run_aggregation_process_desktop(
+                    user_info=self.user_info,
+                    order_id=self.order_id,
+                    filepaths=filepaths,
+                    dm_type=self.dm_type_var.get(),
+                    aggregation_mode=self.aggregation_mode_var.get(),
+                    level1_qty=level1_qty
+                )
+                for log_line in logs:
+                    self.after(0, lambda line=log_line: append_log(line))
+            except Exception as e:
+                self.after(0, lambda err=e: append_log(f"КРИТИЧЕСКАЯ ОШИБКА: {err}\n{traceback.format_exc()}"))
+
+        thread = threading.Thread(target=task, daemon=True)
+        thread.start()
 
 class AddClientDialog(tk.Toplevel):
     """Диалог для добавления нового клиента в локальный справочник."""
