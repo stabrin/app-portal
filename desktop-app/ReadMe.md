@@ -86,3 +86,12 @@
 ```powershell
 .\.venv\Scripts\Activate.ps1
 ```
+git log --oneline --graph
+для выхода q в английской раскладке
+git reset --hard <хэш_коммита>
+git push origin <название_вашей_ветки> --force
+
+git remote set-url origin https://stabrin:<ВАШ_PERSONAL_ACCESS_TOKEN>@github.com/stabrin/app-portal.git
+git push origin main --force
+git remote set-url origin https://github.com/stabrin/app-portal.git
+
