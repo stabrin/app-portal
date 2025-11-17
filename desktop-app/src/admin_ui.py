@@ -1566,88 +1566,123 @@ class ApiIntegrationFrame(ttk.Frame):
         """
         Выполняет полную цепочку: создание заказа (если нужно), пауза, создание запроса на коды.
         """
-        self.request_codes_btn.config(state="disabled") # Блокируем кнопку на время выполнения
+        def task():
+            try:
+                # Шаг 1 и 2: Проверка профиля и обновление токена
+                self.after(0, lambda: self._display_api_response(200, "Шаг 1/7: Проверка профиля пользователя..."))
+                profile = self.api_service.get_user_profile()
+                if profile.get('role') != 'SERVICEPROVIDER':
+                    self.after(0, lambda: self._append_log("Неверная роль. Обновление токена..."))
+                    self.api_service._refresh_token()
+                    profile = self.api_service.get_user_profile()
+                    if profile.get('role') != 'SERVICEPROVIDER':
+                        raise Exception(f"Роль пользователя '{profile.get('role')}' не подходит для операции.")
+                self.after(0, lambda: self._append_log("Профиль в порядке."))
 
-        try:
-            api_order_id = self.order_data.get('api_order_id')
-
-            # --- Шаг 1: Создание заказа в API, если его еще нет ---
-            if not api_order_id:
-                self._display_api_response(200, "Шаг 1/3: Создание заказа в API...")
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                        cur.execute("""
-                            SELECT o.participant_id, o.notes, pg.dm_template, o.client_api_id
-                            FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
-                            WHERE o.id = %s
-                        """, (self.order_id,))
-                        order_info = cur.fetchone()
-                        cur.execute("SELECT gtin, dm_quantity FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
-                        products_data = cur.fetchall()
-
-                if not products_data:
-                    raise Exception("В заказе нет детализации по продуктам (GTIN).")
-
-                products_df = pd.DataFrame(products_data)
-                aggregated_df = products_df.groupby('gtin').agg(dm_quantity=('dm_quantity', 'sum')).reset_index()
-
-                products_payload = [
-                    {
-                        "gtin": p['gtin'], "code_template": order_info['dm_template'], "qty": int(p['dm_quantity']),
-                        "unit_type": "UNIT", "release_method": "IMPORT", "payment_type": 2
-                    } for _, p in aggregated_df.iterrows()
-                ]
-                api_payload = {
-                    "participant_id": order_info['client_api_id'], "production_order_id": order_info['notes'] or "",
-                    "contact_person": self.user_info['name'], "products": products_payload
-                }
-
-                # --- НОВЫЙ БЛОК: Отображаем тело запроса перед отправкой ---
-                self._display_api_response(200, f"Шаг 1/3: Создание заказа в API...\n\nТело запроса:\n{json.dumps(api_payload, indent=2, ensure_ascii=False)}")
-                self.update() # Принудительно обновляем UI
-
-                response_data = self.api_service.create_order(api_payload)
-                api_order_id = response_data.get('order_id')
-
+                # Шаг 3 и 4: Проверка и создание заказа в API
+                api_order_id = self.order_data.get('api_order_id')
                 if not api_order_id:
-                    raise Exception(f"API не вернуло ID заказа. Ответ: {response_data}")
+                    self.after(0, lambda: self._append_log("\nШаг 3-4/7: Создание заказа в API..."))
+                    # ... (здесь логика создания заказа, она у вас уже есть и корректна)
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                            cur.execute("SELECT o.notes, pg.dm_template, o.client_api_id FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id WHERE o.id = %s", (self.order_id,))
+                            order_info = cur.fetchone()
+                            cur.execute("SELECT gtin, dm_quantity FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                            products_data = cur.fetchall()
+                    products_df = pd.DataFrame(products_data).groupby('gtin').agg(dm_quantity=('dm_quantity', 'sum')).reset_index()
+                    products_payload = [{"gtin": p['gtin'], "code_template": order_info['dm_template'], "qty": int(p['dm_quantity']), "unit_type": "UNIT", "release_method": "IMPORT", "payment_type": 2} for _, p in products_df.iterrows()]
+                    api_payload = {"participant_id": order_info['client_api_id'], "production_order_id": order_info['notes'] or "", "contact_person": self.user_info['name'], "products": products_payload}
+                    
+                    self.after(0, lambda p=api_payload: self._append_log(f"Тело запроса на создание заказа:\n{json.dumps(p, indent=2, ensure_ascii=False)}"))
+                    response_data = self.api_service.create_order(api_payload)
+                    api_order_id = response_data.get('order_id')
+                    if not api_order_id: raise Exception(f"API не вернуло ID заказа: {response_data}")
 
-                # Сохраняем полученный ID в нашей БД
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, self.order_id))
+                        conn.commit()
+                    self.order_data['api_order_id'] = api_order_id
+                    self.after(0, lambda: self._append_log(f"Заказ в API создан с ID: {api_order_id}"))
+                else:
+                    self.after(0, lambda: self._append_log(f"\nШаг 3-4/7: Заказ ID {api_order_id} уже существует."))
+
+                # Шаг 5: Ожидание активации заказа
+                self.after(0, lambda: self._append_log(f"\nШаг 5/7: Ожидание активации заказа ID {api_order_id}..."))
+                max_wait_time, check_interval = 300, 5
+                start_time = time.time()
+                while time.time() - start_time < max_wait_time:
+                    details = self.api_service.get_order_details(api_order_id)
+                    order_obj = details.get('orders', [{}])[0]
+                    products = order_obj.get('products', [])
+                    if not products: raise Exception("API не вернуло список продуктов в заказе.")
+                    
+                    order_active = order_obj.get('state') == 'ACTIVE'
+                    products_active = all(p.get('state') == 'ACTIVE' for p in products)
+
+                    if order_active and products_active:
+                        self.after(0, lambda: self._append_log("Заказ и все продукты активны."))
+                        break
+                    
+                    self.after(0, lambda: self._append_log(f"Ожидание... (проверка через {check_interval} сек)"))
+                    time.sleep(check_interval)
+                else:
+                    raise Exception("Время ожидания активации заказа истекло.")
+
+                # Шаг 6: Создание запроса на коды
+                self.after(0, lambda: self._append_log(f"\nШаг 6/7: Создание запроса на коды..."))
+                suborder_req_payload = {"order_id": int(api_order_id)}
+                suborder_req_response = self.api_service.create_suborder_request(suborder_req_payload)
+                self.after(0, lambda r=suborder_req_response: self._append_log(f"Ответ API: {json.dumps(r, ensure_ascii=False)}"))
+
+                # Шаг 7: Получение сводки для пользователя
+                self.after(0, lambda: self._append_log(f"\nШаг 7/7: Получение сводки для подписи..."))
+                time.sleep(2) # Пауза, чтобы API успело обработать запрос
+                suborders_details = self.api_service.get_suborders(api_order_id)
+                
+                suborders_to_sign = []
+                total_codes = 0
+                gtin_summary = {}
+
+                for order in suborders_details.get('orders', []):
+                    for suborder in order.get('suborders', []):
+                        if suborder.get('state') == 'ACTIVE':
+                            suborders_to_sign.append(suborder)
+                            for product in suborder.get('suborder_products', []):
+                                qty = product.get('qty', 0)
+                                gtin = product.get('gtin')
+                                total_codes += qty
+                                if gtin:
+                                    gtin_summary[gtin] = gtin_summary.get(gtin, 0) + qty
+                
+                if not suborders_to_sign:
+                    raise Exception("Не найдено активных запросов к подписи после их создания.")
+
+                summary_text = f"\n--- Сводка для подписи ---\n"
+                summary_text += f"Найдено запросов к подписи: {len(suborders_to_sign)}\n"
+                summary_text += f"Общее количество кодов: {total_codes}\n\n"
+                summary_text += "Детализация по GTIN:\n"
+                for gtin, qty in gtin_summary.items():
+                    summary_text += f"  - GTIN: {gtin}, Кол-во: {qty}\n"
+                summary_text += "\nПожалуйста, подпишите созданный запрос на сайте ДМ.Код вручную."
+                self.after(0, lambda: self._append_log(summary_text))
+
+                # Финальное обновление статуса в локальной БД
                 with self._get_client_db_connection() as conn:
                     with conn.cursor() as cur:
-                        cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, self.order_id))
+                        cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (self.order_id,))
                     conn.commit()
-                self.order_data['api_order_id'] = api_order_id # Обновляем данные в памяти
-                self._display_api_response(200, f"Заказ в API успешно создан с ID: {api_order_id}")
-            
-            # --- Шаг 2: Пауза ---
-            self._display_api_response(200, f"Шаг 2/3: Заказ ID {api_order_id} существует. Пауза 10 секунд перед созданием запроса...")
-            self.update() # Обновляем UI, чтобы показать сообщение
-            time.sleep(10)
+                self.order_data['api_status'] = 'Запрос создан'
+                self.after(0, self._update_buttons_state)
 
-            # --- Шаг 3: Создание запроса на коды ---
-            self._display_api_response(200, f"Шаг 3/3: Создание запроса на коды для заказа ID {api_order_id}...")
-            self.update()
-
-            api_payload = {"order_id": int(api_order_id)}
-            response_data = self.api_service.create_suborder_request(api_payload) # Получаем словарь
-
-            # Обновляем статус в нашей БД
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (self.order_id,))
-                conn.commit()
-            
-            # --- ИСПРАВЛЕНИЕ: Используем словарь response_data и статус 200 для отображения ---
-            self._display_api_response(200, json.dumps(response_data, indent=2, ensure_ascii=False))
-            
-            # Показываем финальное сообщение пользователю
-            messagebox.showinfo("Успех", "Запрос на получение кодов сформирован. Вам необходимо его подписать на сайте ДМ Код", parent=self)
-
-        except Exception as e:
-            error_body = f"ОШИБКА: {e}"
-            self._display_api_response(500, error_body)
-            self._update_buttons_state() # Возвращаем кнопки в исходное состояние
+            except Exception as e:
+                error_body = f"ОШИБКА: {e}\n\n{traceback.format_exc()}"
+                self.after(0, lambda: self._display_api_response(500, error_body))
+            finally:
+                self.after(0, lambda: self.request_codes_btn.config(state="normal"))
+        
+        self._run_in_thread(task)
 
     def _run_in_thread(self, target_func):
         """Запускает функцию в отдельном потоке, чтобы не блокировать UI."""

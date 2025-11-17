@@ -70,6 +70,17 @@ class ApiService:
                 return requests.request(method, url, headers=headers, **kwargs)
             raise # Перебрасываем другие HTTP ошибки
 
+    def get_user_profile(self):
+        """Получает профиль текущего пользователя API."""
+        logger.info("Получение профиля пользователя из API...")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/user/profile"
+            response = self._api_request('get', url)
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Не удалось получить профиль пользователя из API: {e}", exc_info=True)
+            raise
+
     def get_participants(self):
         """Получает список участников (клиентов) из API."""
         logger.info("Получение списка участников из API...")
@@ -116,6 +127,19 @@ class ApiService:
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при получении деталей заказа {api_order_id}: {e}", exc_info=True)
+            raise
+
+    def get_suborders(self, api_order_id: int):
+        """Получает список подзаказов (запросов на коды) для заказа."""
+        logger.info(f"Запрос подзаказов для заказа ID {api_order_id} из API.")
+        try:
+            # Согласно вашему описанию, используется GET-запрос с телом
+            url = f"{self.api_base_url.rstrip('/')}/psp/suborders"
+            response = self._api_request('get', url, json={"order_id": api_order_id}, timeout=30)
+            logger.info(f"Подзаказы для заказа {api_order_id} успешно получены.")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при получении подзаказов для заказа {api_order_id}: {e}", exc_info=True)
             raise
 
     def create_printrun(self, payload: dict):
