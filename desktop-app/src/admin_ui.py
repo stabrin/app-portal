@@ -1741,40 +1741,50 @@ class ApiIntegrationFrame(ttk.Frame):
             self.after(0, lambda: self._append_log("Шаг 1: Синхронизация активных тиражей из API..."))
             try:
                 # 1. Запрашиваем актуальные данные из API
+                self.after(0, lambda: self._append_log(f"  Запрос деталей для заказа API ID: {api_order_id}"))
                 order_details_from_api = self.api_service.get_order_details(api_order_id)
                 api_orders = order_details_from_api.get('orders', [])
-                if api_orders:
-                    # --- ИСПРАВЛЕНИЕ: Ищем тиражи ('printruns') на правильном уровне в ответе API.
-                    # Они находятся не внутри 'products', а на одном уровне с ними, в объекте заказа.
-                    api_printruns = api_orders[0].get('printruns', [])
-                    
-                    gtin_to_active_run_id = {}
-                    for printrun in api_printruns:
-                        if printrun.get('state') == 'ACTIVE':
-                            gtin = printrun.get('gtin')
-                            if gtin:
-                                gtin_to_active_run_id[gtin] = printrun.get('id')
 
-                    # --- ИСПРАВЛЕНИЕ: Полная очистка перед обновлением ---
-                    # Сначала полностью очищаем старые api_id для этого заказа.
-                    # Это гарантирует, что не останется ID от REJECTED или удаленных тиражей,
-                    # и мы начнем синхронизацию с чистого листа.
-                    self.after(0, lambda: self._append_log("  Очистка старых ID тиражей в локальной БД..."))
+                # --- ИСПРАВЛЕНИЕ: Находим нужный заказ в ответе API по его ID ---
+                target_order = next((order for order in api_orders if order.get('order_id') == api_order_id), None)
+
+                if not target_order:
+                    raise Exception(f"В ответе API не найден заказ с ID {api_order_id}")
+
+                self.after(0, lambda: self._append_log(f"  Найден целевой заказ в ответе API."))
+                api_printruns = target_order.get('printruns', [])
+                
+                gtin_to_active_run_id = {}
+                for printrun in api_printruns:
+                    if printrun.get('state') == 'ACTIVE':
+                        gtin = printrun.get('gtin')
+                        if gtin:
+                            gtin_to_active_run_id[gtin] = printrun.get('id')
+
+                # 2. Полностью очищаем старые api_id для этого заказа.
+                self.after(0, lambda: self._append_log("  Очистка старых ID тиражей в локальной БД..."))
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s", (self.order_id,))
+                    conn.commit()
+                self.after(0, lambda: self._append_log("  Очистка завершена."))
+
+                # 3. Теперь, когда все очищено, обновляем базу ID активных тиражей, если они были найдены.
+                if gtin_to_active_run_id:
+                    self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей в API. Обновление локальной БД..."))
                     with self._get_client_db_connection() as conn:
                         with conn.cursor() as cur:
-                            cur.execute("UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s", (self.order_id,))
+                            for gtin, run_id in gtin_to_active_run_id.items():
+                                cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (run_id, self.order_id, gtin))
+                                self.after(0, lambda g=gtin, r=run_id: self._append_log(f"    -> GTIN {g} установлен api_id = {r}"))
                         conn.commit()
+                    self.after(0, lambda: self._append_log("  Обновление локальной БД завершено."))
+                else:
+                    self.after(0, lambda: self._append_log("  Активных тиражей в API не найдено. Поле api_id оставлено пустым."))
 
-                    # Теперь, когда все очищено, обновляем базу ID активных тиражей, если они были найдены.
-                    if gtin_to_active_run_id:
-                        self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей в API. Обновление локальной БД..."))
-                        with self._get_client_db_connection() as conn:
-                            with conn.cursor() as cur:
-                                for gtin, run_id in gtin_to_active_run_id.items():
-                                    cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (run_id, self.order_id, gtin))
-                            conn.commit()
-                    else:
-                        self.after(0, lambda: self._append_log("  Активных тиражей в API не найдено. Очистка всех ID в локальной БД..."))
+                # --- ВРЕМЕННАЯ МЕРА: Останавливаем выполнение для проверки ---
+                self.after(0, lambda: self._append_log("\nСинхронизация завершена. Дальнейшая обработка остановлена для проверки. Можете запускать процесс снова."))
+                return False # Прерываем выполнение функции
 
             except Exception as sync_err:
                 raise Exception(f"Ошибка на шаге синхронизации активных тиражей: {sync_err}")
