@@ -1473,6 +1473,8 @@ class ApiIntegrationFrame(ttk.Frame):
         flow_panel.pack(fill=tk.X, pady=2)
         self.request_codes_btn = ttk.Button(flow_panel, text="Запросить коды", command=self._request_codes_flow)
         self.request_codes_btn.pack(side=tk.LEFT, padx=2)
+        self.get_codes_btn = ttk.Button(flow_panel, text="Получить коды", command=lambda: messagebox.showinfo("В разработке", "Алгоритм получения кодов будет реализован позже.", parent=self))
+        self.get_codes_btn.pack(side=tk.LEFT, padx=2)
         self.split_runs_btn = ttk.Button(flow_panel, text="Разбить на тиражи", command=self._split_runs)
         self.split_runs_btn.pack(side=tk.LEFT, padx=2)
         self.prepare_json_btn = ttk.Button(flow_panel, text="Подготовить JSON", command=self._prepare_json)
@@ -1514,7 +1516,7 @@ class ApiIntegrationFrame(ttk.Frame):
  
             # --- ИЗМЕНЕНИЕ: Сначала прячем ВСЕ кнопки ---
             all_buttons = [
-                self.request_codes_btn, self.split_runs_btn, self.prepare_json_btn,
+                self.request_codes_btn, self.get_codes_btn, self.split_runs_btn, self.prepare_json_btn,
                 self.download_codes_btn, self.prepare_report_data_btn, self.prepare_report_btn
             ]
             for btn in all_buttons:
@@ -1525,8 +1527,8 @@ class ApiIntegrationFrame(ttk.Frame):
                 self.request_codes_btn.pack(side=tk.LEFT, padx=2)
             else:
                 # --- Старая логика для заказов, которые уже в работе с API ---
-                if api_status == 'Запрос создан':
-                    self.split_runs_btn.pack(side=tk.LEFT, padx=2)
+                if api_status == 'Запрос создан': # После успешного запроса
+                    self.get_codes_btn.pack(side=tk.LEFT, padx=2) # Показываем новую кнопку
                 elif api_status == 'Тиражи созданы':
                     self.prepare_json_btn.pack(side=tk.LEFT, padx=2)
                 self.download_codes_btn.pack(side=tk.LEFT, padx=2)
@@ -1656,10 +1658,16 @@ class ApiIntegrationFrame(ttk.Frame):
                 summary_text += "Детализация по GTIN:\n"
                 for gtin, qty in gtin_summary.items():
                     summary_text += f"  - GTIN: {gtin}, Кол-во: {qty}\n"
-                summary_text += "\nПожалуйста, подпишите созданный запрос на сайте ДМ.Код вручную."
                 self.after(0, lambda: self._append_log(summary_text))
 
-                # Финальное обновление статуса в локальной БД
+                # --- НОВЫЙ БЛОК: Показываем пользователю явное уведомление ---
+                final_message = (
+                    f"Запрос на {total_codes} кодов успешно создан в ДМ.Код.\n\n"
+                    "Пожалуйста, перейдите на сайт ДМ.Код и подпишите созданный запрос с помощью ЭЦП."
+                )
+                self.after(0, lambda: messagebox.showinfo("Требуется действие", final_message, parent=self))
+
+                # Шаг 7: Финальное обновление статуса в локальной БД
                 with self._get_client_db_connection() as conn:
                     with conn.cursor() as cur:
                         cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (self.order_id,))
@@ -1669,6 +1677,16 @@ class ApiIntegrationFrame(ttk.Frame):
 
             except Exception as e:
                 error_body = f"ОШИБКА: {e}\n\n{traceback.format_exc()}"
+                # --- НОВАЯ ЛОГИКА: Сброс статуса при ошибке ---
+                try:
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE orders SET api_status = NULL WHERE id = %s", (self.order_id,))
+                        conn.commit()
+                    self.order_data['api_status'] = None
+                    self.after(0, lambda: self._append_log("\nОШИБКА: Статус заказа сброшен. Попробуйте выполнить запрос снова."))
+                except Exception as db_err:
+                    self.after(0, lambda: self._append_log(f"\nКРИТИЧЕСКАЯ ОШИБКА: Не удалось сбросить статус заказа в БД: {db_err}"))
                 self.after(0, lambda: self._display_api_response(500, error_body))
             finally:
                 self.after(0, lambda: self.request_codes_btn.config(state="normal"))
