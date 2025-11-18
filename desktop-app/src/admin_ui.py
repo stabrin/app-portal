@@ -2258,7 +2258,6 @@ class OrderEditorFrame(ttk.Frame):
         ttk.Button(controls_frame_1, text="Выгрузить детали", command=self._export_details_to_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame_1, text="Загрузить детали", command=self._import_details_from_excel).pack(side=tk.LEFT, padx=2)
 
-        # --- ИЗМЕНЕНИЕ: Отображаем все кнопки независимо от сценария ---
         # Ряд 2: Кнопки для разных режимов постобработки
         controls_frame_2 = ttk.Frame(main_frame)
         controls_frame_2.pack(fill=tk.X, pady=2)
@@ -2267,14 +2266,14 @@ class OrderEditorFrame(ttk.Frame):
         ttk.Button(controls_frame_2, text="Экспорт товаров", command=self._export_products_to_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame_2, text="Импорт товаров", command=self._import_products_from_excel).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame_2, text="Создать/Обновить View", command=self._create_bartender_view).pack(side=tk.LEFT, padx=2)
-        # Кнопки для выгрузки/загрузки данных для внешнего ПО ("Дельта")
-        ttk.Button(controls_frame_2, text="Экспорт данных (Дельта)", command=self._export_data_for_external_sw).pack(side=tk.LEFT, padx=2)
-        ttk.Button(controls_frame_2, text="Импорт данных (Дельта)", command=self._import_data_for_external_sw).pack(side=tk.LEFT, padx=2)
 
-        # --- НОВЫЙ БЛОК: Кнопка для отчета декларанта (не зависит от сценария) ---
         # Ряд 3: Отчеты
         controls_frame_3 = ttk.Frame(main_frame)
         controls_frame_3.pack(fill=tk.X, pady=2)
+
+        # Кнопки для выгрузки/загрузки данных для внешнего ПО ("Дельта") и скачивания отчета
+        ttk.Button(controls_frame_3, text="Экспорт данных (Дельта)", command=self._export_data_for_external_sw).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame_3, text="Импорт данных (Дельта)", command=self._import_data_for_external_sw).pack(side=tk.LEFT, padx=2)
         ttk.Button(controls_frame_3, text="Скачать отчет декларанта", command=self._download_declarator_report).pack(side=tk.LEFT, padx=2)
 
         # --- НОВЫЙ БЛОК: Кнопка архивации в самом низу ---
@@ -2361,18 +2360,37 @@ class OrderEditorFrame(ttk.Frame):
 
         try:
             with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    # Получаем текущий статус, чтобы правильно сформировать архивный
-                    cur.execute("SELECT status FROM orders WHERE id = %s", (self.order_id,))
-                    current_status = cur.fetchone()['status']
-                    new_status = f"Архив_{current_status}"
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur: # Используем RealDictCursor
+                    # --- НОВЫЙ БЛОК: Удаление представлений Bartender ---
+                    logging.info(f"Заказ {self.order_id} архивируется. Попытка удаления связанных представлений Bartender.")
+                    # 1. Получаем client_name и status для формирования имени представления и нового статуса
+                    cur.execute("SELECT client_name, status FROM orders WHERE id = %s", (self.order_id,))
+                    order_info = cur.fetchone()
+                    if order_info:
+                        client_name = order_info['client_name']
+                        current_status = order_info['status']
+                        
+                        # 2. Формируем имена представлений (логика из PrintingService)
+                        base_view_name_str = f"{client_name}_{self.order_id}"
+                        sanitized_name = re.sub(r'[^\w]', '_', base_view_name_str)
+                        sanitized_name = re.sub(r'_+', '_', sanitized_name).strip('_')
+                        
+                        base_view_name = psycopg2.sql.Identifier(sanitized_name)
+                        sscc_view_name = psycopg2.sql.Identifier(f"{sanitized_name}_sscc")
 
-                    cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, self.order_id))
-                    result = cur.fetchone()
-                    notification_id = result['notification_id'] if result else None
-                    if notification_id:
-                        cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
-                conn.commit()
+                        # 3. Удаляем представления
+                        cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(sscc_view_name))
+                        cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(base_view_name))
+                        logging.info(f"Выполнен запрос на удаление представлений: {base_view_name.string} и {sscc_view_name.string}")
+
+                        # 4. Обновляем статус заказа
+                        new_status = f"Архив_{current_status}"
+                        cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, self.order_id))
+                        result = cur.fetchone()
+                        notification_id = result['notification_id'] if result else None
+                        if notification_id:
+                            cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
+                conn.commit() # Фиксируем все изменения
             messagebox.showinfo("Успех", "Заказ успешно перемещен в архив. Обновите список заказов.", parent=self)
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось архивировать заказ: {e}", parent=self)
