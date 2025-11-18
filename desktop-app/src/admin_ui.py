@@ -1743,20 +1743,21 @@ class ApiIntegrationFrame(ttk.Frame):
                 # 1. Запрашиваем актуальные данные из API
                 self.after(0, lambda: self._append_log(f"  Запрос деталей для заказа API ID: {api_order_id}"))
                 order_details_from_api = self.api_service.get_order_details(api_order_id)
-
-                # --- ИЗМЕНЕНИЕ: Выводим полный сырой ответ от API для отладки ---
-                raw_response_str = json.dumps(order_details_from_api, indent=2, ensure_ascii=False)
-                self.after(0, lambda: self._append_log("\n--- ПОЛУЧЕН ПОЛНЫЙ ОТВЕТ ОТ API ---\n" + raw_response_str))
-
                 api_orders = order_details_from_api.get('orders', [])
 
-                # --- ИСПРАВЛЕНИЕ: Находим нужный заказ в ответе API по его ID ---
-                # Приводим оба ID к строке для надежного сравнения, чтобы избежать ошибок с типами (int vs str).
-                # '15565' == '15565' всегда будет работать корректно.
-                target_order = next((order for order in api_orders if str(order.get('order_id')) == str(api_order_id)), None)
-
-                if not target_order:
+                # --- ИСПРАВЛЕНИЕ: API возвращает список, даже при запросе одного заказа. Берем первый элемент. ---
+                if not api_orders:
                     raise Exception(f"В ответе API не найден заказ с ID {api_order_id}")
+                
+                target_order = api_orders[0]
+
+                # --- ДОБАВЛЕНО: Выводим полученный заказ для отладки ---
+                target_order_str = json.dumps(target_order, indent=2, ensure_ascii=False)
+                self.after(0, lambda: self._append_log("\n--- ПОЛУЧЕНЫ ДАННЫЕ ПО ЗАКАЗУ ---\n" + target_order_str))
+
+                # Проверяем, что это действительно тот заказ, который мы запрашивали
+                if str(target_order.get('order_id')) != str(api_order_id):
+                    raise Exception(f"API вернуло неверный заказ. Ожидался ID {api_order_id}, получен {target_order.get('order_id')}")
 
                 self.after(0, lambda: self._append_log(f"  Найден целевой заказ в ответе API."))
                 api_printruns = target_order.get('printruns', [])
