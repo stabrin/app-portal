@@ -1745,12 +1745,16 @@ class ApiIntegrationFrame(ttk.Frame):
                 # --- ИСПРАВЛЕНИЕ: Используем правильное имя переменной для ответа от API ---
                 api_printruns_response = self.api_service.get_printruns(api_order_id)
 
-                # --- ИСПРАВЛЕНИЕ: Извлекаем список тиражей из словаря по ключу 'printruns' ---
-                if not isinstance(api_printruns_response, dict) or 'printruns' not in api_printruns_response:
-                    raise Exception(f"Ответ API не содержит ожидаемый ключ 'printruns'. Получен ответ: {api_printruns_response}")
+                # --- ИСПРАВЛЕНИЕ: Корректно извлекаем список тиражей из вложенной структуры ответа ---
+                if not isinstance(api_printruns_response, dict) or 'orders' not in api_printruns_response:
+                    raise Exception(f"Ответ API не содержит ожидаемый ключ 'orders'. Получен ответ: {api_printruns_response}")
                 
-                api_printruns = api_printruns_response.get('printruns', [])
+                orders_list = api_printruns_response.get('orders', [])
+                if not orders_list:
+                    raise Exception(f"Ответ API содержит пустой список 'orders'.")
 
+                api_printruns = orders_list[0].get('printruns', [])
+                
                 gtin_to_active_run_id = {}
                 for printrun in api_printruns: # Теперь api_printruns - это точно список
                     if printrun.get('state') == 'ACTIVE':
