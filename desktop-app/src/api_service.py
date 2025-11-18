@@ -149,11 +149,11 @@ class ApiService:
         Обращается к эндпоинту psp/printruns.
         """
         url = f"{self.api_base_url.rstrip('/')}/psp/printruns"
-        params = {'order_id': order_id}
+        payload = {'order_id': int(order_id)} # --- ИСПРАВЛЕНИЕ: Передаем order_id в теле запроса ---
         logging.info(f"Запрос списка тиражей для заказа ID {order_id} из API. Эндпоинт: {url}")
         try:
             # В отличие от других методов, этот эндпоинт может не возвращать 'status': 'ok'
-            response = self._api_request('get', url, params=params)
+            response = self._api_request('get', url, json=payload)
             logging.info(f"Список тиражей для заказа {order_id} успешно получен.")
             return response.json()
         except Exception as e:
