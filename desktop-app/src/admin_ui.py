@@ -1525,12 +1525,14 @@ class ApiIntegrationFrame(ttk.Frame):
             # --- НОВАЯ ЛОГИКА: Если заказ еще не в API, показываем только одну кнопку ---
             if not api_order_id or not api_status:
                 self.request_codes_btn.pack(side=tk.LEFT, padx=2)
+            # --- НОВАЯ ЛОГИКА: Если запрос создан, показываем ТОЛЬКО кнопку "Получить коды" ---
+            elif api_status == 'Запрос создан':
+                self.get_codes_btn.pack(side=tk.LEFT, padx=2)
             else:
-                # --- Старая логика для заказов, которые уже в работе с API ---
-                if api_status == 'Запрос создан': # После успешного запроса
-                    self.get_codes_btn.pack(side=tk.LEFT, padx=2) # Показываем новую кнопку
-                elif api_status == 'Тиражи созданы':
+                # --- Логика для всех остальных статусов ---
+                if api_status == 'Тиражи созданы':
                     self.prepare_json_btn.pack(side=tk.LEFT, padx=2)
+                
                 self.download_codes_btn.pack(side=tk.LEFT, padx=2)
                 self.prepare_report_data_btn.pack(side=tk.LEFT, padx=2)
                 self.prepare_report_btn.pack(side=tk.LEFT, padx=2)
