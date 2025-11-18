@@ -1609,10 +1609,15 @@ class ApiIntegrationFrame(ttk.Frame):
                 start_time = time.time()
                 while time.time() - start_time < max_wait_time:
                     details = self.api_service.get_order_details(api_order_id)
-                    order_obj = details.get('orders', [{}])[0]
+                    # --- ИЗМЕНЕНИЕ: Более безопасная проверка ответа от API ---
+                    # Если 'orders' пуст, просто продолжаем цикл ожидания.
+                    orders_list = details.get('orders', [])
+                    if not orders_list:
+                        self.after(0, lambda: self._append_log("Ожидание данных заказа от API..."))
+                        time.sleep(check_interval)
+                        continue
+                    order_obj = orders_list[0]
                     products = order_obj.get('products', [])
-                    if not products: raise Exception("API не вернуло список продуктов в заказе.")
-                    
                     order_active = order_obj.get('state') == 'ACTIVE'
                     products_active = all(p.get('state') == 'ACTIVE' for p in products)
 
@@ -1623,7 +1628,10 @@ class ApiIntegrationFrame(ttk.Frame):
                     self.after(0, lambda: self._append_log(f"Ожидание... (проверка через {check_interval} сек)"))
                     time.sleep(check_interval)
                 else:
-                    raise Exception("Время ожидания активации заказа истекло.")
+                    # --- ИЗМЕНЕНИЕ: Более информативное сообщение об ошибке ---
+                    final_details_str = json.dumps(details, indent=2, ensure_ascii=False)
+                    error_message = f"Время ожидания активации заказа истекло. Последний ответ от API:\n{final_details_str}"
+                    raise Exception(error_message)
 
                 # Шаг 5: Создание запроса на коды
                 self.after(0, lambda: self._append_log(f"\nШаг 5/7: Создание запроса на коды..."))
