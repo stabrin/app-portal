@@ -1959,10 +1959,14 @@ class ApiIntegrationFrame(ttk.Frame):
             start_time = time.time()
             while time.time() - start_time < max_wait_time:
                 # --- ИСПРАВЛЕНИЕ: Используем get_printruns для проверки статуса ---
+                # --- ИСПРАВЛЕНИЕ №2: Корректно извлекаем список тиражей из вложенной структуры ---
                 api_printruns_response = self.api_service.get_printruns(api_order_id)
+                orders_list = api_printruns_response.get('orders', [])
+                if not orders_list:
+                    time.sleep(check_interval)
+                    continue # Пропускаем итерацию, если нет данных
                 
-                api_printruns_json_status = {p['id']: p.get('json', False) for p in api_printruns_response.get('printruns', [])}
-                
+                api_printruns_json_status = {p['id']: p.get('json', False) for p in orders_list[0].get('printruns', [])}
                 all_requested_json_ready = True
                 for run_id in unique_printrun_ids:
                     if not api_printruns_json_status.get(run_id, False):
