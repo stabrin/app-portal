@@ -1843,20 +1843,25 @@ class ApiIntegrationFrame(ttk.Frame):
                 start_time = time.time()
                 while time.time() - start_time < max_wait_time:
                     printruns_details = self.api_service.get_order_details(api_order_id) # type: ignore
-                    all_settled = True
+                    # --- ИСПРАВЛЕНИЕ: Ждем, пока конкретный созданный тираж станет ACTIVE ---
+                    # Предыдущая логика проверяла все тиражи на статус 'AWAITING', что было некорректно,
+                    # так как тираж мог быть в другом промежуточном состоянии (например, 'PROCESSING').
+                    current_printrun_state = None
                     for order in printruns_details.get('orders', []):
                         for printrun in order.get('printruns', []):
-                            if printrun.get('state') == 'AWAITING':
-                                all_settled = False
+                            if printrun.get('id') == new_printrun_id:
+                                current_printrun_state = printrun.get('state')
                                 break
-                        if not all_settled: break
+                        if current_printrun_state is not None: break
                     
-                    if all_settled:
-                        self.after(0, lambda: self._append_log("  Тираж обработан."))
+                    if current_printrun_state == 'ACTIVE':
+                        self.after(0, lambda p_id=new_printrun_id: self._append_log(f"  Тираж {p_id} успешно активирован."))
                         break
                     
-                    self.after(0, lambda: self._append_log(f"  Проверка через {check_interval} сек..."))
+                    self.after(0, lambda s=current_printrun_state: self._append_log(f"  Ожидание активации тиража {new_printrun_id} (статус: {s}). Проверка через {check_interval} сек..."))
                     time.sleep(check_interval)
+                else: # если вышли по таймауту
+                    raise Exception(f"Время ожидания активации тиража {new_printrun_id} истекло.")
 
             # Шаг 5: Обновление статуса заказа
             with self._get_client_db_connection() as conn:
@@ -1906,20 +1911,25 @@ class ApiIntegrationFrame(ttk.Frame):
             start_time = time.time()
             while time.time() - start_time < max_wait_time:
                 printruns_details = self.api_service.get_order_details(api_order_id) # type: ignore
-                all_json_ready = True
-                for order in printruns_details.get('orders', []):
-                    for printrun in order.get('printruns', []):
-                        if not printrun.get('json', False):
-                            all_json_ready = False
-                            break
-                    if not all_json_ready: break
                 
-                if all_json_ready:
+                # --- ИСПРАВЛЕНИЕ: Проверяем готовность JSON только для тех тиражей, которые мы запросили ---
+                api_printruns_json_status = {p['id']: p.get('json', False) for order in printruns_details.get('orders', []) for p in order.get('printruns', [])}
+
+                all_requested_json_ready = True
+                for run_id in unique_printrun_ids:
+                    if not api_printruns_json_status.get(run_id, False):
+                        all_requested_json_ready = False
+                        self.after(0, lambda r_id=run_id: self._append_log(f"  JSON для тиража {r_id} еще не готов."))
+                        break # Нет смысла проверять дальше
+                
+                if all_requested_json_ready:
                     self.after(0, lambda: self._append_log("  Все JSON-файлы готовы."))
                     break
                 
                 self.after(0, lambda: self._append_log(f"  Проверка через {check_interval} сек..."))
                 time.sleep(check_interval)
+            else: # если вышли по таймауту
+                raise Exception("Время ожидания готовности JSON истекло.")
 
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
