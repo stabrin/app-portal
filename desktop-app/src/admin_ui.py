@@ -1742,8 +1742,10 @@ class ApiIntegrationFrame(ttk.Frame):
             try:
                 # 1. Запрашиваем актуальные данные из API
                 self.after(0, lambda: self._append_log(f"  Запрос деталей для заказа API ID: {api_order_id}"))
-                order_details_from_api = self.api_service.get_order_details(api_order_id)
-                api_orders = order_details_from_api.get('orders', [])
+                # --- ИСПРАВЛЕНИЕ: Используем get_suborders для получения данных по конкретному заказу, включая тиражи ---
+                # Это обращается к правильному эндпоинту и возвращает данные только по нашему заказу.
+                order_details_from_api = self.api_service.get_suborders(api_order_id)
+                api_orders = order_details_from_api.get('orders', []) # Ответ все еще содержит ключ 'orders'
 
                 # --- ИСПРАВЛЕНИЕ: API возвращает список, даже при запросе одного заказа. Берем первый элемент. ---
                 if not api_orders:
