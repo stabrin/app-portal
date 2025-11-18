@@ -55,15 +55,6 @@ except ImportError:
     logging.warning("tkinter not installed. GUI features will be limited.")
     tk = None
 
-# Конфигурация логирования
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - [printing_service] - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('printing_service.log', encoding='utf-8')
-    ]
-)
 
 class PrintingService:
     """Сервис для генерации и печати документов."""

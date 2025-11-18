@@ -20,15 +20,6 @@ try:
 except ImportError:
     Image = None # Помечаем как недоступный, если Pillow не установлен
 
-# Настройка логирования (оставляем один раз)
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - [admin_ui.py] - %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler('app.log', encoding='utf-8')  # Или другой путь к лог-файлу
-    ])
-
 # Импорты для работы с БД и QR-кодами
 from .db_connector import get_main_db_connection, get_client_db_connection
 from .api_service import ApiService
