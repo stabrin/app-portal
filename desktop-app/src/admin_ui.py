@@ -1886,15 +1886,18 @@ class ApiIntegrationFrame(ttk.Frame):
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("SELECT api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
-                    details_to_process = cur.fetchall()
+                    # --- ИСПРАВЛЕНИЕ: Получаем только уникальные ID тиражей ---
+                    # Это предотвращает отправку дублирующихся запросов, если несколько строк
+                    # детализации относятся к одному сгруппированному тиражу.
+                    unique_printrun_ids = {item['api_id'] for item in cur.fetchall()}
             
-            if not details_to_process:
-                raise Exception("Не найдено позиций с ID тиража для обработки.")
+            if not unique_printrun_ids:
+                raise Exception("Не найдено уникальных ID тиражей для обработки.")
 
-            for i, detail in enumerate(details_to_process):
-                self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос JSON для тиража ID {d['api_id']}..."))
-                self.api_service.create_printrun_json({"printrun_id": detail['api_id']}) # type: ignore
-                self.after(0, lambda d=detail: self._append_log(f"  Запрос для тиража {d['api_id']} успешно отправлен."))
+            for i, printrun_id in enumerate(unique_printrun_ids):
+                self.after(0, lambda p_id=printrun_id, num=i+1: self._append_log(f"--- {num}/{len(unique_printrun_ids)}: Запрос JSON для тиража ID {p_id}..."))
+                self.api_service.create_printrun_json({"printrun_id": printrun_id}) # type: ignore
+                self.after(0, lambda p_id=printrun_id: self._append_log(f"  Запрос для тиража {p_id} успешно отправлен."))
                 time.sleep(0.5)
 
             # --- НОВАЯ ЛОГИКА: Ожидание готовности JSON ---
