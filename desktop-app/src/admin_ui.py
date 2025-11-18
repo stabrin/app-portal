@@ -1751,10 +1751,11 @@ class ApiIntegrationFrame(ttk.Frame):
                 self.after(0, lambda: self._append_log("Группировка данных из dmkod_aggregation_details по GTIN."))
                 with self._get_client_db_connection() as conn:
                     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        # --- ИСПРАВЛЕНИЕ: Группируем по gtin и api_id, чтобы не создавать дубликаты тиражей ---
                         cur.execute("""
-                            SELECT gtin, SUM(dm_quantity) as dm_quantity
+                            SELECT gtin, api_id, SUM(dm_quantity) as dm_quantity
                             FROM dmkod_aggregation_details WHERE order_id = %s
-                            GROUP BY gtin
+                            GROUP BY gtin, api_id
                         """, (self.order_id,))
                         details_data = cur.fetchall()
 
