@@ -1473,7 +1473,7 @@ class ApiIntegrationFrame(ttk.Frame):
         flow_panel.pack(fill=tk.X, pady=2)
         self.request_codes_btn = ttk.Button(flow_panel, text="Запросить коды", command=self._request_codes_flow)
         self.request_codes_btn.pack(side=tk.LEFT, padx=2)
-        self.get_codes_btn = ttk.Button(flow_panel, text="Получить коды", command=lambda: messagebox.showinfo("В разработке", "Алгоритм получения кодов будет реализован позже.", parent=self))
+        self.get_codes_btn = ttk.Button(flow_panel, text="Получить коды", command=self._get_codes_flow)
         self.get_codes_btn.pack(side=tk.LEFT, padx=2)
         self.split_runs_btn = ttk.Button(flow_panel, text="Разбить на тиражи", command=self._split_runs)
         self.split_runs_btn.pack(side=tk.LEFT, padx=2)
@@ -1710,6 +1710,19 @@ class ApiIntegrationFrame(ttk.Frame):
         
         self._run_in_thread(task)
 
+    def _get_codes_flow(self):
+        """
+        Выполняет полную цепочку: разбивка на тиражи, подготовка JSON, скачивание кодов.
+        """
+        def task():
+            # Запускаем задачи последовательно, каждая из них теперь содержит свою логику ожидания.
+            # self.after(0, lambda: self._display_api_response(200, "Запуск полного цикла получения кодов..."))
+            if self._split_runs_task(show_final_message=False):
+                if self._prepare_json_task(show_final_message=False):
+                    self._download_codes_task()
+
+        self._run_in_thread(task)
+
     def _run_in_thread(self, target_func):
         """Запускает функцию в отдельном потоке, чтобы не блокировать UI."""
         thread = threading.Thread(target=target_func, daemon=True)
@@ -1718,23 +1731,38 @@ class ApiIntegrationFrame(ttk.Frame):
     def _split_runs(self):
         self._run_in_thread(self._split_runs_task)
 
-    def _split_runs_task(self):
+    def _split_runs_task(self, show_final_message=True):
         """Задача для разбиения заказа на тиражи."""
-        # self.after(0, lambda: self._display_api_response(200, "Начинаю создание тиражей..."))
+        self.after(0, lambda: self._display_api_response(200, "Начинаю создание тиражей..."))
         try:
-            # Шаг 1: Собираем данные из нашей БД
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
-                    details_data = cur.fetchall()
+            order_status = self.order_data.get('status')
+            api_order_id = self.order_data.get('api_order_id')
+
+            # --- ИЗМЕНЕНИЕ: Логика зависит от статуса заказа ---
+            if order_status == 'delta':
+                self.after(0, lambda: self._append_log("Статус заказа 'delta'. Получаю данные из delta_result."))
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        # Для 'delta' мы берем данные из delta_result, так как они содержат фактическое кол-во кодов
+                        cur.execute("SELECT printrun_id as api_id, gtin, COUNT(*) as dm_quantity FROM delta_result WHERE order_id = %s GROUP BY printrun_id, gtin", (self.order_id,))
+                        details_data = cur.fetchall()
+            else: # 'dmkod' и другие
+                self.after(0, lambda: self._append_log("Статус заказа 'dmkod'. Получаю данные из dmkod_aggregation_details."))
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                        details_data = cur.fetchall()
+            # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
             if not details_data:
                 raise Exception("В заказе нет детализации для создания тиражей.")
             details_df = pd.DataFrame(details_data)
-            # self.after(0, lambda: self._append_log(f"Найдено {len(details_df)} позиций в локальной БД."))
+            self.after(0, lambda: self._append_log(f"Найдено {len(details_df)} позиций в локальной БД."))
+
 
             # Шаг 2: Получаем детали заказа из API
-            # self.after(0, lambda: self._append_log("Получение деталей заказа из API..."))
-            order_details_from_api = self.api_service.get_order_details(self.order_data['api_order_id'])
+            self.after(0, lambda: self._append_log("Получение деталей заказа из API..."))
+            order_details_from_api = self.api_service.get_order_details(api_order_id)
             api_products = order_details_from_api.get('orders', [{}])[0].get('products', [])
             if not api_products:
                 raise Exception("API не вернуло список продуктов в заказе.")
@@ -1745,12 +1773,12 @@ class ApiIntegrationFrame(ttk.Frame):
                 if p.get('state') == 'ACTIVE' and p.get('qty') == p.get('qty_received')
             }
             details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
-            # self.after(0, lambda: self._append_log("Сопоставление продуктов с API завершено."))
+            self.after(0, lambda: self._append_log("Сопоставление продуктов с API завершено."))
 
             # --- ДОБАВЛЕНО: Шаг 3.5 - Обновление справочника товаров, как в веб-версии ---
             products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name')]
             if products_to_upsert:
-                # self.after(0, lambda: self._append_log("Обновление локального справочника товаров..."))
+                self.after(0, lambda: self._append_log("Обновление локального справочника товаров..."))
                 from .utils import upsert_data_to_db
                 upsert_df = pd.DataFrame(products_to_upsert)
                 with self._get_client_db_connection() as conn:
@@ -1760,21 +1788,21 @@ class ApiIntegrationFrame(ttk.Frame):
 
             # Шаг 4: Цикл создания тиражей
             for i, row in details_df.iterrows():
-                if pd.notna(row.get('api_id')):
-                    # self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, тираж уже существует (ID: {r['api_id']})."))
+                if pd.notna(row.get('api_id')) and order_status != 'delta': # Для delta мы всегда должны проходить, но там api_id уже есть
+                    self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, тираж уже существует (ID: {r['api_id']})."))
                     continue
                 
                 api_product_id = row.get('api_product_id')
                 if pd.isna(api_product_id):
-                    # self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, не найден активный продукт в API."))
+                    self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, не найден активный продукт в API."))
                     continue
 
-                # self.after(0, lambda r=row: self._append_log(f"--- Создаю тираж для GTIN {r['gtin']}..."))
+                self.after(0, lambda r=row: self._append_log(f"--- Создаю тираж для GTIN {r['gtin']}..."))
                 
                 # --- ИЗМЕНЕНИЕ: Добавляем обработку специфичной ошибки 400 ---
                 try:
                     tirage_payload = {"order_product_id": int(api_product_id), "qty": int(row['dm_quantity'])}
-                    response_data = self.api_service.create_printrun(tirage_payload)
+                    response_data = self.api_service.create_printrun(tirage_payload) # type: ignore
                     new_printrun_id = response_data.get('printrun_id')
 
                     if not new_printrun_id:
@@ -1782,22 +1810,41 @@ class ApiIntegrationFrame(ttk.Frame):
                 except requests.exceptions.HTTPError as e:
                     if e.response.status_code == 400:
                         # Если это ошибка 400, прерываем цикл и выводим дружелюбное сообщение
-                        # self.after(0, lambda: self._append_log("\nAPI вернуло ошибку. Вероятно, система еще обрабатывает предыдущий запрос."))
-                        # self.after(0, lambda: self._append_log("Пожалуйста, подождите несколько минут и запустите операцию 'Разбить на тиражи' еще раз."))
+                        self.after(0, lambda: self._append_log("\nAPI вернуло ошибку. Вероятно, система еще обрабатывает предыдущий запрос."))
+                        self.after(0, lambda: self._append_log("Пожалуйста, подождите несколько минут и запустите операцию 'Разбить на тиражи' еще раз."))
                         self.after(0, self._update_buttons_state)
-                        return # Выходим из функции _split_runs_task
+                        return False # Выходим из функции _split_runs_task
                     else:
                         raise # Если другая ошибка, пробрасываем ее дальше
                 
                 # Обновляем нашу БД
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s", (new_printrun_id, row['id']))
-                    conn.commit()
-                # self.after(0, lambda r=row, p_id=new_printrun_id: self._append_log(f"  Успешно создан тираж ID {p_id} для GTIN {r['gtin']}."))
+                if 'id' in row and pd.notna(row['id']): # Обновляем только если есть ID строки (т.е. для dmkod)
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s", (new_printrun_id, row['id']))
+                        conn.commit()
+                self.after(0, lambda r=row, p_id=new_printrun_id: self._append_log(f"  Успешно создан тираж ID {p_id} для GTIN {r['gtin']}."))
                 
-                # self.after(0, lambda: self._append_log("  Пауза 10 секунд..."))
-                time.sleep(10)
+                # --- НОВАЯ ЛОГИКА: Ожидание готовности тиража ---
+                self.after(0, lambda: self._append_log("  Ожидание обработки тиража сервером..."))
+                max_wait_time, check_interval = 120, 5
+                start_time = time.time()
+                while time.time() - start_time < max_wait_time:
+                    printruns_details = self.api_service.get_printruns({"order_id": api_order_id}) # type: ignore
+                    all_settled = True
+                    for order in printruns_details.get('orders', []):
+                        for printrun in order.get('printruns', []):
+                            if printrun.get('state') == 'AWAITING':
+                                all_settled = False
+                                break
+                        if not all_settled: break
+                    
+                    if all_settled:
+                        self.after(0, lambda: self._append_log("  Тираж обработан."))
+                        break
+                    
+                    self.after(0, lambda: self._append_log(f"  Проверка через {check_interval} сек..."))
+                    time.sleep(check_interval)
 
             # Шаг 5: Обновление статуса заказа
             with self._get_client_db_connection() as conn:
@@ -1806,19 +1853,24 @@ class ApiIntegrationFrame(ttk.Frame):
                 conn.commit()
             
             self.order_data['api_status'] = 'Тиражи созданы'
-            self.after(0, lambda: self._display_api_response(200, "Все тиражи успешно созданы!"))
+            if show_final_message:
+                self.after(0, lambda: self._display_api_response(200, "Все тиражи успешно созданы!"))
             self.after(0, self._update_buttons_state)
+            return True
 
         except Exception as e:
+            self.after(0, lambda: self._append_log(f"\nОШИБКА: {e}\n{traceback.format_exc()}"))
             self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
             self.after(0, self._update_buttons_state)
+            return False
 
     def _prepare_json(self):
         self._run_in_thread(self._prepare_json_task)
 
-    def _prepare_json_task(self):
-        # self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку JSON..."))
+    def _prepare_json_task(self, show_final_message=True):
+        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку JSON..."))
         try:
+            api_order_id = self.order_data.get('api_order_id')
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("SELECT api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
@@ -1828,10 +1880,31 @@ class ApiIntegrationFrame(ttk.Frame):
                 raise Exception("Не найдено позиций с ID тиража для обработки.")
 
             for i, detail in enumerate(details_to_process):
-                # self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос JSON для тиража ID {d['api_id']}..."))
-                self.api_service.create_printrun_json({"printrun_id": detail['api_id']})
-                # self.after(0, lambda d=detail: self._append_log(f"  Запрос для тиража {d['api_id']} успешно отправлен."))
+                self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос JSON для тиража ID {d['api_id']}..."))
+                self.api_service.create_printrun_json({"printrun_id": detail['api_id']}) # type: ignore
+                self.after(0, lambda d=detail: self._append_log(f"  Запрос для тиража {d['api_id']} успешно отправлен."))
                 time.sleep(0.5)
+
+            # --- НОВАЯ ЛОГИКА: Ожидание готовности JSON ---
+            self.after(0, lambda: self._append_log("\nОжидание генерации JSON сервером..."))
+            max_wait_time, check_interval = 300, 5
+            start_time = time.time()
+            while time.time() - start_time < max_wait_time:
+                printruns_details = self.api_service.get_printruns({"order_id": api_order_id}) # type: ignore
+                all_json_ready = True
+                for order in printruns_details.get('orders', []):
+                    for printrun in order.get('printruns', []):
+                        if not printrun.get('json', False):
+                            all_json_ready = False
+                            break
+                    if not all_json_ready: break
+                
+                if all_json_ready:
+                    self.after(0, lambda: self._append_log("  Все JSON-файлы готовы."))
+                    break
+                
+                self.after(0, lambda: self._append_log(f"  Проверка через {check_interval} сек..."))
+                time.sleep(check_interval)
 
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
@@ -1839,18 +1912,22 @@ class ApiIntegrationFrame(ttk.Frame):
                 conn.commit()
             
             self.order_data['api_status'] = 'JSON заказан'
-            self.after(0, lambda: self._display_api_response(200, "Все запросы на подготовку JSON успешно отправлены!"))
+            if show_final_message:
+                self.after(0, lambda: self._display_api_response(200, "Все запросы на подготовку JSON успешно отправлены!"))
             self.after(0, self._update_buttons_state)
+            return True
 
         except Exception as e:
+            self.after(0, lambda: self._append_log(f"\nОШИБКА: {e}\n{traceback.format_exc()}"))
             self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
             self.after(0, self._update_buttons_state)
+            return False
 
     def _download_codes(self):
         self._run_in_thread(self._download_codes_task)
 
     def _download_codes_task(self):
-        # self.after(0, lambda: self._display_api_response(200, "Начинаю скачивание кодов..."))
+        self.after(0, lambda: self._display_api_response(200, "Начинаю скачивание кодов..."))
         try:
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -1863,18 +1940,18 @@ class ApiIntegrationFrame(ttk.Frame):
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
                     for i, detail in enumerate(details_to_process):
-                        # self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос кодов для тиража ID {d['api_id']}..."))
-                        response_data = self.api_service.download_printrun_json({"printrun_id": detail['api_id']})
+                        self.after(0, lambda d=detail, num=i+1: self._append_log(f"--- {num}/{len(details_to_process)}: Запрос кодов для тиража ID {d['api_id']}..."))
+                        response_data = self.api_service.download_printrun_json({"printrun_id": detail['api_id']}) # type: ignore
                         codes = response_data.get('codes', [])
                         if not codes:
-                            # self.after(0, lambda d=detail: self._append_log(f"  Коды для тиража {d['api_id']} еще не готовы или отсутствуют."))
+                            self.after(0, lambda d=detail: self._append_log(f"  Коды для тиража {d['api_id']} еще не готовы или отсутствуют."))
                             continue
                         
                         cur.execute(
                             "UPDATE dmkod_aggregation_details SET api_codes_json = %s WHERE id = %s",
                             (json.dumps({'codes': codes}), detail['id'])
                         )
-                        # self.after(0, lambda c=len(codes), d_id=detail['id']: self._append_log(f"  Сохранено {c} кодов в БД для строки ID {d_id}."))
+                        self.after(0, lambda c=len(codes), d_id=detail['id']: self._append_log(f"  Сохранено {c} кодов в БД для строки ID {d_id}."))
 
                 conn.commit() # Фиксируем сохранение всех JSON
 
@@ -1888,6 +1965,7 @@ class ApiIntegrationFrame(ttk.Frame):
             self.after(0, self._update_buttons_state)
 
         except Exception as e:
+            self.after(0, lambda: self._append_log(f"\nОШИБКА: {e}\n{traceback.format_exc()}"))
             self.after(0, lambda err=e: self._display_api_response(500, f"ОШИБКА: {err}"))
             self.after(0, self._update_buttons_state)
 
@@ -1896,10 +1974,10 @@ class ApiIntegrationFrame(ttk.Frame):
 
     def _prepare_report_data_task(self):
         """Задача для подготовки сведений для отчета."""
-        # self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений для отчета..."))
+        self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений для отчета..."))
         try:
+            self.after(0, lambda: self._append_log(f"Статус заказа: {self.order_data.get('status')}"))
             order_status = self.order_data.get('status')
-            # self.after(0, lambda: self._append_log(f"Статус заказа: {order_status}"))
 
             if order_status == 'delta':
                 # Логика для статуса 'delta'
@@ -1919,13 +1997,13 @@ class ApiIntegrationFrame(ttk.Frame):
                     self.after(0, lambda: self._display_api_response(200, "Статус заказа обновлен: 'Сведения подготовлены' (нет новых данных от 'Дельта')."))
                     return
                 else: # Если данные есть, обрабатываем их и обновляем статус
-                    # self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
+                    self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
 
                     with self._get_client_db_connection() as conn:
                         with conn.cursor() as cur:
                             for i, result in enumerate(results_to_process):
                                 payload = result['codes_json']
-                                # self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
+                                self.after(0, lambda i=i, r=result: self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {r['printrun_id']} ---"))
                                 
                                 # Вызов API
                                 response_data = self.api_service.upload_utilisation_data(payload)
@@ -1938,7 +2016,7 @@ class ApiIntegrationFrame(ttk.Frame):
                                 # Обновляем запись в delta_result, используя ID из API
                                 cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, result['id']))
                                 
-                                # self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
+                                self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
                                 self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
                                 time.sleep(5)
                         conn.commit()
@@ -2019,7 +2097,6 @@ class ApiIntegrationFrame(ttk.Frame):
         self._run_in_thread(self._prepare_report_task)
 
     def _prepare_report_task(self):
-        # self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку отчета..."))
         # --- ИСПРАВЛЕНИЕ: Заменяем заглушку на реальную логику из веб-приложения ---
         self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку отчета..."))
         try:
