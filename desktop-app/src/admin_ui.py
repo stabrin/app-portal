@@ -1740,29 +1740,38 @@ class ApiIntegrationFrame(ttk.Frame):
             # --- НОВЫЙ ШАГ: Синхронизация существующих активных тиражей из API ---
             self.after(0, lambda: self._append_log("Шаг 1: Синхронизация активных тиражей из API..."))
             try:
-                order_details_from_api = self.api_service.get_order_details(api_order_id)
-                api_products = order_details_from_api.get('orders', [{}])[0].get('products', [])
-                
-                gtin_to_active_run_id = {}
-                for product in api_products:
-                    gtin = product.get('gtin')
-                    if not gtin: continue
-                    for printrun in product.get('printruns', []):
-                        if printrun.get('state') == 'ACTIVE':
-                            # Нашли активный тираж для этого GTIN
-                            gtin_to_active_run_id[gtin] = printrun.get('id')
-                            break # Для одного GTIN может быть только один активный тираж
+                # --- ИСПРАВЛЕНИЕ: Сначала полностью очищаем старые api_id для этого заказа ---
+                # Это гарантирует, что не останется ID от REJECTED или удаленных тиражей.
+                self.after(0, lambda: self._append_log("  Очистка старых ID тиражей в локальной БД..."))
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s", (self.order_id,))
+                    conn.commit()
 
-                if gtin_to_active_run_id:
-                    self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей. Обновление локальной БД..."))
-                    with self._get_client_db_connection() as conn:
-                        with conn.cursor() as cur:
-                            for gtin, run_id in gtin_to_active_run_id.items():
-                                cur.execute(
-                                    "UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s",
-                                    (run_id, self.order_id, gtin)
-                                )
-                        conn.commit()
+                # Теперь запрашиваем актуальные данные из API
+                order_details_from_api = self.api_service.get_order_details(api_order_id)
+                # Безопасно получаем список продуктов
+                api_orders = order_details_from_api.get('orders', [])
+                if api_orders:
+                    api_products = api_orders[0].get('products', [])
+                    
+                    gtin_to_active_run_id = {}
+                    for product in api_products:
+                        gtin = product.get('gtin')
+                        if not gtin: continue
+                        for printrun in product.get('printruns', []):
+                            if printrun.get('state') == 'ACTIVE':
+                                gtin_to_active_run_id[gtin] = printrun.get('id')
+                                break # Для одного GTIN может быть только один активный тираж
+
+                    if gtin_to_active_run_id:
+                        self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей. Обновление локальной БД..."))
+                        with self._get_client_db_connection() as conn:
+                            with conn.cursor() as cur:
+                                for gtin, run_id in gtin_to_active_run_id.items():
+                                    cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (run_id, self.order_id, gtin))
+                            conn.commit()
+
             except Exception as sync_err:
                 raise Exception(f"Ошибка на шаге синхронизации активных тиражей: {sync_err}")
 
