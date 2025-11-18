@@ -1640,27 +1640,34 @@ class ApiIntegrationFrame(ttk.Frame):
                 self.after(0, lambda r=suborder_req_response: self._append_log(f"Ответ API: {json.dumps(r, ensure_ascii=False)}"))
 
                 # Шаг 6: Получение сводки для пользователя
-                self.after(0, lambda: self._append_log(f"\nШаг 6/7: Получение сводки для подписи..."))
-                time.sleep(2) # Пауза, чтобы API успело обработать запрос
-                suborders_details = self.api_service.get_suborders(api_order_id)
-                
                 suborders_to_sign = []
                 total_codes = 0
                 gtin_summary = {}
 
-                for order in suborders_details.get('orders', []):
-                    for suborder in order.get('suborders', []):
-                        if suborder.get('state') == 'ACTIVE':
-                            suborders_to_sign.append(suborder)
-                            for product in suborder.get('suborder_products', []):
-                                qty = product.get('qty', 0)
-                                gtin = product.get('gtin')
-                                total_codes += qty
-                                if gtin:
-                                    gtin_summary[gtin] = gtin_summary.get(gtin, 0) + qty
+                # --- НОВАЯ ЛОГИКА: Цикл ожидания активного подзаказа ---
+                self.after(0, lambda: self._append_log(f"\nШаг 6/7: Ожидание активного запроса на коды..."))
+                max_wait_time, check_interval = 120, 3 # Ждем до 2 минут
+                start_time = time.time()
+                while time.time() - start_time < max_wait_time:
+                    suborders_details = self.api_service.get_suborders(api_order_id)
+                    for order in suborders_details.get('orders', []):
+                        for suborder in order.get('suborders', []):
+                            if suborder.get('state') == 'ACTIVE':
+                                suborders_to_sign.append(suborder)
+                                for product in suborder.get('suborder_products', []):
+                                    qty = product.get('qty', 0)
+                                    gtin = product.get('gtin')
+                                    total_codes += qty
+                                    if gtin:
+                                        gtin_summary[gtin] = gtin_summary.get(gtin, 0) + qty
+                    if suborders_to_sign:
+                        break # Выходим из цикла, если нашли активный запрос
+                    self.after(0, lambda: self._append_log(f"Ожидание... (проверка через {check_interval} сек)"))
+                    time.sleep(check_interval)
+                # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
                 
                 if not suborders_to_sign:
-                    raise Exception("Не найдено активных запросов к подписи после их создания.")
+                    raise Exception(f"Не найдено активных запросов к подписи после их создания. Последний ответ от API: {json.dumps(suborders_details, indent=2, ensure_ascii=False)}")
 
                 summary_text = f"\n--- Сводка для подписи ---\n"
                 summary_text += f"Найдено запросов к подписи: {len(suborders_to_sign)}\n"
