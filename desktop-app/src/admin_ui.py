@@ -1740,36 +1740,41 @@ class ApiIntegrationFrame(ttk.Frame):
             # --- НОВЫЙ ШАГ: Синхронизация существующих активных тиражей из API ---
             self.after(0, lambda: self._append_log("Шаг 1: Синхронизация активных тиражей из API..."))
             try:
-                # --- ИСПРАВЛЕНИЕ: Сначала полностью очищаем старые api_id для этого заказа ---
-                # Это гарантирует, что не останется ID от REJECTED или удаленных тиражей.
-                self.after(0, lambda: self._append_log("  Очистка старых ID тиражей в локальной БД..."))
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute("UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s", (self.order_id,))
-                    conn.commit()
-
-                # Теперь запрашиваем актуальные данные из API
+                # 1. Запрашиваем актуальные данные из API
                 order_details_from_api = self.api_service.get_order_details(api_order_id)
-                # Безопасно получаем список продуктов
                 api_orders = order_details_from_api.get('orders', [])
                 if api_orders:
-                    api_products = api_orders[0].get('products', [])
+                    # --- ИСПРАВЛЕНИЕ: Ищем тиражи (printruns) на правильном уровне в ответе API ---
+                    # Тиражи находятся не внутри 'products', а на одном уровне с ними.
+                    api_printruns = api_orders[0].get('printruns', [])
                     
                     gtin_to_active_run_id = {}
-                    for product in api_products:
-                        gtin = product.get('gtin')
-                        if not gtin: continue
-                        for printrun in product.get('printruns', []):
-                            if printrun.get('state') == 'ACTIVE':
+                    for printrun in api_printruns:
+                        if printrun.get('state') == 'ACTIVE':
+                            gtin = printrun.get('gtin')
+                            if gtin:
                                 gtin_to_active_run_id[gtin] = printrun.get('id')
-                                break # Для одного GTIN может быть только один активный тираж
 
                     if gtin_to_active_run_id:
-                        self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей. Обновление локальной БД..."))
+                        self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей в API. Обновление локальной БД..."))
                         with self._get_client_db_connection() as conn:
                             with conn.cursor() as cur:
+                                # 2. Сначала очищаем только те api_id, которых нет среди активных
+                                active_ids = tuple(gtin_to_active_run_id.values())
+                                cur.execute(
+                                    "UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s AND api_id NOT IN %s",
+                                    (self.order_id, active_ids)
+                                )
+                                # 3. Затем обновляем правильные api_id для всех строк с соответствующим GTIN
                                 for gtin, run_id in gtin_to_active_run_id.items():
                                     cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (run_id, self.order_id, gtin))
+                            conn.commit()
+                    else:
+                        # Если активных тиражей в API нет, очищаем все api_id для этого заказа
+                        self.after(0, lambda: self._append_log("  Активных тиражей в API не найдено. Очистка всех ID в локальной БД..."))
+                        with self._get_client_db_connection() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute("UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s", (self.order_id,))
                             conn.commit()
 
             except Exception as sync_err:
