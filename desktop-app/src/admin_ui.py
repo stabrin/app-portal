@@ -1743,6 +1743,11 @@ class ApiIntegrationFrame(ttk.Frame):
                 # 1. Запрашиваем актуальные данные из API
                 self.after(0, lambda: self._append_log(f"  Запрос деталей для заказа API ID: {api_order_id}"))
                 order_details_from_api = self.api_service.get_order_details(api_order_id)
+
+                # --- ИЗМЕНЕНИЕ: Выводим полный сырой ответ от API для отладки ---
+                raw_response_str = json.dumps(order_details_from_api, indent=2, ensure_ascii=False)
+                self.after(0, lambda: self._append_log("\n--- ПОЛУЧЕН ПОЛНЫЙ ОТВЕТ ОТ API ---\n" + raw_response_str))
+
                 api_orders = order_details_from_api.get('orders', [])
 
                 # --- ИСПРАВЛЕНИЕ: Находим нужный заказ в ответе API по его ID ---
