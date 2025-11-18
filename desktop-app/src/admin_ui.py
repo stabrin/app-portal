@@ -1745,12 +1745,14 @@ class ApiIntegrationFrame(ttk.Frame):
                 # --- ИСПРАВЛЕНИЕ: Используем метод get_printruns, который обращается к эндпоинту psp/printruns ---
                 api_printruns = self.api_service.get_printruns(api_order_id)
 
-                # 2. Проверяем, что ответ является списком
-                if not isinstance(api_printruns, list):
-                    raise Exception(f"Ожидался список тиражей от API, но получен другой тип данных: {type(api_printruns)}")
+                # --- ИСПРАВЛЕНИЕ: Извлекаем список тиражей из словаря по ключу 'printruns' ---
+                if not isinstance(api_printruns_response, dict) or 'printruns' not in api_printruns_response:
+                    raise Exception(f"Ответ API не содержит ожидаемый ключ 'printruns'. Получен ответ: {api_printruns_response}")
+                
+                api_printruns = api_printruns_response.get('printruns', [])
 
                 gtin_to_active_run_id = {}
-                for printrun in api_printruns:
+                for printrun in api_printruns: # Теперь api_printruns - это точно список
                     if printrun.get('state') == 'ACTIVE':
                         gtin = printrun.get('gtin')
                         if gtin:
