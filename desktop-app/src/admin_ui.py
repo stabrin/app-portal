@@ -1736,6 +1736,36 @@ class ApiIntegrationFrame(ttk.Frame):
         self.after(0, lambda: self._display_api_response(200, "Начинаю создание тиражей..."))
         try:            
             api_order_id = self.order_data.get('api_order_id')
+
+            # --- НОВЫЙ ШАГ: Синхронизация существующих активных тиражей из API ---
+            self.after(0, lambda: self._append_log("Шаг 1: Синхронизация активных тиражей из API..."))
+            try:
+                order_details_from_api = self.api_service.get_order_details(api_order_id)
+                api_products = order_details_from_api.get('orders', [{}])[0].get('products', [])
+                
+                gtin_to_active_run_id = {}
+                for product in api_products:
+                    gtin = product.get('gtin')
+                    if not gtin: continue
+                    for printrun in product.get('printruns', []):
+                        if printrun.get('state') == 'ACTIVE':
+                            # Нашли активный тираж для этого GTIN
+                            gtin_to_active_run_id[gtin] = printrun.get('id')
+                            break # Для одного GTIN может быть только один активный тираж
+
+                if gtin_to_active_run_id:
+                    self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей. Обновление локальной БД..."))
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            for gtin, run_id in gtin_to_active_run_id.items():
+                                cur.execute(
+                                    "UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s",
+                                    (run_id, self.order_id, gtin)
+                                )
+                        conn.commit()
+            except Exception as sync_err:
+                raise Exception(f"Ошибка на шаге синхронизации активных тиражей: {sync_err}")
+
             post_processing_mode = self.post_processing_mode
 
             self.after(0, lambda: self._append_log(f"Режим постобработки: '{post_processing_mode}'"))
