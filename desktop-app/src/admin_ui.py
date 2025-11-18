@@ -1782,9 +1782,6 @@ class ApiIntegrationFrame(ttk.Frame):
                 else:
                     self.after(0, lambda: self._append_log("  Активных тиражей в API не найдено. Поле api_id оставлено пустым."))
 
-                # --- ВРЕМЕННАЯ МЕРА: Останавливаем выполнение для проверки ---
-                self.after(0, lambda: self._append_log("\nСинхронизация завершена. Дальнейшая обработка остановлена для проверки. Можете запускать процесс снова."))
-                return False # Прерываем выполнение функции
 
             except Exception as sync_err:
                 raise Exception(f"Ошибка на шаге синхронизации активных тиражей: {sync_err}")
@@ -1896,17 +1893,14 @@ class ApiIntegrationFrame(ttk.Frame):
                 max_wait_time, check_interval = 120, 5
                 start_time = time.time()
                 while time.time() - start_time < max_wait_time:
-                    printruns_details = self.api_service.get_order_details(api_order_id) # type: ignore
-                    # --- ИСПРАВЛЕНИЕ: Ждем, пока конкретный созданный тираж станет ACTIVE ---
-                    # Предыдущая логика проверяла все тиражи на статус 'AWAITING', что было некорректно,
-                    # так как тираж мог быть в другом промежуточном состоянии (например, 'PROCESSING').
+                    # --- ИСПРАВЛЕНИЕ: Используем get_printruns для проверки статуса ---
+                    api_printruns = self.api_service.get_printruns(api_order_id)
+                    
                     current_printrun_state = None
-                    for order in printruns_details.get('orders', []):
-                        for printrun in order.get('printruns', []):
-                            if printrun.get('id') == new_printrun_id:
-                                current_printrun_state = printrun.get('state')
-                                break
-                        if current_printrun_state is not None: break
+                    for printrun in api_printruns.get('printruns', []):
+                        if printrun.get('id') == new_printrun_id:
+                            current_printrun_state = printrun.get('state')
+                            break
                     
                     if current_printrun_state == 'ACTIVE':
                         self.after(0, lambda p_id=new_printrun_id: self._append_log(f"  Тираж {p_id} успешно активирован."))
@@ -1964,11 +1958,11 @@ class ApiIntegrationFrame(ttk.Frame):
             max_wait_time, check_interval = 300, 5
             start_time = time.time()
             while time.time() - start_time < max_wait_time:
-                printruns_details = self.api_service.get_order_details(api_order_id) # type: ignore
+                # --- ИСПРАВЛЕНИЕ: Используем get_printruns для проверки статуса ---
+                api_printruns_response = self.api_service.get_printruns(api_order_id)
                 
-                # --- ИСПРАВЛЕНИЕ: Проверяем готовность JSON только для тех тиражей, которые мы запросили ---
-                api_printruns_json_status = {p['id']: p.get('json', False) for order in printruns_details.get('orders', []) for p in order.get('printruns', [])}
-
+                api_printruns_json_status = {p['id']: p.get('json', False) for p in api_printruns_response.get('printruns', [])}
+                
                 all_requested_json_ready = True
                 for run_id in unique_printrun_ids:
                     if not api_printruns_json_status.get(run_id, False):
