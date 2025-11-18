@@ -1888,28 +1888,28 @@ class ApiIntegrationFrame(ttk.Frame):
                         conn.commit()
                 self.after(0, lambda r=row, p_id=new_printrun_id: self._append_log(f"  Успешно создан тираж ID {p_id} для GTIN {r['gtin']}."))
                 
-                # --- НОВАЯ ЛОГИКА: Ожидание готовности тиража ---
-                self.after(0, lambda: self._append_log("  Ожидание обработки тиража сервером..."))
-                max_wait_time, check_interval = 120, 5
+                # --- ИЗМЕНЕННАЯ ЛОГИКА: Ожидание, пока API не будет готово принять следующий запрос ---
+                self.after(0, lambda: self._append_log("  Проверка готовности API к созданию следующего тиража..."))
+                max_wait_time, check_interval = 180, 5
                 start_time = time.time()
                 while time.time() - start_time < max_wait_time:
-                    # --- ИСПРАВЛЕНИЕ: Используем get_printruns для проверки статуса ---
-                    api_printruns = self.api_service.get_printruns(api_order_id)
+                    api_printruns_response = self.api_service.get_printruns(api_order_id)
+                    orders_list = api_printruns_response.get('orders', [])
+                    if not orders_list:
+                        time.sleep(check_interval)
+                        continue # Пропускаем итерацию, если нет данных
+
+                    api_printruns = orders_list[0].get('printruns', [])
+                    is_awaiting = any(p.get('state') == 'AWAITING' for p in api_printruns)
                     
-                    current_printrun_state = None
-                    for printrun in api_printruns.get('printruns', []):
-                        if printrun.get('id') == new_printrun_id:
-                            current_printrun_state = printrun.get('state')
-                            break
-                    
-                    if current_printrun_state == 'ACTIVE':
-                        self.after(0, lambda p_id=new_printrun_id: self._append_log(f"  Тираж {p_id} успешно активирован."))
+                    if not is_awaiting:
+                        self.after(0, lambda: self._append_log("  API готово."))
                         break
                     
-                    self.after(0, lambda s=current_printrun_state: self._append_log(f"  Ожидание активации тиража {new_printrun_id} (статус: {s}). Проверка через {check_interval} сек..."))
+                    self.after(0, lambda: self._append_log(f"  API занято (статус AWAITING). Проверка через {check_interval} сек..."))
                     time.sleep(check_interval)
                 else: # если вышли по таймауту
-                    raise Exception(f"Время ожидания активации тиража {new_printrun_id} истекло.")
+                    raise Exception("Время ожидания готовности API истекло. Один из тиражей остался в статусе AWAITING.")
 
             # Шаг 5: Обновление статуса заказа
             with self._get_client_db_connection() as conn:
