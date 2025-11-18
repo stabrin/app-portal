@@ -148,14 +148,14 @@ class ApiService:
         Получает список тиражей для конкретного заказа.
         Обращается к эндпоинту psp/printruns.
         """
-        url = f"{self.base_url}/psp/printruns"
+        url = f"{self.api_base_url.rstrip('/')}/psp/printruns"
         params = {'order_id': order_id}
         logging.info(f"Запрос списка тиражей для заказа ID {order_id} из API. Эндпоинт: {url}")
         try:
             # В отличие от других методов, этот эндпоинт может не возвращать 'status': 'ok'
             response = self._api_request('get', url, params=params)
             logging.info(f"Список тиражей для заказа {order_id} успешно получен.")
-            return response
+            return response.json()
         except Exception as e:
             logging.error(f"Ошибка при запросе списка тиражей для заказа {order_id}: {e}", exc_info=True)
             raise
