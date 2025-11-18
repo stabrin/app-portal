@@ -143,6 +143,23 @@ class ApiService:
             logger.error(f"Ошибка при создании тиража: {e}", exc_info=True)
             raise
 
+    def get_printruns(self, order_id: int) -> list:
+        """
+        Получает список тиражей для конкретного заказа.
+        Обращается к эндпоинту psp/printruns.
+        """
+        url = f"{self.base_url}/psp/printruns"
+        params = {'order_id': order_id}
+        logging.info(f"Запрос списка тиражей для заказа ID {order_id} из API. Эндпоинт: {url}")
+        try:
+            # В отличие от других методов, этот эндпоинт может не возвращать 'status': 'ok'
+            response = self._api_request('get', url, params=params)
+            logging.info(f"Список тиражей для заказа {order_id} успешно получен.")
+            return response
+        except Exception as e:
+            logging.error(f"Ошибка при запросе списка тиражей для заказа {order_id}: {e}", exc_info=True)
+            raise
+
     def create_printrun_json(self, payload: dict):
         """Запрашивает подготовку JSON-файла с кодами для тиража."""
         logger.info(f"Отправка запроса на подготовку JSON для тиража. Payload: {payload}")

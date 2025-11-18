@@ -1742,15 +1742,10 @@ class ApiIntegrationFrame(ttk.Frame):
             try:
                 # 1. Запрашиваем актуальные данные из API
                 self.after(0, lambda: self._append_log(f"  Запрос деталей для заказа API ID: {api_order_id}"))
-                # --- ИСПРАВЛЕНИЕ: Используем новый метод, который обращается к эндпоинту psp/printruns ---
-                # Этот эндпоинт должен вернуть плоский список тиражей для указанного order_id.
-                # Предполагается, что в ApiService будет добавлен метод get_printruns.
+                # --- ИСПРАВЛЕНИЕ: Используем метод get_printruns, который обращается к эндпоинту psp/printruns ---
                 api_printruns = self.api_service.get_printruns(api_order_id)
 
-                # --- ДОБАВЛЕНО: Выводим полученный заказ для отладки ---
-                raw_response_str = json.dumps(api_printruns, indent=2, ensure_ascii=False)
-                self.after(0, lambda: self._append_log("\n--- ПОЛУЧЕН ОТВЕТ ОТ psp/printruns ---\n" + raw_response_str))
-
+                # 2. Проверяем, что ответ является списком
                 if not isinstance(api_printruns, list):
                     raise Exception(f"Ожидался список тиражей от API, но получен другой тип данных: {type(api_printruns)}")
 
@@ -1760,8 +1755,7 @@ class ApiIntegrationFrame(ttk.Frame):
                         gtin = printrun.get('gtin')
                         if gtin:
                             gtin_to_active_run_id[gtin] = printrun.get('id')
-
-                # 2. Полностью очищаем старые api_id для этого заказа.
+                # 3. Полностью очищаем старые api_id для этого заказа.
                 self.after(0, lambda: self._append_log("  Очистка старых ID тиражей в локальной БД..."))
                 with self._get_client_db_connection() as conn:
                     with conn.cursor() as cur:
@@ -1769,7 +1763,7 @@ class ApiIntegrationFrame(ttk.Frame):
                     conn.commit()
                 self.after(0, lambda: self._append_log("  Очистка завершена."))
 
-                # 3. Теперь, когда все очищено, обновляем базу ID активных тиражей, если они были найдены.
+                # 4. Теперь, когда все очищено, обновляем базу ID активных тиражей, если они были найдены.
                 if gtin_to_active_run_id:
                     self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей в API. Обновление локальной БД..."))
                     with self._get_client_db_connection() as conn:
