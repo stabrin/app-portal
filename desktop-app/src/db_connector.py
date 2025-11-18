@@ -226,33 +226,44 @@ def get_main_db_connection():
 @contextmanager
 def get_client_db_connection(user_info: Dict[str, Any]):
     """Контекстный менеджер, который берет соединение из пула для клиентской БД."""
-    logging.debug("Запрос соединения из пула клиентской БД...")
     db_config = user_info.get("client_db_config")
     if not db_config:
         raise ValueError("Конфигурация базы данных клиента не предоставлена.")
-        
-    # --- ИЗМЕНЕНИЕ: Используем ID клиента для идентификации пула ---
-    # Предполагаем, что client_db_config содержит 'id' клиента из главной БД.
-    # Если его нет, можно использовать, например, db_name как ключ.
-    client_id = db_config.get('id') # Может быть 0 в локальном режиме
 
-    # --- ИСПРАВЛЕНИЕ: Для локального режима (id=0) используем db_name как ключ пула ---
+    client_id = db_config.get('id') # Может быть 0 в локальном режиме
     if client_id == 0:
         pool_key = db_config.get('db_name')
     else:
         pool_key = client_id
     if not pool_key: raise ValueError("Не удалось определить ключ для пула соединений (ни ID клиента, ни имя БД).")
 
-    client_pool = get_client_pool(pool_key, db_config)
-    
-    logging.debug(f"Получение соединения из пула для клиента (ключ: {pool_key})...")
-    conn = client_pool.getconn()
-    logging.debug(f"Соединение {id(conn)} получено из пула клиента (ключ: {pool_key}).")
-    try:
-        yield conn
-    finally:
-        client_pool.putconn(conn)
-        logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
+    client_pool = get_client_pool(pool_key, db_config) # Получаем или создаем пул
+
+    conn = None
+    for attempt in range(2): # Делаем до двух попыток
+        try:
+            if conn: # Если это вторая попытка, предыдущее соединение было плохим
+                logging.warning(f"Попытка {attempt + 1}: Получение нового соединения из пула клиента (ключ: {pool_key}).")
+                # Закрываем старое соединение, чтобы пул его отбросил
+                client_pool.putconn(conn, close=True)
+            
+            conn = client_pool.getconn()
+            logging.debug(f"Соединение {id(conn)} получено из пула клиента (ключ: {pool_key}).")
+            
+            yield conn # Передаем соединение в блок 'with'
+            
+            # Если код в блоке 'with' выполнился без ошибок, выходим из цикла
+            break
+
+        except psycopg2.OperationalError as e:
+            logging.warning(f"Перехвачена ошибка OperationalError: {e}. Попытка {attempt + 1} из 2.")
+            if attempt == 1: # Если это была последняя попытка
+                raise # Пробрасываем ошибку дальше
+        
+        finally:
+            if conn and not conn.closed:
+                client_pool.putconn(conn)
+                logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
 
 def _get_cert_path(ssl_cert_content: Optional[str]) -> Optional[str]:
     """Создает временный файл для сертификата и возвращает путь к нему."""
