@@ -2255,26 +2255,21 @@ class OrderEditorFrame(ttk.Frame):
         controls_frame_1 = ttk.Frame(main_frame)
         controls_frame_1.pack(fill=tk.X, pady=2)
         ttk.Button(controls_frame_1, text="Сохранить изменения", command=self._save_changes).pack(side=tk.LEFT, padx=2)
-        ttk.Button(controls_frame_1, text="Выгрузить в Excel", command=self._export_details_to_excel).pack(side=tk.LEFT, padx=2)
-        ttk.Button(controls_frame_1, text="Загрузить из Excel", command=self._import_details_from_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame_1, text="Выгрузить детали", command=self._export_details_to_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame_1, text="Загрузить детали", command=self._import_details_from_excel).pack(side=tk.LEFT, padx=2)
 
-        # --- ИЗМЕНЕНИЕ: Разделяем логику кнопок в зависимости от сценария ---
-        post_processing_mode = self.scenario_data.get('post_processing')
-
-        # Ряд 2: Кнопки, зависящие от сценария
+        # --- ИЗМЕНЕНИЕ: Отображаем все кнопки независимо от сценария ---
+        # Ряд 2: Кнопки для разных режимов постобработки
         controls_frame_2 = ttk.Frame(main_frame)
         controls_frame_2.pack(fill=tk.X, pady=2)
 
-        if post_processing_mode == "Печать через Bartender":
-            # Кнопки для работы со справочником товаров и Bartender View
-            ttk.Button(controls_frame_2, text="Экспорт товаров", command=self._export_products_to_excel).pack(side=tk.LEFT, padx=2)
-            ttk.Button(controls_frame_2, text="Импорт товаров", command=self._import_products_from_excel).pack(side=tk.LEFT, padx=2)
-            ttk.Button(controls_frame_2, text="Создать/Обновить View", command=self._create_bartender_view).pack(side=tk.LEFT, padx=2)
-
-        elif post_processing_mode == "Внешнее ПО":
-            # Кнопки для выгрузки/загрузки данных для внешнего ПО
-            ttk.Button(controls_frame_2, text="Экспорт данных", command=self._export_data_for_external_sw).pack(side=tk.LEFT, padx=2)
-            ttk.Button(controls_frame_2, text="Импорт данных", command=self._import_data_for_external_sw).pack(side=tk.LEFT, padx=2)
+        # Кнопки для работы со справочником товаров и Bartender View
+        ttk.Button(controls_frame_2, text="Экспорт товаров", command=self._export_products_to_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame_2, text="Импорт товаров", command=self._import_products_from_excel).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame_2, text="Создать/Обновить View", command=self._create_bartender_view).pack(side=tk.LEFT, padx=2)
+        # Кнопки для выгрузки/загрузки данных для внешнего ПО ("Дельта")
+        ttk.Button(controls_frame_2, text="Экспорт данных (Дельта)", command=self._export_data_for_external_sw).pack(side=tk.LEFT, padx=2)
+        ttk.Button(controls_frame_2, text="Импорт данных (Дельта)", command=self._import_data_for_external_sw).pack(side=tk.LEFT, padx=2)
 
         # --- НОВЫЙ БЛОК: Кнопка для отчета декларанта (не зависит от сценария) ---
         # Ряд 3: Отчеты
