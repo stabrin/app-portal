@@ -1742,8 +1742,8 @@ class ApiIntegrationFrame(ttk.Frame):
             try:
                 # 1. Запрашиваем актуальные данные из API
                 self.after(0, lambda: self._append_log(f"  Запрос деталей для заказа API ID: {api_order_id}"))
-                # --- ИСПРАВЛЕНИЕ: Используем метод get_printruns, который обращается к эндпоинту psp/printruns ---
-                api_printruns = self.api_service.get_printruns(api_order_id)
+                # --- ИСПРАВЛЕНИЕ: Используем правильное имя переменной для ответа от API ---
+                api_printruns_response = self.api_service.get_printruns(api_order_id)
 
                 # --- ИСПРАВЛЕНИЕ: Извлекаем список тиражей из словаря по ключу 'printruns' ---
                 if not isinstance(api_printruns_response, dict) or 'printruns' not in api_printruns_response:
