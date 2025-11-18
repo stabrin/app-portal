@@ -1746,7 +1746,7 @@ class ApiIntegrationFrame(ttk.Frame):
                 api_orders = order_details_from_api.get('orders', [])
 
                 # --- ИСПРАВЛЕНИЕ: Находим нужный заказ в ответе API по его ID ---
-                target_order = next((order for order in api_orders if order.get('order_id') == api_order_id), None)
+                target_order = next((order for order in api_orders if order.get('order_id') == int(api_order_id)), None)
 
                 if not target_order:
                     raise Exception(f"В ответе API не найден заказ с ID {api_order_id}")
