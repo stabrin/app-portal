@@ -1744,8 +1744,8 @@ class ApiIntegrationFrame(ttk.Frame):
                 order_details_from_api = self.api_service.get_order_details(api_order_id)
                 api_orders = order_details_from_api.get('orders', [])
                 if api_orders:
-                    # --- ИСПРАВЛЕНИЕ: Ищем тиражи (printruns) на правильном уровне в ответе API ---
-                    # Тиражи находятся не внутри 'products', а на одном уровне с ними.
+                    # --- ИСПРАВЛЕНИЕ: Ищем тиражи ('printruns') на правильном уровне в ответе API.
+                    # Они находятся не внутри 'products', а на одном уровне с ними, в объекте заказа.
                     api_printruns = api_orders[0].get('printruns', [])
                     
                     gtin_to_active_run_id = {}
@@ -1759,18 +1759,18 @@ class ApiIntegrationFrame(ttk.Frame):
                         self.after(0, lambda: self._append_log(f"  Найдено {len(gtin_to_active_run_id)} активных тиражей в API. Обновление локальной БД..."))
                         with self._get_client_db_connection() as conn:
                             with conn.cursor() as cur:
-                                # 2. Сначала очищаем только те api_id, которых нет среди активных
+                                # 2. Сначала очищаем только те api_id, которых НЕТ среди активных.
+                                # Это удалит ID от REJECTED и других неактуальных тиражей.
                                 active_ids = tuple(gtin_to_active_run_id.values())
-                                cur.execute(
-                                    "UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s AND api_id NOT IN %s",
-                                    (self.order_id, active_ids)
-                                )
-                                # 3. Затем обновляем правильные api_id для всех строк с соответствующим GTIN
+                                if len(active_ids) > 0:
+                                    cur.execute("UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s AND api_id NOT IN %s", (self.order_id, active_ids))
+
+                                # 3. Затем обновляем правильные api_id для всех строк с соответствующим GTIN.
                                 for gtin, run_id in gtin_to_active_run_id.items():
                                     cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (run_id, self.order_id, gtin))
                             conn.commit()
                     else:
-                        # Если активных тиражей в API нет, очищаем все api_id для этого заказа
+                        # Если активных тиражей в API нет, очищаем ВСЕ api_id для этого заказа.
                         self.after(0, lambda: self._append_log("  Активных тиражей в API не найдено. Очистка всех ID в локальной БД..."))
                         with self._get_client_db_connection() as conn:
                             with conn.cursor() as cur:
