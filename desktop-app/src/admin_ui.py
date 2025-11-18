@@ -1568,22 +1568,15 @@ class ApiIntegrationFrame(ttk.Frame):
         """
         def task():
             try:
-                # Шаг 1 и 2: Проверка профиля и обновление токена
-                self.after(0, lambda: self._display_api_response(200, "Шаг 1/7: Проверка профиля пользователя..."))
-                profile = self.api_service.get_user_profile()
-                if profile.get('role') != 'SERVICEPROVIDER':
-                    self.after(0, lambda: self._append_log("Неверная роль. Обновление токена..."))
-                    self.api_service._refresh_token()
-                    profile = self.api_service.get_user_profile()
-                    if profile.get('role') != 'SERVICEPROVIDER':
-                        raise Exception(f"Роль пользователя '{profile.get('role')}' не подходит для операции.")
-                self.after(0, lambda: self._append_log("Профиль в порядке."))
+                # Шаг 1: Проверка токена (любой запрос, например get_participants, проверит и обновит токен при необходимости)
+                self.after(0, lambda: self._display_api_response(200, "Шаг 1/7: Проверка токена API..."))
+                self.api_service.get_participants() # Этот вызов проверит и при необходимости обновит токен
+                self.after(0, lambda: self._append_log("Токен API в порядке."))
 
-                # Шаг 3 и 4: Проверка и создание заказа в API
+                # Шаг 2 и 3: Проверка и создание заказа в API
                 api_order_id = self.order_data.get('api_order_id')
                 if not api_order_id:
-                    self.after(0, lambda: self._append_log("\nШаг 3-4/7: Создание заказа в API..."))
-                    # ... (здесь логика создания заказа, она у вас уже есть и корректна)
+                    self.after(0, lambda: self._append_log("\nШаг 2-3/7: Создание заказа в API..."))
                     with self._get_client_db_connection() as conn:
                         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                             cur.execute("SELECT o.notes, pg.dm_template, o.client_api_id FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id WHERE o.id = %s", (self.order_id,))
@@ -1606,10 +1599,10 @@ class ApiIntegrationFrame(ttk.Frame):
                     self.order_data['api_order_id'] = api_order_id
                     self.after(0, lambda: self._append_log(f"Заказ в API создан с ID: {api_order_id}"))
                 else:
-                    self.after(0, lambda: self._append_log(f"\nШаг 3-4/7: Заказ ID {api_order_id} уже существует."))
+                    self.after(0, lambda: self._append_log(f"\nШаг 2-3/7: Заказ ID {api_order_id} уже существует."))
 
-                # Шаг 5: Ожидание активации заказа
-                self.after(0, lambda: self._append_log(f"\nШаг 5/7: Ожидание активации заказа ID {api_order_id}..."))
+                # Шаг 4: Ожидание активации заказа
+                self.after(0, lambda: self._append_log(f"\nШаг 4/7: Ожидание активации заказа ID {api_order_id}..."))
                 max_wait_time, check_interval = 300, 5
                 start_time = time.time()
                 while time.time() - start_time < max_wait_time:
@@ -1630,14 +1623,14 @@ class ApiIntegrationFrame(ttk.Frame):
                 else:
                     raise Exception("Время ожидания активации заказа истекло.")
 
-                # Шаг 6: Создание запроса на коды
-                self.after(0, lambda: self._append_log(f"\nШаг 6/7: Создание запроса на коды..."))
+                # Шаг 5: Создание запроса на коды
+                self.after(0, lambda: self._append_log(f"\nШаг 5/7: Создание запроса на коды..."))
                 suborder_req_payload = {"order_id": int(api_order_id)}
                 suborder_req_response = self.api_service.create_suborder_request(suborder_req_payload)
                 self.after(0, lambda r=suborder_req_response: self._append_log(f"Ответ API: {json.dumps(r, ensure_ascii=False)}"))
 
-                # Шаг 7: Получение сводки для пользователя
-                self.after(0, lambda: self._append_log(f"\nШаг 7/7: Получение сводки для подписи..."))
+                # Шаг 6: Получение сводки для пользователя
+                self.after(0, lambda: self._append_log(f"\nШаг 6/7: Получение сводки для подписи..."))
                 time.sleep(2) # Пауза, чтобы API успело обработать запрос
                 suborders_details = self.api_service.get_suborders(api_order_id)
                 
@@ -2796,6 +2789,9 @@ class AdminWindow(tk.Tk):
         
         # --- ИСПРАВЛЕНИЕ: Обновляем UI из главного потока ---
         self.after(0, self._set_api_status_color, is_valid)
+        
+        # --- УЛУЧШЕНИЕ: Запускаем следующую проверку через 600 секунд ---
+        self.after(600000, self.update_api_status)
 
     def _set_api_status_color(self, is_valid):
         color = "green" if is_valid else "red"
@@ -3796,25 +3792,39 @@ class AdminWindow(tk.Tk):
                 refresh_archive()
         notebook.bind("<<NotebookTabChanged>>", on_tab_change)
 
-    def _open_dm_test_print_dialog(self):
+    def _get_test_datamatrix_data(self):
         """
-        Открывает диалог печати для тестирования DataMatrix.
-        Данные для кода будут получены автоматически сервисом печати
-        согласно источнику данных, указанному в макете.
+        Получает один тестовый код DataMatrix из базы данных клиента.
+        Возвращает словарь с данными для печати или None в случае ошибки.
         """
-        # Готовим "пустой" набор данных. Сервис печати сам подставит реальные
-        # данные из БД, так как в макете указан источник "items.datamatrix".
-        item_data_for_printing = {
-            "items.datamatrix": None, # Значение будет получено из БД автоматически
-            # Добавляем заглушки для других возможных полей в макете, чтобы избежать ошибок.
-            "QR: Конфигурация сервера": json.dumps({"error": "not applicable"}),
-            "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
-            "ap_workplaces.warehouse_name": "Тест DataMatrix (из БД)",
-            "ap_workplaces.workplace_number": "0" # ИСПРАВЛЕНИЕ: Преобразуем в строку, чтобы избежать ошибки 'int' object has no attribute 'isdigit'
-        }
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # Загружаем один любой код из таблицы items
+                    cur.execute("SELECT datamatrix FROM items WHERE datamatrix IS NOT NULL LIMIT 1")
+                    result = cur.fetchone()
+            
+            if not result or not result.get('datamatrix'):
+                messagebox.showwarning("Нет данных", "Не удалось найти ни одного кода DataMatrix в базе данных для тестовой печати.", parent=self)
+                return None
 
-        # Вызываем нашу стандартную процедуру печати с предпросмотром.
-        PrintWorkplaceLabelsDialog(self, self.user_info, "Тестирование DataMatrix", [item_data_for_printing])
+            return {
+                "items.datamatrix": result.get('datamatrix'),
+                # Добавляем заглушки для других возможных полей в макете, чтобы избежать ошибок.
+                "QR: Конфигурация сервера": json.dumps({"error": "not applicable"}),
+                "QR: Конфигурация рабочего места": json.dumps({"error": "not applicable"}),
+                "ap_workplaces.warehouse_name": "Тест DataMatrix (из БД)",
+                "ap_workplaces.workplace_number": "0"
+            }
+        except Exception as e:
+            logging.error(f"Ошибка при получении тестового DataMatrix: {e}", exc_info=True)
+            messagebox.showerror("Ошибка БД", f"Не удалось получить тестовый код из базы данных: {e}", parent=self)
+            return None
+
+    def _open_dm_test_print_dialog(self):
+        item_data = self._get_test_datamatrix_data()
+        if item_data:
+            PrintWorkplaceLabelsDialog(self, self.user_info, "Тестирование DataMatrix", [item_data])
 
 
     def _create_menu(self):

@@ -70,17 +70,6 @@ class ApiService:
                 return requests.request(method, url, headers=headers, **kwargs)
             raise # Перебрасываем другие HTTP ошибки
 
-    def get_user_profile(self):
-        """Получает профиль текущего пользователя API."""
-        logger.info("Получение профиля пользователя из API...")
-        try:
-            url = f"{self.api_base_url.rstrip('/')}/user/profile"
-            response = self._api_request('get', url)
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Не удалось получить профиль пользователя из API: {e}", exc_info=True)
-            raise
-
     def get_participants(self):
         """Получает список участников (клиентов) из API."""
         logger.info("Получение списка участников из API...")
