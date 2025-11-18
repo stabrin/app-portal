@@ -1734,25 +1734,29 @@ class ApiIntegrationFrame(ttk.Frame):
     def _split_runs_task(self, show_final_message=True):
         """Задача для разбиения заказа на тиражи."""
         self.after(0, lambda: self._display_api_response(200, "Начинаю создание тиражей..."))
-        try:
-            order_status = self.order_data.get('status')
+        try:            
             api_order_id = self.order_data.get('api_order_id')
+            post_processing_mode = self.post_processing_mode
 
-            # --- ИЗМЕНЕНИЕ: Логика зависит от статуса заказа ---
-            if order_status == 'delta':
-                self.after(0, lambda: self._append_log("Статус заказа 'delta'. Получаю данные из delta_result."))
-                with self._get_client_db_connection() as conn:
-                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                        # Для 'delta' мы берем данные из delta_result, так как они содержат фактическое кол-во кодов
-                        cur.execute("SELECT printrun_id as api_id, gtin, COUNT(*) as dm_quantity FROM delta_result WHERE order_id = %s GROUP BY printrun_id, gtin", (self.order_id,))
-                        details_data = cur.fetchall()
-            else: # 'dmkod' и другие
-                self.after(0, lambda: self._append_log("Статус заказа 'dmkod'. Получаю данные из dmkod_aggregation_details."))
+            self.after(0, lambda: self._append_log(f"Режим постобработки: '{post_processing_mode}'"))
+
+            # --- НОВАЯ ЛОГИКА: Получение данных в зависимости от post_processing_mode ---
+            if post_processing_mode == "Печать через Bartender":
+                self.after(0, lambda: self._append_log("Получение всех строк из dmkod_aggregation_details."))
                 with self._get_client_db_connection() as conn:
                     with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                         cur.execute("SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
                         details_data = cur.fetchall()
-            # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+            else: # Для всех остальных режимов
+                self.after(0, lambda: self._append_log("Группировка данных из dmkod_aggregation_details по GTIN."))
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute("""
+                            SELECT gtin, SUM(dm_quantity) as dm_quantity
+                            FROM dmkod_aggregation_details WHERE order_id = %s
+                            GROUP BY gtin
+                        """, (self.order_id,))
+                        details_data = cur.fetchall()
 
             if not details_data:
                 raise Exception("В заказе нет детализации для создания тиражей.")
@@ -1788,7 +1792,7 @@ class ApiIntegrationFrame(ttk.Frame):
 
             # Шаг 4: Цикл создания тиражей
             for i, row in details_df.iterrows():
-                if pd.notna(row.get('api_id')) and order_status != 'delta': # Для delta мы всегда должны проходить, но там api_id уже есть
+                if pd.notna(row.get('api_id')):
                     self.after(0, lambda r=row: self._append_log(f"Пропуск GTIN {r['gtin']}, тираж уже существует (ID: {r['api_id']})."))
                     continue
                 
@@ -1818,10 +1822,18 @@ class ApiIntegrationFrame(ttk.Frame):
                         raise # Если другая ошибка, пробрасываем ее дальше
                 
                 # Обновляем нашу БД
-                if 'id' in row and pd.notna(row['id']): # Обновляем только если есть ID строки (т.е. для dmkod)
+                if 'id' in row and pd.notna(row['id']): # Режим "Печать через Bartender" - обновляем по ID строки
                     with self._get_client_db_connection() as conn:
                         with conn.cursor() as cur:
                             cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s", (new_printrun_id, row['id']))
+                        conn.commit()
+                else: # Остальные режимы - обновляем все строки с этим GTIN для данного заказа
+                    with self._get_client_db_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s",
+                                (new_printrun_id, self.order_id, row['gtin'])
+                            )
                         conn.commit()
                 self.after(0, lambda r=row, p_id=new_printrun_id: self._append_log(f"  Успешно создан тираж ID {p_id} для GTIN {r['gtin']}."))
                 
