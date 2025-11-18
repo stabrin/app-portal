@@ -1742,28 +1742,18 @@ class ApiIntegrationFrame(ttk.Frame):
             try:
                 # 1. Запрашиваем актуальные данные из API
                 self.after(0, lambda: self._append_log(f"  Запрос деталей для заказа API ID: {api_order_id}"))
-                # --- ИСПРАВЛЕНИЕ: Используем get_suborders для получения данных по конкретному заказу, включая тиражи ---
-                # Это обращается к правильному эндпоинту и возвращает данные только по нашему заказу.
-                order_details_from_api = self.api_service.get_suborders(api_order_id)
-                api_orders = order_details_from_api.get('orders', []) # Ответ все еще содержит ключ 'orders'
-
-                # --- ИСПРАВЛЕНИЕ: API возвращает список, даже при запросе одного заказа. Берем первый элемент. ---
-                if not api_orders:
-                    raise Exception(f"В ответе API не найден заказ с ID {api_order_id}")
-                
-                target_order = api_orders[0]
+                # --- ИСПРАВЛЕНИЕ: Используем новый метод, который обращается к эндпоинту psp/printruns ---
+                # Этот эндпоинт должен вернуть плоский список тиражей для указанного order_id.
+                # Предполагается, что в ApiService будет добавлен метод get_printruns.
+                api_printruns = self.api_service.get_printruns(api_order_id)
 
                 # --- ДОБАВЛЕНО: Выводим полученный заказ для отладки ---
-                target_order_str = json.dumps(target_order, indent=2, ensure_ascii=False)
-                self.after(0, lambda: self._append_log("\n--- ПОЛУЧЕНЫ ДАННЫЕ ПО ЗАКАЗУ ---\n" + target_order_str))
+                raw_response_str = json.dumps(api_printruns, indent=2, ensure_ascii=False)
+                self.after(0, lambda: self._append_log("\n--- ПОЛУЧЕН ОТВЕТ ОТ psp/printruns ---\n" + raw_response_str))
 
-                # Проверяем, что это действительно тот заказ, который мы запрашивали
-                if str(target_order.get('order_id')) != str(api_order_id):
-                    raise Exception(f"API вернуло неверный заказ. Ожидался ID {api_order_id}, получен {target_order.get('order_id')}")
+                if not isinstance(api_printruns, list):
+                    raise Exception(f"Ожидался список тиражей от API, но получен другой тип данных: {type(api_printruns)}")
 
-                self.after(0, lambda: self._append_log(f"  Найден целевой заказ в ответе API."))
-                api_printruns = target_order.get('printruns', [])
-                
                 gtin_to_active_run_id = {}
                 for printrun in api_printruns:
                     if printrun.get('state') == 'ACTIVE':
