@@ -2213,11 +2213,12 @@ class ApiIntegrationFrame(ttk.Frame):
 
 class OrderEditorFrame(ttk.Frame):
     """Фрейм для редактирования деталей заказа, встраиваемый во вкладку."""
-    def __init__(self, parent, user_info, order_id, scenario_data=None):
+    def __init__(self, parent, user_info, order_id, scenario_data=None, main_app_window=None):
         super().__init__(parent)
 
         self.user_info = user_info
         self.order_id = order_id
+        self.main_app_window = main_app_window # Ссылка на главное окно AdminWindow
         self.scenario_data = scenario_data if scenario_data else {}
 
         self._create_widgets()
@@ -2391,6 +2392,12 @@ class OrderEditorFrame(ttk.Frame):
                         if notification_id:
                             cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
                 conn.commit() # Фиксируем все изменения
+            
+            # --- НОВЫЙ БЛОК: Автоматическое обновление интерфейса ---
+            if self.main_app_window:
+                logging.info("Вызов автоматического обновления списков после архивации.")
+                self.main_app_window.refresh_all_tabs()
+
             messagebox.showinfo("Успех", "Заказ успешно перемещен в архив. Обновите список заказов.", parent=self)
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось архивировать заказ: {e}", parent=self)
@@ -2998,6 +3005,14 @@ class AdminWindow(tk.Tk):
         self.api_status_indicator.delete("all")
         self.api_status_indicator.create_oval(2, 2, 14, 14, fill=color, outline="")
 
+    def refresh_all_tabs(self):
+        """Вызывает все сохраненные функции обновления для всех вкладок."""
+        if self.refresh_supply_notice_tab:
+            self.refresh_supply_notice_tab()
+        if self.refresh_orders_in_progress_tab:
+            self.refresh_orders_in_progress_tab()
+        # Архив обновлять не обязательно, но для полноты картины можно
+
     def _create_supply_notice_tab(self, parent_frame):
         from .supply_notification_service import SupplyNotificationService
         service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
@@ -3157,6 +3172,9 @@ class AdminWindow(tk.Tk):
         def refresh_all():
             refresh_notifications()
             refresh_summary_data()
+        
+        # Сохраняем ссылку на функцию обновления для этой вкладки
+        self.refresh_supply_notice_tab = refresh_all
 
         def populate_editor_pane(notification_id):
             """Заполняет правую панель данными выбранного уведомления."""
@@ -3933,8 +3951,8 @@ class AdminWindow(tk.Tk):
                     post_processing_mode = scenario_data.get('post_processing')
                     logging.debug(f"on_order_select: Данные сценария получены. post_processing_mode: '{post_processing_mode}'.")
  
-                    logging.debug(f"on_order_select: Создание OrderEditorFrame для заказа ID {order_id}...")
-                    OrderEditorFrame(edit_tab, self.user_info, order_id, scenario_data).pack(fill="both", expand=True)
+                    logging.debug(f"on_order_select: Создание OrderEditorFrame для заказа ID {order_id}...") # --- ИЗМЕНЕНИЕ: Передаем ссылку на главное окно ---
+                    OrderEditorFrame(edit_tab, self.user_info, order_id, scenario_data, main_app_window=self).pack(fill="both", expand=True)
                     logging.debug("on_order_select: OrderEditorFrame успешно создан и упакован.")
  
                     # --- НОВАЯ ЛОГИКА: Создаем нужный фрейм в зависимости от источника ---
@@ -3978,18 +3996,22 @@ class AdminWindow(tk.Tk):
 
         # Создаем обе вкладки
         refresh_in_progress = _create_orders_view(in_progress_frame, is_archive=False)
-        refresh_archive = _create_orders_view(archive_frame, is_archive=True)
+        _create_orders_view(archive_frame, is_archive=True)
+
+        # Сохраняем ссылку на функцию обновления для вкладки "В работе"
+        self.refresh_orders_in_progress_tab = refresh_in_progress
 
         # При переключении вкладок можно добавить автообновление
         def on_tab_change(event):
-            if notebook.index(notebook.select()) == 0:
-                # --- НОВЫЙ БЛОК: Логика для вкладки "Загрузка кодов" ---
-                # Этот блок будет пустым, так как вкладка скрыта по умолчанию
+            # Обновляем только активную вкладку при переключении на нее
+            # Это более экономный подход, чем обновлять все сразу.
+            try:
+                selected_tab_index = notebook.index(notebook.select())
+                if selected_tab_index == 0: # В работе
+                    refresh_in_progress()
+            except Exception:
+                # Может возникнуть ошибка, если вкладки еще не полностью созданы
                 pass
-            elif notebook.index(notebook.select()) == 1:
-                refresh_in_progress()
-            else:
-                refresh_archive()
         notebook.bind("<<NotebookTabChanged>>", on_tab_change)
 
     def _get_test_datamatrix_data(self):
