@@ -1842,7 +1842,7 @@ class ApiIntegrationFrame(ttk.Frame):
                 max_wait_time, check_interval = 120, 5
                 start_time = time.time()
                 while time.time() - start_time < max_wait_time:
-                    printruns_details = self.api_service.get_printruns({"order_id": api_order_id}) # type: ignore
+                    printruns_details = self.api_service.get_order_details(api_order_id) # type: ignore
                     all_settled = True
                     for order in printruns_details.get('orders', []):
                         for printrun in order.get('printruns', []):
@@ -1902,7 +1902,7 @@ class ApiIntegrationFrame(ttk.Frame):
             max_wait_time, check_interval = 300, 5
             start_time = time.time()
             while time.time() - start_time < max_wait_time:
-                printruns_details = self.api_service.get_printruns({"order_id": api_order_id}) # type: ignore
+                printruns_details = self.api_service.get_order_details(api_order_id) # type: ignore
                 all_json_ready = True
                 for order in printruns_details.get('orders', []):
                     for printrun in order.get('printruns', []):
