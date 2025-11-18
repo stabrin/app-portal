@@ -1511,24 +1511,31 @@ class ApiIntegrationFrame(ttk.Frame):
         if self.order_data:
             api_order_id = self.order_data.get('api_order_id')
             api_status = self.order_data.get('api_status')
-
-            # --- ИЗМЕНЕНИЕ: Управляем видимостью кнопок, а не только состоянием ---
-            # Прячем все кнопки и показываем только нужные для текущего статуса
-            for btn in [self.request_codes_btn, self.split_runs_btn, self.prepare_json_btn]:
+ 
+            # --- ИЗМЕНЕНИЕ: Сначала прячем ВСЕ кнопки ---
+            all_buttons = [
+                self.request_codes_btn, self.split_runs_btn, self.prepare_json_btn,
+                self.download_codes_btn, self.prepare_report_data_btn, self.prepare_report_btn
+            ]
+            for btn in all_buttons:
                 btn.pack_forget()
-
-            if not api_status:
+ 
+            # --- НОВАЯ ЛОГИКА: Если заказ еще не в API, показываем только одну кнопку ---
+            if not api_order_id or not api_status:
                 self.request_codes_btn.pack(side=tk.LEFT, padx=2)
-            elif api_status == 'Запрос создан':
-                # После создания запроса сразу даем возможность разбить на тиражи
-                self.split_runs_btn.pack(side=tk.LEFT, padx=2)
-
-            # Кнопка "Подготовить JSON" активна, если статус 'Тиражи созданы'
-            self.prepare_json_btn.pack(side=tk.LEFT, padx=2)
-            # Кнопка "Скачать коды" активна для нескольких статусов
-            self.download_codes_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен'] else "disabled")
-            self.prepare_report_data_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны'] else "disabled")
-            self.prepare_report_btn.config(state="normal" if api_status == 'Сведения подготовлены' else "disabled")
+            else:
+                # --- Старая логика для заказов, которые уже в работе с API ---
+                if api_status == 'Запрос создан':
+                    self.split_runs_btn.pack(side=tk.LEFT, padx=2)
+                elif api_status == 'Тиражи созданы':
+                    self.prepare_json_btn.pack(side=tk.LEFT, padx=2)
+                self.download_codes_btn.pack(side=tk.LEFT, padx=2)
+                self.prepare_report_data_btn.pack(side=tk.LEFT, padx=2)
+                self.prepare_report_btn.pack(side=tk.LEFT, padx=2)
+                # Управляем состоянием (активна/неактивна)
+                self.download_codes_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен'] else "disabled")
+                self.prepare_report_data_btn.config(state="normal" if api_status in ['JSON заказан', 'Коды скачаны'] else "disabled")
+                self.prepare_report_btn.config(state="normal" if api_status == 'Сведения подготовлены' else "disabled")
 
     def _display_api_response(self, status_code, body):
         """Отображает ответ API в текстовом поле, безопасно преобразуя тело ответа в строку."""
