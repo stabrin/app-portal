@@ -208,6 +208,21 @@ class ApiService:
             logger.error(f"Ошибка при отправке сведений об использовании: {e}", exc_info=True)
             raise
 
+    def get_utilisation_result(self, utilisation_upload_id: int):
+        """
+        Получает результат обработки ранее отправленных сведений об использовании.
+        Использует GET-запрос с телом JSON.
+        """
+        logger.info(f"Запрос результата для utilisation_upload_id: {utilisation_upload_id}")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/result"
+            payload = {'utilisation_upload_id': int(utilisation_upload_id)}
+            response = self._api_request('get', url, json=payload, timeout=60)
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при получении результата для utilisation_upload_id {utilisation_upload_id}: {e}", exc_info=True)
+            raise
+
     def create_utilisation_report(self, payload: dict):
         """
         Отправляет запрос на создание отчета об использовании (нанесении).

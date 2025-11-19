@@ -2054,6 +2054,7 @@ class ApiIntegrationFrame(ttk.Frame):
         self.after(0, lambda: self._display_api_response(200, "Начинаю подготовку сведений для отчета..."))
         try:
             self.after(0, lambda: self._append_log(f"Статус заказа: {self.order_data.get('status')}"))
+            all_upload_ids = [] # Собираем все ID для последующей проверки
             order_status = self.order_data.get('status')
 
             if order_status == 'delta':
@@ -2064,15 +2065,7 @@ class ApiIntegrationFrame(ttk.Frame):
                         results_to_process = cur.fetchall()
 
                 if not results_to_process:
-                    self.after(0, lambda: self._display_api_response(200, "Нет новых данных от 'Дельта' для отправки."))
-                    # Обновляем статус, даже если нет данных
-                    with self._get_client_db_connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
-                        conn.commit()
-                    self.order_data['api_status'] = 'Сведения подготовлены'
-                    self.after(0, lambda: self._display_api_response(200, "Статус заказа обновлен: 'Сведения подготовлены' (нет новых данных от 'Дельта')."))
-                    return
+                    self.after(0, lambda: self._append_log("Нет новых данных от 'Дельта' для отправки. Пропускаем шаг отправки."))
                 else: # Если данные есть, обрабатываем их и обновляем статус
                     self.after(0, lambda: self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки."))
 
@@ -2090,22 +2083,14 @@ class ApiIntegrationFrame(ttk.Frame):
                                 if not upload_id_from_api:
                                     raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
 
+                                all_upload_ids.append(upload_id_from_api)
                                 # Обновляем запись в delta_result, используя ID из API
                                 cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, result['id']))
                                 
                                 self.after(0, lambda r=response_data: self._append_log(f"  Ответ API: {json.dumps(r, ensure_ascii=False)}"))
                                 self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
-                                time.sleep(5)
+                                time.sleep(1) # Небольшая пауза между запросами
                         conn.commit()
-                    
-                    # Обновляем статус заказа после успешной обработки
-                    with self._get_client_db_connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
-                        conn.commit()
-                    self.order_data['api_status'] = 'Сведения подготовлены'
-                    self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
-                return
             elif order_status == 'dmkod':
                 # Логика для статуса 'dmkod'
                 with self._get_client_db_connection() as conn:
@@ -2120,15 +2105,7 @@ class ApiIntegrationFrame(ttk.Frame):
                         details_to_process = cur.fetchall()
 
                 if not details_to_process:
-                    self.after(0, lambda: self._display_api_response(200, "Нет новых тиражей для отправки сведений."))
-                    # Обновляем статус, даже если нет данных
-                    with self._get_client_db_connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
-                        conn.commit()
-                    self.order_data['api_status'] = 'Сведения подготовлены'
-                    self.after(0, lambda: self._display_api_response(200, "Статус заказа обновлен: 'Сведения подготовлены' (нет новых тиражей)."))
-                    return
+                    self.after(0, lambda: self._append_log("Нет новых тиражей для отправки сведений. Пропускаем шаг отправки."))
                 else: # Если данные есть, обрабатываем их и обновляем статус
                     with self._get_client_db_connection() as conn:
                         with conn.cursor() as cur:
@@ -2151,23 +2128,98 @@ class ApiIntegrationFrame(ttk.Frame):
                                 if not upload_id_from_api:
                                     raise ValueError(f"API не вернуло 'utilisation_upload_id' в ответе: {response_data}")
 
+                                all_upload_ids.append(upload_id_from_api)
                                 cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (upload_id_from_api, detail['detail_id']))
                                 self.after(0, lambda r=upload_id_from_api: self._append_log(f"  Записи присвоен ID из API: {r}"))
-                                time.sleep(5)
+                                time.sleep(1) # Небольшая пауза
                         conn.commit()
 
-                    # Обновляем статус заказа после успешной обработки
-                    with self._get_client_db_connection() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
-                        conn.commit()
-                    self.order_data['api_status'] = 'Сведения подготовлены'
-                    self.after(0, lambda: self._display_api_response(200, "Все сведения успешно отправлены!"))
-                    return
+            # --- НОВЫЙ БЛОК: Итоговая проверка ---
+            self.after(0, lambda: self._append_log("\n--- Итоговая проверка ---"))
+            
+            # 1. Сверка количества кодов
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT client_name FROM orders WHERE id = %s", (self.order_id,))
+                    client_name = cur.fetchone()['client_name']
+
+                    # Используем CTE для чистоты
+                    summary_query = """
+                    WITH codes_count AS (
+                        SELECT COALESCE(SUM(jsonb_array_length(api_codes_json->'codes')), 0) as received_codes
+                        FROM dmkod_aggregation_details
+                        WHERE order_id = %s
+                    )
+                    SELECT 
+                        COUNT(DISTINCT gtin) as total_products,
+                        SUM(dm_quantity) as ordered_codes,
+                        (SELECT received_codes FROM codes_count) as received_codes
+                    FROM dmkod_aggregation_details
+                    WHERE order_id = %s;
+                    """
+                    cur.execute(summary_query, (self.order_id, self.order_id))
+                    summary = cur.fetchone()
+            
+            summary_msg_1 = (
+                f"По клиенту '{client_name}' заказу №{self.order_id} всего в заказе {summary['total_products']} товаров. "
+                f"Заказано {summary['ordered_codes']} кодов, получено {summary['received_codes']} кодов."
+            )
+            self.after(0, lambda msg=summary_msg_1: self._append_log(msg))
+
+            # 2. Проверка результатов обработки в API
+            total_success, total_not_found, total_duplicated = 0, 0, 0
+            if not all_upload_ids:
+                # Если нечего было отправлять, получаем ID из базы
+                with self._get_client_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT utilisation_upload_id FROM dmkod_aggregation_details WHERE order_id = %s AND utilisation_upload_id IS NOT NULL", (self.order_id,))
+                        all_upload_ids.extend([row[0] for row in cur.fetchall()])
+                        if order_status == 'delta':
+                            cur.execute("SELECT utilisation_upload_id FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NOT NULL", (self.order_id,))
+                            all_upload_ids.extend([row[0] for row in cur.fetchall()])
+                all_upload_ids = list(set(all_upload_ids)) # Оставляем только уникальные
+
+            self.after(0, lambda: self._append_log(f"\nПроверка статуса обработки для {len(all_upload_ids)} загрузок..."))
+            for upload_id in all_upload_ids:
+                result = self.api_service.get_utilisation_result(upload_id)
+                include_data = result.get('include', {})
+                total_success += include_data.get('success', {}).get('count', 0)
+                total_not_found += include_data.get('not_found', {}).get('count', 0)
+                total_duplicated += include_data.get('duplicated', {}).get('count', 0)
+                time.sleep(0.5)
+
+            summary_msg_2 = (
+                f"Результаты обработки в API: \n"
+                f"  - Успешно принято: {total_success}\n"
+                f"  - Не найдено: {total_not_found}\n"
+                f"  - Дубликаты: {total_duplicated}"
+            )
+            self.after(0, lambda msg=summary_msg_2: self._append_log(msg))
+
+            # 3. Диалог с пользователем
+            final_prompt = f"{summary_msg_1}\n\n{summary_msg_2}\n\nПодготовить отчет?"
+            
+            # Запускаем messagebox в главном потоке
+            self.after(0, lambda: self._ask_prepare_report(final_prompt))
 
         except Exception as e:
             self.after(0, lambda err=e: self._display_api_response(500, f"КРИТИЧЕСКАЯ ОШИБКА: {err}\n\n{traceback.format_exc()}"))
         finally:
+            self.after(0, self._update_buttons_state)
+
+    def _ask_prepare_report(self, prompt_text):
+        """Выносит вызов messagebox в отдельный метод для запуска через self.after."""
+        if messagebox.askyesno("Подтверждение", prompt_text, parent=self):
+            self.after(0, lambda: self._append_log("\nПользователь подтвердил создание отчета. Запускаю..."))
+            self._prepare_report()
+        else:
+            self.after(0, lambda: self._append_log("\nПользователь отменил создание отчета."))
+            # Обновляем статус, так как сведения подготовлены, но отчет не создан
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE orders SET api_status = 'Сведения подготовлены' WHERE id = %s", (self.order_id,))
+                conn.commit()
+            self.order_data['api_status'] = 'Сведения подготовлены'
             self.after(0, self._update_buttons_state)
 
     def _prepare_report(self):
