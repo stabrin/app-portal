@@ -157,10 +157,11 @@ class SupplyNotificationService:
             conn.commit()
             logging.info(f"Уведомление ID: {notification_id} успешно обновлено.")
 
-    def create_order_from_notification(self, notification_id: int):
+    def create_or_recreate_order_from_notification(self, notification_id: int, force_recreate: bool = False):
         """
         Создает или обновляет заказ в таблице 'orders' на основе данных из уведомления о поставке.
-        Возвращает кортеж (bool, str) - успех и сообщение.
+        Если заказ существует, запрашивает подтверждение на пересоздание.
+        Возвращает кортеж (успех, сообщение, требуется_подтверждение).
         """
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -177,18 +178,18 @@ class SupplyNotificationService:
                 notification = cur.fetchone()
 
                 if not notification:
-                    return False, f"Уведомление с ID {notification_id} не найдено."
+                    return False, f"Уведомление с ID {notification_id} не найдено.", False
 
                 # 2. Проверяем количество товарных групп
                 product_groups = notification['product_groups']
                 if not product_groups or len(product_groups) > 1:
                     msg = f"Разделите это уведомление на {len(product_groups)} и после этого создайте отдельные заказы для каждой товарной группы."
-                    return False, msg
+                    return False, msg, False
 
                 # 3. Проверяем тип сценария и формируем статус
                 scenario_data = notification['scenario_data']
                 if scenario_data.get('type') == 'Ручная агрегация':
-                    return False, "Создание заказа для сценария 'Ручная агрегация' находится в процессе реализации."
+                    return False, "Создание заказа для сценария 'Ручная агрегация' находится в процессе реализации.", False
                 
                 status = 'dmkod' if scenario_data.get('dm_source') == 'Заказ в ДМ.Код' else 'new'
                 product_group_id = product_groups[0].get('id')
@@ -198,12 +199,21 @@ class SupplyNotificationService:
                 existing_order = cur.fetchone()
 
                 if existing_order:
+                    # --- НОВАЯ ЛОГИКА: Запрос подтверждения, если заказ уже существует ---
+                    if not force_recreate:
+                        confirmation_message = (
+                            "Вы хотите пересоздать заказ полностью?\n\n"
+                            "Внимание: это полностью аннулирует заказ в ДМ.Код, если вы делали запрос кодов. "
+                            "Вам придется заново запросить/получить коды."
+                        )
+                        return False, confirmation_message, True
+
                     # ОБНОВЛЕНИЕ СУЩЕСТВУЮЩЕГО ЗАКАЗА
                     order_id = existing_order['id']
                     cur.execute("""
                         UPDATE orders SET
                             client_api_id = %s, client_local_id = %s, client_name = %s, scenario_id = %s,
-                            order_date = CURRENT_DATE, notes = %s, status = %s, product_group_id = %s
+                            order_date = CURRENT_DATE, notes = %s, status = %s, product_group_id = %s, api_status = NULL, api_order_id = NULL
                         WHERE id = %s;
                     """, (
                         notification['client_api_id'], notification['client_local_id'], notification['client_name'],
@@ -257,7 +267,7 @@ class SupplyNotificationService:
                 logging.info(f"Статус уведомления ID {notification_id} обновлен на 'Заказ создан'.")
 
             conn.commit()
-            return True, message
+            return True, message, False
 
     def get_notification_by_id(self, notification_id):
         """Получает одно уведомление по ID."""

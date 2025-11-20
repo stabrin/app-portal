@@ -3338,8 +3338,31 @@ class AdminWindow(tk.Tk):
 
                 # --- НОВАЯ КНОПКА: Создать/Обновить заказ ---
                 def _save_and_create_order():
-                    if _save_general_info_from_panel(): # Сначала сохраняем
-                        _create_order_from_panel()      # Затем создаем заказ
+                    # Шаг 1: "Тихое" сохранение текущих данных уведомления
+                    if not _save_general_info_from_panel(show_success_message=False):
+                        # Если сохранение не удалось, прерываем операцию
+                        messagebox.showerror("Ошибка", "Не удалось сохранить изменения в уведомлении перед созданием заказа.", parent=self)
+                        return
+
+                    # Шаг 2: Попытка создать заказ
+                    logging.info(f"Запрос на создание/обновление заказа из уведомления ID: {notification_id}")
+                    try:
+                        success, message, needs_confirmation = service.create_or_recreate_order_from_notification(notification_id)
+                        if needs_confirmation:
+                            # Шаг 3: Запрос подтверждения у пользователя, если заказ уже существует
+                            user_response = messagebox.askyesno("Подтверждение пересоздания", message, parent=self)
+                            if user_response:
+                                # Шаг 4: Повторный вызов с флагом принудительного пересоздания
+                                success, message, _ = service.create_or_recreate_order_from_notification(notification_id, force_recreate=True)
+                        
+                        if success:
+                            messagebox.showinfo("Успех", message, parent=self)
+                            refresh_all() # Обновляем, чтобы увидеть изменение статуса
+                        elif not needs_confirmation: # Показываем ошибку, только если это не отмена пользователем
+                            messagebox.showwarning("Внимание", message, parent=self)
+                    except Exception as e:
+                        logging.error(f"Ошибка при создании заказа из уведомления {notification_id}: {e}", exc_info=True)
+                        messagebox.showerror("Ошибка", f"Не удалось создать заказ: {e}", parent=self)
 
                 # --- Размещаем кнопки ---
                 buttons_frame = ttk.Frame(general_tab)
@@ -3347,7 +3370,7 @@ class AdminWindow(tk.Tk):
                 ttk.Button(buttons_frame, text="Сохранить изменения", command=_save_general_info_from_panel).pack(side=tk.LEFT, padx=(0, 5))
 
                 # --- ИЗМЕНЕНИЕ: Кнопка доступна, только если детализация загружена (статус 'Ожидание') ---
-                if notification_data.get('status') != 'Проект':
+                if notification_data.get('status') == 'Ожидание':
                     ttk.Button(buttons_frame, text="Создать/Обновить заказ", command=_save_and_create_order).pack(side=tk.LEFT)
 
                 # Вкладка "Документы"
