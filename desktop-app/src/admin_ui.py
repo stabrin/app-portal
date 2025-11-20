@@ -2954,18 +2954,10 @@ class OrderEditorFrame(ttk.Frame):
             logging.info(f"Шаг 1: Запуск run_import_from_dmkod для заказа ID: {self.order_id}")
             logs = run_import_from_dmkod(self.user_info, self.order_id)
             logging.info(f"run_import_from_dmkod для заказа ID: {self.order_id} завершен.")
-            
-            # Показываем лог выполнения в новом окне
-            log_window = tk.Toplevel(self)
-            log_window.title(f"Лог обработки заказа №{self.order_id}")
-            log_window.geometry("700x500")
-            log_text = tk.Text(log_window, wrap="word", padx=10, pady=10)
-            # --- ИЗМЕНЕНИЕ: Логируем также то, что показываем пользователю ---
-            user_log_content = "\n".join(logs)
-            logging.debug(f"Лог для пользователя (заказ ID {self.order_id}):\n--- НАЧАЛО ЛОГА ---\n{user_log_content}\n--- КОНЕЦ ЛОГА ---")
-            log_text.insert(tk.END, "\n".join(logs))
-            log_text.config(state="disabled")
-            log_text.pack(expand=True, fill=tk.BOTH)
+            # --- ИЗМЕНЕНИЕ: Убираем отображение лога пользователю в отдельном окне ---
+            # Вся необходимая информация теперь пишется в app.log
+            if any("КРИТИЧЕСКАЯ ОШИБКА" in log for log in logs):
+                messagebox.showerror("Ошибка импорта", "Во время импорта кодов произошла ошибка. Подробности в файле app.log.", parent=self)
 
             # Шаг 2: Создаем представления
             logging.info(f"Шаг 2: Запуск create_bartender_views для заказа ID: {self.order_id}")

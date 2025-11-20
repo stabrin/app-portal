@@ -242,12 +242,13 @@ def get_client_db_connection(user_info: Dict[str, Any]):
     try:
         conn = client_pool.getconn()
         logging.debug(f"Соединение {id(conn)} получено из пула клиента (ключ: {pool_key}).")
-        yield conn  # Передаем соединение в блок 'with'
+        yield conn # Передаем соединение в блок 'with'
     except psycopg2.OperationalError as e:
         logging.error(f"Не удалось получить соединение из пула клиента (ключ: {pool_key}): {e}", exc_info=True)
-        raise  # Перебрасываем ошибку, чтобы приложение могло ее обработать
+        raise # Перебрасываем ошибку, чтобы приложение могло ее обработать
     finally:
         if conn:
+            # Этот блок теперь будет выполняться ПОСЛЕ завершения работы блока 'with'
             client_pool.putconn(conn)
             logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
 
