@@ -186,17 +186,19 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
     Выполняет импорт кодов из JSON-поля в dmkod_aggregation_details и их агрегацию.
     Адаптировано из datamatrix-app.
     """
+    logger.debug(f"run_import_from_dmkod: Запуск для order_id={order_id}")
     logs = [f"Запуск импорта кодов из БД для Заказа №{order_id}..."]
-    logger.info(f"run_import_from_dmkod: Начало для order_id={order_id}")
     conn = None
 
     try:
         with get_client_db_connection(user_info) as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             # 1. Получаем все строки детализации с кодами для этого заказа
-            cur.execute("""
+            query = """
                 SELECT gtin, api_codes_json, aggregation_level, api_id
                 FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL
-            """, (order_id,))
+            """
+            logger.debug(f"Выполнение запроса для получения деталей: {query % (order_id,)}")
+            cur.execute(query, (order_id,))
             all_details_with_codes = cur.fetchall()
 
             logger.debug(f"Найдено {len(all_details_with_codes)} строк с кодами для обработки.")
@@ -210,16 +212,20 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
                 gtin = detail['gtin']
                 aggregation_level = detail['aggregation_level']
                 codes_from_json = detail.get('api_codes_json', {}).get('codes', [])
+                logger.debug(f"Обработка тиража api_id={api_id}, gtin={gtin}. Найдено {len(codes_from_json)} кодов в JSON.")
 
                 logs.append(f"\n--- Обработка тиража ID: {api_id} (GTIN: {gtin}) ---")
                 logger.info(f"Обработка тиража api_id={api_id}, gtin={gtin}, {len(codes_from_json)} кодов.")
 
                 if not codes_from_json:
                     logs.append("  -> В записи нет кодов для обработки. Пропускаю.")
+                    logger.debug(f"Тираж {api_id} пропущен: нет кодов в JSON.")
                     continue
 
                 # Проверяем, существуют ли коды из ЭТОГО тиража в таблице items
-                cur.execute("SELECT 1 FROM items WHERE datamatrix = ANY(%s) LIMIT 1", (codes_from_json,))
+                check_query = "SELECT 1 FROM items WHERE datamatrix = ANY(%s) LIMIT 1"
+                logger.debug(f"Проверка на дубликаты для тиража {api_id}...")
+                cur.execute(check_query, (codes_from_json,))
                 if cur.fetchone():
                     logs.append("  -> ИНФО: Коды из этого тиража уже были загружены ранее. Пропускаю.")
                     logger.info(f"Тираж {api_id} пропущен, так как коды уже есть в таблице items.")
@@ -230,6 +236,7 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
                 for dm_string in codes_from_json:
                     parsed_data = parse_datamatrix(dm_string)
                     if not parsed_data.get('gtin'):
+                        logger.warning(f"Не удалось распознать GTIN в коде: '{dm_string[:30]}...'")
                         logs.append(f"  -> Пропущен код: не удалось распознать GTIN в '{dm_string[:30]}...'.")
                         continue
                     parsed_data['order_id'] = order_id
@@ -238,6 +245,7 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
 
                 if not current_tirage_dm_data:
                     logs.append("  -> В тираже не найдено корректных кодов DataMatrix для обработки.")
+                    logger.warning(f"Для тиража {api_id} не найдено корректных кодов для парсинга.")
                     continue
                 logger.debug(f"Спарсено {len(current_tirage_dm_data)} кодов для тиража {api_id}.")
 
@@ -245,6 +253,7 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
                 logs.append(f"  -> Подготовлено к загрузке {len(items_df)} кодов.")
 
                 # Проверка и создание GTIN в справочнике
+                logger.debug(f"Проверка GTIN {gtin} в справочнике 'products'.")
                 cur.execute("SELECT gtin FROM products WHERE gtin = %s", (gtin,))
                 if not cur.fetchone():
                     logs.append(f"  -> GTIN {gtin} не найден в справочнике. Создаю заглушку...")
@@ -268,6 +277,7 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
                         if warning and warning not in logs: logs.append(warning)
                         items_df.loc[chunk_indices, 'package_id'] = box_id
                         _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
+                        logger.debug(f"Создан короб: id={box_id}, sscc={full_sscc}, gcp={gcp_for_sscc}")
                         all_packages.append({'id': box_id, 'sscc': full_sscc, 'owner': 'wed-ug', 'level': 1, 'parent_id': None})
                     logger.debug(f"Создано {len(all_packages)} пакетов для тиража {api_id}.")
                 else:
@@ -278,20 +288,23 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
                 if all_packages:
                     packages_df = pd.DataFrame(all_packages)
                     logs.append(f"  -> Загружаю {len(packages_df)} упаковок...")
-                    logger.info(f"Вызов upsert_data_to_db для {len(packages_df)} упаковок.")
+                    logger.debug(f"Вызов upsert_data_to_db для {len(packages_df)} упаковок.")
                     upsert_data_to_db(cur, 'packages', packages_df, 'id')
 
                 logs.append(f"  -> Загружаю {len(items_df)} товаров...")
-                logger.info(f"Вызов upsert_data_to_db для {len(items_df)} товаров.")
+                logger.debug(f"Вызов upsert_data_to_db для {len(items_df)} товаров.")
                 upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
 
             conn.commit()
-            logger.info(f"run_import_from_dmkod: Транзакция для order_id={order_id} успешно закоммичена.")
+            logger.debug(f"run_import_from_dmkod: Транзакция для order_id={order_id} успешно закоммичена.")
 
         logs.append("\nПроцесс импорта и агрегации успешно завершен!")
+        logger.info(f"run_import_from_dmkod: Успешное завершение для order_id={order_id}")
     except Exception as e:
         logger.error(f"Ошибка в run_import_from_dmkod для order_id={order_id}: {e}", exc_info=True)
-        if conn: conn.rollback()
+        if conn:
+            logger.debug(f"run_import_from_dmkod: Выполняется откат транзакции для order_id={order_id}")
+            conn.rollback()
         logs.append(f"\nКРИТИЧЕСКАЯ ОШИБКА: {e}")
         logs.append("Все изменения в базе данных отменены.")
     finally:
