@@ -238,32 +238,18 @@ def get_client_db_connection(user_info: Dict[str, Any]):
     if not pool_key: raise ValueError("Не удалось определить ключ для пула соединений (ни ID клиента, ни имя БД).")
 
     client_pool = get_client_pool(pool_key, db_config) # Получаем или создаем пул
-
     conn = None
-    for attempt in range(2): # Делаем до двух попыток
-        try:
-            if conn: # Если это вторая попытка, предыдущее соединение было плохим
-                logging.warning(f"Попытка {attempt + 1}: Получение нового соединения из пула клиента (ключ: {pool_key}).")
-                # Закрываем старое соединение, чтобы пул его отбросил
-                client_pool.putconn(conn, close=True)
-            
-            conn = client_pool.getconn()
-            logging.debug(f"Соединение {id(conn)} получено из пула клиента (ключ: {pool_key}).")
-            
-            yield conn # Передаем соединение в блок 'with'
-            
-            # Если код в блоке 'with' выполнился без ошибок, выходим из цикла
-            break
-
-        except psycopg2.OperationalError as e:
-            logging.warning(f"Перехвачена ошибка OperationalError: {e}. Попытка {attempt + 1} из 2.")
-            if attempt == 1: # Если это была последняя попытка
-                raise # Пробрасываем ошибку дальше
-        
-        finally:
-            if conn and not conn.closed:
-                client_pool.putconn(conn)
-                logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
+    try:
+        conn = client_pool.getconn()
+        logging.debug(f"Соединение {id(conn)} получено из пула клиента (ключ: {pool_key}).")
+        yield conn # Передаем соединение в блок 'with'
+    except psycopg2.OperationalError as e:
+        logging.error(f"Не удалось получить соединение из пула клиента (ключ: {pool_key}): {e}", exc_info=True)
+        raise # Перебрасываем ошибку, чтобы приложение могло ее обработать
+    finally:
+        if conn:
+            client_pool.putconn(conn)
+            logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
 
 def _get_cert_path(ssl_cert_content: Optional[str]) -> Optional[str]:
     """Создает временный файл для сертификата и возвращает путь к нему."""
