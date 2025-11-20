@@ -2948,7 +2948,7 @@ class OrderEditorFrame(ttk.Frame):
         logging.info(f"Запущена процедура создания Bartender view для заказа ID: {self.order_id}")
         # --- НОВАЯ ЛОГИКА: Сначала импорт, потом создание представлений ---
         try:
-            from .aggregation_service import run_import_from_dmkod
+            from .aggregation_service import run_import_from_dmkod, create_bartender_views
             
             # Шаг 1: Выполняем импорт и агрегацию
             logging.info(f"Шаг 1: Запуск run_import_from_dmkod для заказа ID: {self.order_id}")
@@ -2969,7 +2969,7 @@ class OrderEditorFrame(ttk.Frame):
 
             # Шаг 2: Создаем представления
             logging.info(f"Шаг 2: Запуск create_bartender_views для заказа ID: {self.order_id}")
-            result = PrintingService.create_bartender_views(self.user_info, self.order_id)
+            result = create_bartender_views(self.user_info, self.order_id)
             logging.info(f"create_bartender_views для заказа ID: {self.order_id} завершен. Результат: {result}")
             if result.get('success'):
                 messagebox.showinfo("Успех", result.get('message', 'Представления успешно созданы/обновлены.'), parent=self)

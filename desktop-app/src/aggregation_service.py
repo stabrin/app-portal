@@ -1,15 +1,16 @@
 import os
 import re
 import logging
-from typing import Optional
+from typing import Optional, Dict, Any
 import codecs
 import pandas as pd
 from psycopg2.extras import RealDictCursor
+from psycopg2 import sql
+import psycopg2
 
 from .db_connector import get_client_db_connection
 from .utils import upsert_data_to_db # Импортируем утилиту
 from .sscc_service import generate_sscc, read_and_increment_counter # Импортируем централизованные функции
-from .printing_service import PrintingService
 
 # Константа-разделитель для кодов DataMatrix
 GS_SEPARATOR = '\x1d'
@@ -67,6 +68,118 @@ def parse_datamatrix(dm_string: str) -> dict:
         elif part.startswith('93'): result['crypto_part_93'] = part[2:]
     return result
 
+def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
+    """
+    Создает или обновляет представления (VIEW) для Bartender.
+    Перенесено из PrintingService для лучшей организации кода.
+    """
+    logging.info(f"Начало создания представлений для заказа ID: {order_id}")
+    conn = None
+    try:
+        # Используем get_client_db_connection из текущего модуля
+        conn = get_client_db_connection(user_info)
+        with conn.cursor() as cur:
+            # 1. Получаем информацию о заказе и формируем имена
+            cur.execute("SELECT client_name FROM orders WHERE id = %s", (order_id,))
+            order_info = cur.fetchone()
+            if not order_info:
+                logging.error(f"Заказ с ID {order_id} не найден в БД при создании представлений.")
+                return {"success": False, "message": f"Заказ с ID {order_id} не найден."}
+            client_name = order_info[0]
+
+            # Очистка имен для SQL
+            base_view_name_str = f"{client_name}_{order_id}"
+            sanitized_name = re.sub(r'[^\w]', '_', base_view_name_str)
+            sanitized_name = re.sub(r'_+', '_', sanitized_name).strip('_')
+            
+            base_view_name = sql.Identifier(sanitized_name)
+            sscc_view_name = sql.Identifier(f"{sanitized_name}_sscc")
+
+            logging.debug(f"Сгенерированы имена представлений: {base_view_name.string}, {sscc_view_name.string}")
+
+            # 2. Используем CREATE OR REPLACE VIEW для атомарного обновления
+            logging.debug("Создание/обновление основного представления...")
+            main_view_query = sql.SQL("""
+            CREATE OR REPLACE VIEW {view_name} AS
+            SELECT
+                o.client_name, o.order_date, i.datamatrix, i.gtin, i.serial,
+                i.code_8005, i.crypto_part_91, i.crypto_part_92, i.crypto_part_93,
+                i.tirage_number, i.package_id, p.name AS product_name,
+                p.description_1, p.description_2, p.description_3
+            FROM items i
+            JOIN orders o ON i.order_id = o.id
+            LEFT JOIN products p ON i.gtin = p.gtin
+            WHERE i.order_id = {order_id};
+            """).format(
+                view_name=base_view_name,
+                order_id=sql.Literal(order_id)
+            )
+            cur.execute(main_view_query)
+            logging.debug("Основное представление успешно создано/обновлено.")
+            
+            logging.debug("Создание/обновление SSCC-представления...")
+            
+            # 3. Проверяем наличие агрегации
+            cur.execute(
+                sql.SQL("SELECT 1 FROM items WHERE order_id = %s AND package_id IS NOT NULL LIMIT 1"),
+                (order_id,)
+            )
+            aggregation_exists = cur.fetchone() is not None
+            logging.debug(f"Проверка наличия агрегации для заказа {order_id}: {aggregation_exists}")
+
+            # 4. Создаем второе представление для SSCC
+            if aggregation_exists:
+                sscc_view_query = sql.SQL("""
+                CREATE OR REPLACE VIEW {view_name} AS
+                WITH RECURSIVE package_hierarchy AS (
+                    SELECT
+                        p.id as base_box_id, p.id as package_id, p.level, p.sscc, p.parent_id
+                    FROM packages p
+                    WHERE p.level = 1 AND p.id IN (
+                        SELECT DISTINCT i.package_id
+                        FROM items i
+                        WHERE i.order_id = {order_id} AND i.package_id IS NOT NULL
+                    )
+                    UNION ALL
+                    SELECT ph.base_box_id, p_parent.id as package_id, p_parent.level, p_parent.sscc, p_parent.parent_id
+                    FROM package_hierarchy ph JOIN packages p_parent ON ph.parent_id = p_parent.id
+                ),
+                boxes_view AS (
+                    SELECT
+                        base_box_id AS id_level_1,
+                        MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1,
+                        MAX(CASE WHEN level = 2 THEN package_id END) AS id_level_2,
+                        MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2,
+                        MAX(CASE WHEN level = 3 THEN package_id END) AS id_level_3,
+                        MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
+                    FROM package_hierarchy
+                    GROUP BY base_box_id
+                )
+                SELECT * FROM boxes_view;
+                """).format(
+                    view_name=sscc_view_name,
+                    order_id=sql.Literal(order_id)
+                )
+            else:
+                # Пустое представление, если агрегации нет
+                sscc_view_query = sql.SQL("""
+                CREATE OR REPLACE VIEW {view_name} AS
+                SELECT NULL::integer AS id_level_1, NULL::varchar AS sscc_level_1, NULL::integer AS id_level_2,
+                       NULL::varchar AS sscc_level_2, NULL::integer AS id_level_3, NULL::varchar AS sscc_level_3
+                WHERE 1=0;
+                """).format(view_name=sscc_view_name)
+
+            cur.execute(sscc_view_query)
+            logging.debug("SSCC-представление успешно создано/обновлено.")
+
+        conn.commit()
+        logging.info(f"Представления для заказа №{order_id} успешно созданы/обновлены.")
+        return {"success": True, "message": f"Представления для заказа №{order_id} успешно созданы/обновлены."}
+    except Exception as e:
+        logging.error(f"Ошибка при создании представлений для заказа {order_id}: {e}", exc_info=True)
+        if conn: conn.rollback()
+        return {"success": False, "message": f"Ошибка при создании представлений: {e}"}
+
 def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
     """
     Выполняет импорт кодов из JSON-поля в dmkod_aggregation_details и их агрегацию.
@@ -77,7 +190,7 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
     conn = None
 
     try:
-        conn = PrintingService._get_client_db_connection(user_info)
+        conn = get_client_db_connection(user_info)
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # 1. Получаем все строки детализации с кодами для этого заказа
             cur.execute("""
