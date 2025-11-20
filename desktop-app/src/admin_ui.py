@@ -3302,7 +3302,7 @@ class AdminWindow(tk.Tk):
                 comments_text.pack(fill=tk.X, pady=2)
 
                 # --- ИЗМЕНЕНИЕ: Универсальная функция сохранения ---
-                def _save_general_info_from_panel():
+                def _save_general_info_from_panel(show_success_message=True):
                     try:
                         selected_pg_name = product_group_var.get()
                         selected_pg = next((pg for pg in all_product_groups if pg['display_name'] == selected_pg_name), None)
@@ -3314,7 +3314,8 @@ class AdminWindow(tk.Tk):
                             'comments': comments_text.get('1.0', 'end-1c')
                         }
                         service.update_notification(notification_id, data_to_save)
-                        messagebox.showinfo("Успех", "Данные уведомления успешно обновлены.", parent=self)
+                        if show_success_message:
+                            messagebox.showinfo("Успех", "Данные уведомления успешно обновлены.", parent=self)
                         refresh_all()
                         return True # Возвращаем успех
                     except Exception as e:
