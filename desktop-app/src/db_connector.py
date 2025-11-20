@@ -295,6 +295,8 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
         conn = psycopg2.connect(**conn_params)
         logging.debug(f"Успешное подключение к БД: host={conn_params['host']}, port={conn_params['port']}, dbname={conn_params['dbname']}")
         return conn
+        logging.debug(f"Успешное тестовое подключение к БД: host={conn_params['host']}, dbname={conn_params['dbname']}")
+        yield conn # Используем yield для передачи управления
     except psycopg2.OperationalError as e:
         logging.warning(f"Ошибка подключения к БД: {e}")
         raise # Перебрасываем ошибку, чтобы вызывающий код мог ее обработать

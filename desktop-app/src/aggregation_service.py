@@ -87,7 +87,7 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
             client_name = order_info[0]
 
             # Очистка имен для SQL
-            base_view_name_str = f"{client_name}_{order_id}"
+            base_view_name_str = f"{client_name[:10]}_{order_id}"
             sanitized_name = re.sub(r'[^\w]', '_', base_view_name_str)
             sanitized_name = re.sub(r'_+', '_', sanitized_name).strip('_')
             
