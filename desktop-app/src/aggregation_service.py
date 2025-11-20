@@ -75,9 +75,10 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
     """
     logging.info(f"Начало создания представлений для заказа ID: {order_id}")
     conn = None
+    # --- ИСПРАВЛЕНИЕ: Объединяем with-блоки, чтобы соединение не закрывалось преждевременно ---
     try:
         # Используем get_client_db_connection из текущего модуля
-        with get_client_db_connection(user_info) as conn, conn.cursor() as cur:
+        with get_client_db_connection(user_info) as conn:
             # 1. Получаем информацию о заказе и формируем имена
             cur.execute("SELECT client_name FROM orders WHERE id = %s", (order_id,))
             order_info = cur.fetchone()
