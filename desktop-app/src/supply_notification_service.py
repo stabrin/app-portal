@@ -314,6 +314,20 @@ class SupplyNotificationService:
 
     def process_formalized_file(self, notification_id, file_data):
         """Обрабатывает загруженный файл с детализацией."""
+        # --- НОВЫЙ БЛОК: Получаем сценарий обработки ---
+        post_processing_mode = ""
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT s.scenario_data
+                    FROM ap_supply_notifications n
+                    JOIN ap_marking_scenarios s ON n.scenario_id = s.id
+                    WHERE n.id = %s
+                """, (notification_id,))
+                scenario_info = cur.fetchone()
+                if scenario_info and scenario_info.get('scenario_data'):
+                    post_processing_mode = scenario_info['scenario_data'].get('post_processing')
+
         # --- ИЗМЕНЕНИЕ: Читаем все колонки как строки, чтобы избежать авто-преобразования pandas ---
         df = pd.read_excel(io.BytesIO(file_data), dtype=str, engine='openpyxl')
         df.columns = [col.strip().lower() for col in df.columns]
@@ -321,6 +335,12 @@ class SupplyNotificationService:
         details_to_insert = []
         for _, row in df.iterrows():
             # 1. Дата производства: если пустая, ставим текущую
+            # --- НОВЫЙ БЛОК: Контроль GTIN ---
+            gtin = str(row.get('gtin', '')).strip()
+            if len(gtin) == 13:
+                gtin = '0' + gtin
+            # --- КОНЕЦ НОВОГО БЛОКА ---
+
             prod_date = pd.to_datetime(row.get('дата производства'), errors='coerce')
             if pd.isna(prod_date):
                 prod_date = pd.Timestamp.now()
@@ -348,14 +368,46 @@ class SupplyNotificationService:
 
             details_to_insert.append((
                 notification_id,
-                str(row.get('gtin', '')),
+                gtin,
                 int(quantity),
                 int(aggregation),
                 prod_date.date(),
                 int(shelf_life_months) if pd.notna(shelf_life_months) else None,
                 exp_date.date() if pd.notna(exp_date) else None
             ))
+        
+        # --- НОВЫЙ БЛОК: Специальная логика для "Внешнего ПО" ---
+        if post_processing_mode == "Внешнее ПО":
+            logging.info("Активирована специальная логика для сценария 'Внешнее ПО'.")
+            if not details_to_insert:
+                # Если после парсинга ничего нет, просто выходим
+                return 0
 
+            # Создаем DataFrame из обработанных данных
+            processed_df = pd.DataFrame(details_to_insert, columns=[
+                'notification_id', 'gtin', 'quantity', 'aggregation', 
+                'production_date', 'shelf_life_months', 'expiry_date'
+            ])
+
+            # Группируем по GTIN и сроку годности, суммируем количество
+            grouped_df = processed_df.groupby(['gtin', 'expiry_date']).agg(
+                quantity=('quantity', 'sum'),
+                aggregation=('aggregation', 'first'), # Берем агрегацию из первой встреченной строки
+                production_date=('production_date', 'first'),
+                shelf_life_months=('shelf_life_months', 'first'),
+                notification_id=('notification_id', 'first')
+            ).reset_index()
+
+            # Проверяем на дубликаты GTIN после группировки
+            if grouped_df['gtin'].duplicated().any():
+                raise ValueError("В детализации есть несколько одинаковых товаров с разными сроками годности")
+
+            # Преобразуем сгруппированный DataFrame обратно в список кортежей для загрузки
+            details_to_insert = [tuple(x) for x in grouped_df[[
+                'notification_id', 'gtin', 'quantity', 'aggregation', 
+                'production_date', 'shelf_life_months', 'expiry_date'
+            ]].to_numpy()]
+        
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM ap_supply_notification_details WHERE notification_id = %s", (notification_id,))
