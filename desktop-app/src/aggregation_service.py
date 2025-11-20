@@ -77,8 +77,7 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
     conn = None
     try:
         # Используем get_client_db_connection из текущего модуля
-        conn = get_client_db_connection(user_info)
-        with conn.cursor() as cur:
+        with get_client_db_connection(user_info) as conn, conn.cursor() as cur:
             # 1. Получаем информацию о заказе и формируем имена
             cur.execute("SELECT client_name FROM orders WHERE id = %s", (order_id,))
             order_info = cur.fetchone()
