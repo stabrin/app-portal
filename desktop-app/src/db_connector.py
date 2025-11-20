@@ -302,10 +302,7 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
         # --- ИЗМЕНЕНИЕ: Контекстный менеджер сам закроет соединение ---
         if conn:
             yield conn
-            conn.close()
-        else:
-            yield None
-            
+            conn.close() # Закрываем соединение после выхода из блока with
         if temp_cert_file and os.path.exists(temp_cert_file):
             try:
                 os.remove(temp_cert_file)
