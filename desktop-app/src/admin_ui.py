@@ -3371,8 +3371,12 @@ class AdminWindow(tk.Tk):
                 ttk.Button(buttons_frame, text="Сохранить изменения", command=_save_general_info_from_panel).pack(side=tk.LEFT, padx=(0, 5))
 
                 # --- ИЗМЕНЕНИЕ: Кнопка доступна, только если детализация загружена (статус 'Ожидание') ---
-                if notification_data.get('status') == 'Ожидание':
-                    ttk.Button(buttons_frame, text="Создать/Обновить заказ", command=_save_and_create_order).pack(side=tk.LEFT)
+                status = notification_data.get('status')
+                if status == 'Ожидание':
+                    ttk.Button(buttons_frame, text="Создать заказ", command=_save_and_create_order).pack(side=tk.LEFT)
+                elif status == 'Заказ создан':
+                    ttk.Button(buttons_frame, text="Обновить заказ", command=_save_and_create_order).pack(side=tk.LEFT)
+                # Если статус 'Проект' или любой другой, кнопка не будет создана
 
                 # Вкладка "Документы"
                 docs_frame = ttk.Frame(editor_notebook, padding=5)
