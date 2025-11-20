@@ -190,8 +190,7 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
     conn = None
 
     try:
-        conn = get_client_db_connection(user_info)
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with get_client_db_connection(user_info) as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
             # 1. Получаем все строки детализации с кодами для этого заказа
             cur.execute("""
                 SELECT gtin, api_codes_json, aggregation_level, api_id
