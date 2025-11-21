@@ -4359,6 +4359,7 @@ class ScenarioEditorDialog(tk.Toplevel):
         self.title("Редактор сценария маркировки")
         self.transient(parent)
         self.grab_set()
+        self.result = None
         self.widgets = {}
 
         # Инициализация данных
