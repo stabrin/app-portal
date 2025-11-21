@@ -1523,6 +1523,13 @@ class ApiIntegrationFrame(ttk.Frame):
             for btn in all_buttons:
                 btn.pack_forget()
  
+            # --- НОВАЯ ЛОГИКА: Если отчет подготовлен, скрываем все кнопки ---
+            if api_status == 'Отчет подготовлен':
+                # Оставляем только текстовое поле с ответом API, чтобы была видна история
+                # Можно добавить сюда Label с сообщением о завершении работы
+                self._display_api_response(200, "Работа с заказом в АПИ завершена. Отчет об использовании кодов подготовлен.")
+                return
+
             # --- НОВАЯ ЛОГИКА: Если заказ еще не в API, показываем только одну кнопку ---
             if not api_order_id or not api_status:
                 self.request_codes_btn.pack(side=tk.LEFT, padx=2)
@@ -3807,6 +3814,13 @@ class AdminWindow(tk.Tk):
                 # Для стандартного редактора передаем колонки и pk_field
                 dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
 
+            # --- НОВЫЙ БЛОК: Добавляем callback для кнопки "Применить" ---
+            if isinstance(dialog, ScenarioEditorDialog):
+                def apply_callback(data_to_save):
+                    service_methods['upsert'](data_to_save)
+                    messagebox.showinfo("Применено", "Изменения успешно сохранены.", parent=dialog)
+                dialog.on_apply_callback = apply_callback
+
 
             self.wait_window(dialog)
             if dialog.result:
@@ -4290,8 +4304,9 @@ class ScenarioEditorDialog(tk.Toplevel):
         # Кнопки
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill="x", pady=(15, 0))
-        ttk.Button(button_frame, text="Сохранить", command=self._on_ok).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
+        ttk.Button(button_frame, text="Сохранить и закрыть", command=self._on_ok).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Применить", command=self._apply_changes).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT, padx=5)
 
         self._on_type_change() # Первоначальная настройка видимости
 
