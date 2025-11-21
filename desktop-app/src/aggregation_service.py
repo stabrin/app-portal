@@ -197,6 +197,7 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
 
     try:
         with get_client_db_connection(user_info) as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+                logging.debug(f"Получено соединение с БД и курсор для заказа ID: {order_id}")
             # 1. Получаем все строки детализации с кодами для этого заказа
             query = """
                 SELECT gtin, api_codes_json, aggregation_level, api_id
