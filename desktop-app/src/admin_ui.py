@@ -37,6 +37,7 @@ from datetime import datetime
 import traceback
 import base64
 import zlib, base64 # Для сжатия данных QR-кода (оставляем один раз)
+from tkinter import font
 
 def open_label_editor_window(parent_widget, user_info):
     """
@@ -3014,16 +3015,68 @@ class AdminWindow(tk.Tk):
         # --- Индикатор статуса API ---
         self.api_status_indicator = tk.Canvas(self, width=16, height=16, highlightthickness=0, relief='flat')
         self.api_status_indicator.pack(side=tk.RIGHT, padx=10)
+        self.api_status_indicator.bind("<Double-1>", self._force_refresh_api_token)
+        
+        # --- НОВЫЙ БЛОК: Всплывающая подсказка для индикатора ---
+        self.tooltip = None
+        self.api_status_indicator.bind("<Enter>", self._show_tooltip)
+        self.api_status_indicator.bind("<Leave>", self._hide_tooltip)
+        
         self.update_api_status()
+
+    def _show_tooltip(self, event):
+        """Показывает всплывающую подсказку."""
+        if self.tooltip: return
+        x, y, _, _ = self.api_status_indicator.bbox("all")
+        x += self.api_status_indicator.winfo_rootx() + 20
+        y += self.api_status_indicator.winfo_rooty() - 10
+        
+        self.tooltip = tk.Toplevel(self)
+        self.tooltip.wm_overrideredirect(True)
+        self.tooltip.wm_geometry(f"+{x}+{y}")
+        
+        label = tk.Label(self.tooltip, text="Двойной клик для обновления токена",
+                         background="#ffffe0", relief="solid", borderwidth=1,
+                         font=("tahoma", "8", "normal"))
+        label.pack()
+
+    def _hide_tooltip(self, event):
+        """Скрывает всплывающую подсказку."""
+        if self.tooltip:
+            self.tooltip.destroy()
+            self.tooltip = None
 
     def check_api_token(self):
         """Проверяет валидность API-токена."""
+        # --- ИЗМЕНЕНИЕ: Возвращаем False, если нет конфигурации API ---
+        if not self.user_info.get('client_api_config', {}).get('api_base_url'): return False
         try:
             api_service = ApiService(self.user_info)
             api_service.get_participants()
             return True
         except Exception:
             return False
+
+    def _force_refresh_api_token(self, event=None):
+        """
+        Принудительно обновляет токен авторизации API и статус индикатора.
+        Вызывается по двойному клику.
+        """
+        logging.info("Принудительное обновление токена API по двойному клику...")
+        try:
+            api_service = ApiService(self.user_info)
+            # Вызываем публичный метод для обновления токена
+            success = api_service.refresh_token()
+            if success:
+                messagebox.showinfo("Успех", "Токен авторизации API успешно обновлен.", parent=self)
+            else:
+                # refresh_token() сам вызовет исключение, но на всякий случай
+                messagebox.showwarning("Ошибка", "Не удалось обновить токен. Возможно, требуется перезапуск приложения.", parent=self)
+            # Обновляем цвет индикатора
+            self._set_api_status_color(success)
+        except Exception as e:
+            messagebox.showerror("Ошибка обновления токена", f"Произошла ошибка: {e}", parent=self)
+            self._set_api_status_color(False)
 
     def update_api_status(self):
         """Обновляет индикатор статуса API."""
@@ -3042,6 +3095,7 @@ class AdminWindow(tk.Tk):
         self.after(0, self._set_api_status_color, is_valid)
         
         # --- УЛУЧШЕНИЕ: Запускаем следующую проверку через 600 секунд ---
+        # --- ИСПРАВЛЕНИЕ: Убираем повторный вызов, чтобы избежать рекурсии ---
         self.after(600000, self.update_api_status)
 
     def _set_api_status_color(self, is_valid):

@@ -31,7 +31,7 @@ class ApiService:
             raise ConnectionError("Отсутствует токен доступа к API.")
         return {'Authorization': f'Bearer {access_token}'}
 
-    def _refresh_token(self):
+    def refresh_token(self):
         """Обновляет access и refresh токены, используя текущий refresh токен."""
         refresh_token = self.user_info.get('api_refresh_token')
         if not refresh_token:
@@ -65,7 +65,7 @@ class ApiService:
             return response
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401: # Unauthorized
-                self._refresh_token()
+                self.refresh_token()
                 headers = self._get_auth_headers() # Получаем новые заголовки
                 return requests.request(method, url, headers=headers, **kwargs)
             raise # Перебрасываем другие HTTP ошибки
