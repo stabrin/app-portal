@@ -79,13 +79,16 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
     try:
         # Используем get_client_db_connection из текущего модуля
         with get_client_db_connection(user_info) as conn, conn.cursor() as cur:
+                logging.debug(f"Получено соединение с БД и курсор для заказа ID: {order_id}")
                 # 1. Получаем информацию о заказе и формируем имена
                 cur.execute("SELECT client_name FROM orders WHERE id = %s", (order_id,))
                 order_info = cur.fetchone()
                 if not order_info:
                     logging.error(f"Заказ с ID {order_id} не найден в БД при создании представлений.")
                     return {"success": False, "message": f"Заказ с ID {order_id} не найден."}
+
                 client_name = order_info[0]
+                logging.debug(f"Для заказа ID: {order_id} получен client_name: '{client_name}'")
 
                 # Очистка имен для SQL
                 base_view_name_str = f"{client_name[:10]}_{order_id}"
@@ -114,6 +117,7 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
                     view_name=base_view_name,
                     order_id=sql.Literal(order_id)
                 )
+                logging.debug(f"Запрос для основного представления:\n{main_view_query.as_string(conn)}")
                 cur.execute(main_view_query)
                 logging.debug("Основное представление успешно создано/обновлено.")
                 
@@ -168,12 +172,14 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
                            NULL::varchar AS sscc_level_2, NULL::integer AS id_level_3, NULL::varchar AS sscc_level_3
                     WHERE 1=0;
                     """).format(view_name=sscc_view_name)
+                    logging.debug(f"Агрегация не найдена. Будет создано пустое SSCC-представление.")
 
+                logging.debug(f"Запрос для SSCC-представления:\n{sscc_view_query.as_string(conn)}")
                 cur.execute(sscc_view_query)
                 logging.debug("SSCC-представление успешно создано/обновлено.")
 
         conn.commit()
-        logging.info(f"Представления для заказа №{order_id} успешно созданы/обновлены.")
+        logging.info(f"Представления для заказа №{order_id} успешно созданы/обновлены. Транзакция зафиксирована.")
         return {"success": True, "message": f"Представления для заказа №{order_id} успешно созданы/обновлены."}
     except Exception as e:
         logging.error(f"Ошибка при создании представлений для заказа {order_id}: {e}", exc_info=True)
