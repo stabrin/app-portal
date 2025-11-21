@@ -3281,6 +3281,57 @@ class AdminWindow(tk.Tk):
         # Сохраняем ссылку на функцию обновления для этой вкладки
         self.refresh_supply_notice_tab = refresh_all
 
+        # --- НОВЫЙ БЛОК: Виджеты для фильтрации ---
+        filter_frame = ttk.Frame(left_pane)
+        filter_frame.pack(fill=tk.X, pady=(5,0), padx=5)
+
+        # Фильтр по клиенту
+        ttk.Label(filter_frame, text="Клиент:").pack(side=tk.LEFT, padx=(0, 5))
+        client_filter_var = tk.StringVar()
+        client_filter_combo = ttk.Combobox(filter_frame, textvariable=client_filter_var, state="readonly", width=30)
+        client_filter_combo.pack(side=tk.LEFT, padx=5)
+
+        # Поиск по тексту
+        ttk.Label(filter_frame, text="Поиск:").pack(side=tk.LEFT, padx=(10, 5))
+        search_filter_var = tk.StringVar()
+        search_filter_entry = ttk.Entry(filter_frame, textvariable=search_filter_var, width=30)
+        search_filter_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # --- НОВЫЙ БЛОК: Логика фильтрации ---
+        all_notifications_cache = []
+
+        def apply_filters(*args):
+            """Фильтрует и отображает уведомления на основе значений в полях фильтра."""
+            client_query = client_filter_var.get()
+            search_query = search_filter_var.get().lower()
+
+            tree.delete(*tree.get_children()) # Очищаем таблицу
+
+            filtered_data = all_notifications_cache
+            if client_query and client_query != "Все клиенты":
+                filtered_data = [n for n in filtered_data if n.get('client_name') == client_query]
+
+            if search_query:
+                # Ищем в нескольких полях: сценарий, клиент, номер ТС, статус
+                filtered_data = [
+                    n for n in filtered_data
+                    if search_query in str(n.get('scenario_name', '')).lower() or
+                       search_query in str(n.get('client_name', '')).lower() or
+                       search_query in str(n.get('vehicle_number', '')).lower() or
+                       search_query in str(n.get('status', '')).lower()
+                ]
+
+            # Заполняем таблицу отфильтрованными данными
+            for n in filtered_data:
+                pg_list = n.get('product_groups', [])
+                pg_names = ", ".join([pg.get('name', '') for pg in pg_list]) if pg_list else ''
+                values = (
+                    n['id'], n['scenario_name'], n['client_name'], pg_names,
+                    n['planned_arrival_date'], n['vehicle_number'], n['status'],
+                    n['positions_count'], n['dm_count']
+                )
+                tree.insert('', 'end', iid=n['id'], values=values, tags=(n['status'],))
+
         def populate_editor_pane(notification_id):
             """Заполняет правую панель данными выбранного уведомления."""
             # Очищаем правую панель
@@ -3950,6 +4001,40 @@ class AdminWindow(tk.Tk):
             # --- Заполнение левой панели (таблица заказов и ее элементы управления) ---
             order_controls_frame = ttk.Frame(left_pane)
             order_controls_frame.pack(fill=tk.X, padx=5, pady=5)
+
+            # --- НОВЫЙ БЛОК: Виджеты фильтрации для заказов ---
+            order_filter_frame = ttk.Frame(left_pane)
+            order_filter_frame.pack(fill=tk.X, padx=5, pady=5)
+
+            ttk.Label(order_filter_frame, text="Клиент:").pack(side=tk.LEFT, padx=(0, 5))
+            order_client_filter_var = tk.StringVar()
+            order_client_filter_combo = ttk.Combobox(order_filter_frame, textvariable=order_client_filter_var, state="readonly", width=30)
+            order_client_filter_combo.pack(side=tk.LEFT, padx=5)
+
+            ttk.Label(order_filter_frame, text="Поиск:").pack(side=tk.LEFT, padx=(10, 5))
+            order_search_filter_var = tk.StringVar()
+            order_search_filter_entry = ttk.Entry(order_filter_frame, textvariable=order_search_filter_var, width=30)
+            order_search_filter_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            # --- НОВЫЙ БЛОК: Кэш и функция фильтрации для заказов ---
+            all_orders_cache = []
+
+            def apply_order_filters(*args):
+                client_query = order_client_filter_var.get()
+                search_query = order_search_filter_var.get().lower()
+
+                tree.delete(*tree.get_children())
+                filtered_data = [o for o in all_orders_cache if (not client_query or client_query == "Все клиенты" or o.get('client_name') == client_query) and (not search_query or search_query in str(o.get('client_name', '')).lower() or search_query in str(o.get('notes', '')).lower() or search_query in str(o.get('status', '')).lower())]
+
+                for order in filtered_data:
+                    client_display = f"{order['client_name']} заказ № {order['id']}"
+                    values = (order['order_date'], client_display, order['status'], order['notes'])
+                    tag = ''
+                    if order['api_status'] == 'Отчет подготовлен': tag = 'pink_row'
+                    elif order['api_status'] == 'Коды скачаны': tag = 'green_row'
+                    elif order['api_status'] == 'Запрос создан': tag = 'yellow_row'
+                    elif order['status'] == 'completed': tag = 'blue_row'
+                    tree.insert('', 'end', iid=order['id'], values=values, tags=(tag,))
  
             cols = ('date', 'client', 'status', 'notes')
             tree = ttk.Treeview(left_pane, columns=cols, show='headings')
@@ -3997,24 +4082,22 @@ class AdminWindow(tk.Tk):
             def load_data():
                 on_order_select() # Сбрасываем состояние кнопок при обновлении
                 # (логика загрузки данных остается прежней)
-                for i in tree.get_children(): tree.delete(i)
+                nonlocal all_orders_cache
                 try:
                     with get_client_db_connection(self.user_info) as conn:
                         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                             status_filter = "status LIKE 'Архив%%'" if is_archive else "status NOT LIKE 'Архив%%'"
                             query = f"SELECT id, client_name, order_date, status, notes, api_status FROM orders WHERE {status_filter} ORDER BY id DESC"
                             cur.execute(query)
-                            for order in cur.fetchall():
-                                client_display = f"{order['client_name']} заказ № {order['id']}"
-                                values = (order['order_date'], client_display, order['status'], order['notes'])
-                                tag = ''
-                                if order['api_status'] == 'Отчет подготовлен': tag = 'pink_row'
-                                elif order['api_status'] == 'Коды скачаны': tag = 'green_row'
-                                elif order['api_status'] == 'Запрос создан': tag = 'yellow_row'
-                                elif order['status'] == 'completed': tag = 'blue_row'
-                                tree.insert('', 'end', iid=order['id'], values=values, tags=(tag,))
+                            all_orders_cache = cur.fetchall()
+
+                    # Обновляем список клиентов в фильтре
+                    client_names = sorted(list(set(o['client_name'] for o in all_orders_cache)))
+                    order_client_filter_combo['values'] = ["Все клиенты"] + client_names
+                    apply_order_filters() # Применяем фильтры после загрузки
                 except Exception as e:
                     messagebox.showerror("Ошибка", f"Не удалось загрузить заказы: {e}", parent=parent)
+
 
             def move_to_archive(order_id, current_status):
                 # (логика архивации остается прежней)
@@ -4126,6 +4209,10 @@ class AdminWindow(tk.Tk):
 
             # --- Заполнение элементов управления над таблицей ---
             ttk.Button(order_controls_frame, text="Обновить", command=load_data).pack(side=tk.LEFT)
+
+            # Привязываем события к фильтрам
+            order_client_filter_var.trace_add("write", apply_order_filters)
+            order_search_filter_var.trace_add("write", apply_order_filters)
 
             # --- Заполнение нижней панели (статистика) ---
             ttk.Label(bottom_pane, text="Раздел статистики в разработке.").pack(expand=True)
