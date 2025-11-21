@@ -240,15 +240,17 @@ def get_client_db_connection(user_info: Dict[str, Any]):
     client_pool = get_client_pool(pool_key, db_config) # Получаем или создаем пул
     conn = None
     try:
+        # 1. Получаем соединение из пула
         conn = client_pool.getconn()
         logging.debug(f"Соединение {id(conn)} получено из пула клиента (ключ: {pool_key}).")
-        yield conn # Передаем соединение в блок 'with'
+        # 2. Передаем управление в блок 'with'
+        yield conn 
     except psycopg2.OperationalError as e:
         logging.error(f"Не удалось получить соединение из пула клиента (ключ: {pool_key}): {e}", exc_info=True)
         raise # Перебрасываем ошибку, чтобы приложение могло ее обработать
     finally:
+        # 3. Этот блок выполнится только ПОСЛЕ того, как код внутри 'with' завершится
         if conn:
-            # Этот блок теперь будет выполняться ПОСЛЕ завершения работы блока 'with'
             client_pool.putconn(conn)
             logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
 
