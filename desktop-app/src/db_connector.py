@@ -254,6 +254,46 @@ def get_client_db_connection(user_info: Dict[str, Any]):
             client_pool.putconn(conn)
             logging.debug(f"Соединение {id(conn)} возвращено в пул клиента (ключ: {pool_key}).")
 
+@contextmanager
+def get_client_db_direct_connection(user_info: Dict[str, Any]):
+    """
+    Создает ПРЯМОЕ соединение с БД клиента, минуя пул.
+    Используется для критически важных операций, где есть подозрение на проблемы с пулом.
+    """
+    db_config = user_info.get("client_db_config")
+    if not db_config:
+        raise ValueError("Конфигурация базы данных клиента не предоставлена.")
+
+    # Логика выбора адреса (внешний/внутренний) дублируется из get_client_pool
+    conn_params = None
+    # Попытка 1: Внешний адрес
+    try:
+        external_params = {
+            'host': db_config.get('db_host'), 'port': db_config.get('db_port'), 'dbname': db_config.get('db_name'),
+            'user': db_config.get('db_user'), 'password': db_config.get('db_password'), 'connect_timeout': 5
+        }
+        if all(external_params.values()):
+            with _attempt_db_connection(external_params, db_config.get('db_ssl_cert'), 'verify-full') as conn_test:
+                if conn_test:
+                    conn_params = {**external_params, 'sslmode': 'verify-full', 'sslrootcert': _get_cert_path(db_config.get('db_ssl_cert'))}
+    except Exception: pass
+
+    # Попытка 2: Внутренний адрес
+    if not conn_params:
+        local_params = {
+            'host': db_config.get('local_server_address'), 'port': db_config.get('local_server_port'), 'dbname': db_config.get('db_name'),
+            'user': db_config.get('db_user'), 'password': db_config.get('db_password'), 'connect_timeout': 5
+        }
+        if all(local_params.values()):
+            conn_params = {**local_params, 'sslmode': 'disable'}
+
+    if not conn_params:
+        raise ConnectionError("Не удалось определить параметры для прямого подключения к БД клиента.")
+
+    conn = psycopg2.connect(**conn_params)
+    yield conn
+    conn.close()
+
 def _get_cert_path(ssl_cert_content: Optional[str]) -> Optional[str]:
     """Создает временный файл для сертификата и возвращает путь к нему."""
     if not ssl_cert_content:

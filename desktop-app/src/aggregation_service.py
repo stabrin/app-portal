@@ -8,7 +8,7 @@ from psycopg2.extras import RealDictCursor
 from psycopg2 import sql
 import psycopg2
 
-from .db_connector import get_client_db_connection
+from .db_connector import get_client_db_connection, get_client_db_direct_connection
 from .utils import upsert_data_to_db # Импортируем утилиту
 from .sscc_service import generate_sscc, read_and_increment_counter # Импортируем централизованные функции
 
@@ -78,10 +78,9 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
     # --- ИСПРАВЛЕНИЕ: Объединяем with-блоки, чтобы соединение не закрывалось преждевременно ---
     try:
         # Используем get_client_db_connection из текущего модуля
-        # --- ИСПРАВЛЕНИЕ: Разделяем получение соединения и курсора на вложенные блоки 'with' ---
-        # Это гарантирует, что соединение не закроется преждевременно.
-        with get_client_db_connection(user_info) as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        # --- РЕШЕНИЕ: Используем ПРЯМОЕ подключение, чтобы избежать проблем с пулом ---
+        with get_client_db_direct_connection(user_info) as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur: # RealDictCursor нужен для доступа по имени колонки
                 logging.debug(f"Получено соединение с БД и курсор для заказа ID: {order_id}")
                 # 1. Получаем информацию о заказе и формируем имена
                 cur.execute("SELECT client_name FROM orders WHERE id = %s", (order_id,))
