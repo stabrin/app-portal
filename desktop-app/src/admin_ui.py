@@ -3865,13 +3865,6 @@ class AdminWindow(tk.Tk):
                 # Для стандартного редактора передаем колонки и pk_field
                 dialog = GenericEditorDialog(self, f"Редактор: {title}", columns, item_data, pk_field)
 
-            # --- НОВЫЙ БЛОК: Добавляем callback для кнопки "Применить" ---
-            if isinstance(dialog, ScenarioEditorDialog):
-                def apply_callback(data_to_save):
-                    service_methods['upsert'](data_to_save)
-                    messagebox.showinfo("Применено", "Изменения успешно сохранены.", parent=dialog)
-                dialog.on_apply_callback = apply_callback
-
 
             self.wait_window(dialog)
             if dialog.result:
@@ -4356,11 +4349,11 @@ class ScenarioEditorDialog(tk.Toplevel):
         self.title("Редактор сценария маркировки")
         self.transient(parent)
         self.grab_set()
-        self.result = None
         self.widgets = {}
 
         # Инициализация данных
-        # --- ИСПРАВЛЕНИЕ: Глубокое копирование, чтобы изменения в редакторе не затрагивали кэш ---
+        # --- ИСПРАВЛЕНИЕ: Глубокое копирование, чтобы изменения в редакторе не затрагивали кэш.
+        # Также убираем on_save_callback, так как он больше не нужен. ---
         self.item_data = json.loads(json.dumps(item_data)) if item_data else {}
         self.scenario_data = self.item_data.get('scenario_data', {})
 
@@ -4391,9 +4384,8 @@ class ScenarioEditorDialog(tk.Toplevel):
         # Кнопки
         button_frame = ttk.Frame(main_frame)
         button_frame.pack(fill="x", pady=(15, 0))
-        ttk.Button(button_frame, text="Сохранить и закрыть", command=self._on_ok).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="Применить", command=self._apply_changes).pack(side=tk.RIGHT, padx=5)
-        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Сохранить", command=self._on_ok).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Отмена", command=self.destroy).pack(side=tk.RIGHT)
 
         self._on_type_change() # Первоначальная настройка видимости
 
@@ -4401,40 +4393,52 @@ class ScenarioEditorDialog(tk.Toplevel):
         # Источник кодов ДМ
         ttk.Label(parent, text="Источник кодов ДМ:").pack(anchor="w")
         self.widgets['dm_source'] = tk.StringVar(value=self.scenario_data.get('dm_source', 'Заказ в ДМ.Код'))
-        ttk.Combobox(parent, textvariable=self.widgets['dm_source'], values=['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'], state='readonly').pack(fill="x", pady=(0, 5))
+        dm_source_combo = ttk.Combobox(parent, textvariable=self.widgets['dm_source'], values=['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'], state='readonly')
+        dm_source_combo.pack(fill="x", pady=(0, 5))
 
         # Агрегация
         self.widgets['aggregation_needed'] = tk.BooleanVar(value=self.scenario_data.get('aggregation_needed', False))
-        ttk.Checkbutton(parent, text="Нужна агрегация", variable=self.widgets['aggregation_needed']).pack(anchor="w")
+        agg_check = ttk.Checkbutton(parent, text="Нужна агрегация", variable=self.widgets['aggregation_needed'], command=self._on_options_change)
+        agg_check.pack(anchor="w")
 
         # Источник SSCC
-        ttk.Label(parent, text="Источник кодов SSCC:").pack(anchor="w", pady=(5,0))
+        self.sscc_source_label = ttk.Label(parent, text="Источник кодов SSCC:")
+        self.sscc_source_label.pack(anchor="w", pady=(5,0))
         self.widgets['sscc_source'] = tk.StringVar(value=self.scenario_data.get('sscc_source', 'Генерировать самостоятельно'))
-        ttk.Combobox(parent, textvariable=self.widgets['sscc_source'], values=['Генерировать самостоятельно', 'Предоставит клиент'], state='readonly').pack(fill="x", pady=(0, 5))
+        self.sscc_source_combo = ttk.Combobox(parent, textvariable=self.widgets['sscc_source'], values=['Генерировать самостоятельно', 'Предоставит клиент'], state='readonly')
+        self.sscc_source_combo.pack(fill="x", pady=(0, 5))
 
         # Постобработка
-        ttk.Label(parent, text="Постобработка:").pack(anchor="w")
+        self.post_processing_label = ttk.Label(parent, text="Постобработка:")
+        self.post_processing_label.pack(anchor="w")
         self.widgets['post_processing'] = tk.StringVar(value=self.scenario_data.get('post_processing', 'Печать через Bartender'))
-        ttk.Combobox(parent, textvariable=self.widgets['post_processing'], values=['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'], state='readonly').pack(fill="x", pady=(0, 5))
+        post_processing_combo = ttk.Combobox(parent, textvariable=self.widgets['post_processing'], values=['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'], state='readonly')
+        post_processing_combo.pack(fill="x", pady=(0, 5))
+        post_processing_combo.bind("<<ComboboxSelected>>", self._on_options_change)
 
-        # --- ИСПРАВЛЕНИЕ: Используем общие переменные для доп. опций ---
+        # Дополнительные опции для "Собственный алгоритм"
+        self.custom_algo_frame = ttk.Frame(parent)
+        self.custom_algo_frame.pack(fill="x", padx=(20, 0), pady=5)
         self.widgets['clarify_prod_date'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_date', False))
-        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date']).pack(anchor="w")
+        ttk.Checkbutton(self.custom_algo_frame, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date']).pack(anchor="w")
         self.widgets['clarify_prod_country'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_country', False))
-        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country']).pack(anchor="w")
+        ttk.Checkbutton(self.custom_algo_frame, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country']).pack(anchor="w")
 
     def _create_manual_aggregation_widgets(self, parent):
         # Варианты агрегации
         ttk.Label(parent, text="Варианты агрегации:").pack(anchor="w")
         self.widgets['manual_agg_variant'] = tk.StringVar(value=self.scenario_data.get('manual_agg_variant', 'Агрегация в набор'))
-        ttk.Combobox(parent, textvariable=self.widgets['manual_agg_variant'], values=['Агрегация в набор', 'Агрегация в короб', 'Агрегация в набор а затем в короб'], state='readonly').pack(fill="x", pady=(0, 5))
+        manual_agg_combo = ttk.Combobox(parent, textvariable=self.widgets['manual_agg_variant'], values=['Агрегация в набор', 'Агрегация в короб', 'Агрегация в набор а затем в короб'], state='readonly')
+        manual_agg_combo.pack(fill="x", pady=(0, 5))
+        manual_agg_combo.bind("<<ComboboxSelected>>", self._on_options_change)
 
-        # --- ИСПРАВЛЕНИЕ: Используем те же общие переменные, что и для маркировки ---
-        # Виджеты будут созданы в _create_marking_widgets, здесь мы их просто используем.
-        # Чтобы они не дублировались, мы можем просто перенести их создание в одно место
-        # или, для простоты, просто создать их еще раз, но привязать к тем же переменным.
-        ttk.Checkbutton(parent, text="Уточнить дату производства", variable=self.widgets['clarify_prod_date']).pack(anchor="w")
-        ttk.Checkbutton(parent, text="Уточнить страну производства", variable=self.widgets['clarify_prod_country']).pack(anchor="w")
+        # Дополнительные опции для ручной агрегации
+        self.manual_agg_options_frame = ttk.Frame(parent)
+        self.manual_agg_options_frame.pack(fill="x", padx=(20, 0), pady=5)
+        self.widgets['manual_clarify_prod_date'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_date', False))
+        ttk.Checkbutton(self.manual_agg_options_frame, text="Уточнить дату производства", variable=self.widgets['manual_clarify_prod_date']).pack(anchor="w")
+        self.widgets['manual_clarify_prod_country'] = tk.BooleanVar(value=self.scenario_data.get('clarify_prod_country', False))
+        ttk.Checkbutton(self.manual_agg_options_frame, text="Уточнить страну производства", variable=self.widgets['manual_clarify_prod_country']).pack(anchor="w")
 
     def _on_type_change(self, event=None):
         """Показывает/скрывает фреймы в зависимости от типа сценария."""
@@ -4448,9 +4452,26 @@ class ScenarioEditorDialog(tk.Toplevel):
         else:
             self.marking_frame.pack_forget()
             self.aggregation_frame.pack_forget()
+        self._on_options_change()
+
+    def _on_options_change(self, event=None):
+        """Показывает/скрывает доп. опции в зависимости от выбора."""
+        # Для вкладки "Маркировка"
+        if self.marking_frame.winfo_ismapped():
+            show_sscc = self.widgets['aggregation_needed'].get()
+            self.sscc_source_label.pack(anchor="w", pady=(5,0)) if show_sscc else self.sscc_source_label.pack_forget()
+            self.sscc_source_combo.pack(fill="x", pady=(0, 5)) if show_sscc else self.sscc_source_combo.pack_forget()
+
+            show_custom_algo = self.widgets['post_processing'].get() == 'Собственный алгоритм'
+            self.custom_algo_frame.pack(fill="x", padx=(20, 0), pady=5) if show_custom_algo else self.custom_algo_frame.pack_forget()
+
+        # Для вкладки "Ручная агрегация"
+        if self.aggregation_frame.winfo_ismapped():
+            show_manual_options = self.widgets['manual_agg_variant'].get() == 'Агрегация в набор а затем в короб'
+            self.manual_agg_options_frame.pack(fill="x", padx=(20, 0), pady=5) if show_manual_options else self.manual_agg_options_frame.pack_forget()
 
     def _on_ok(self):
-        """Собирает данные из виджетов и формирует результат."""
+        """Собирает данные из виджетов, формирует результат и закрывает окно."""
         name = self.name_entry.get().strip()
         if not name:
             messagebox.showwarning("Внимание", "Название сценария не может быть пустым.", parent=self)
@@ -4463,15 +4484,15 @@ class ScenarioEditorDialog(tk.Toplevel):
             scenario_data['aggregation_needed'] = self.widgets['aggregation_needed'].get()
             if scenario_data['aggregation_needed']:
                 scenario_data['sscc_source'] = self.widgets['sscc_source'].get()
-            scenario_data['post_processing'] = self.widgets['post_processing'].get()
-            if scenario_data['post_processing'] == 'Собственный алгоритм':
-                scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date'].get()
-                scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country'].get()
+            scenario_data['post_processing'] = self.widgets['post_processing'].get() # Сохраняем всегда
+            # Сохраняем доп. опции, даже если они не видны
+            scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date'].get()
+            scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country'].get()
 
         elif scenario_data['type'] == 'Ручная агрегация':
             scenario_data['manual_agg_variant'] = self.widgets['manual_agg_variant'].get()
-            scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date'].get()
-            scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country'].get()
+            scenario_data['clarify_prod_date'] = self.widgets['manual_clarify_prod_date'].get()
+            scenario_data['clarify_prod_country'] = self.widgets['manual_clarify_prod_country'].get()
 
         self.result = {
             'id': self.item_data.get('id'),
