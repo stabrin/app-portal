@@ -3270,9 +3270,15 @@ class AdminWindow(tk.Tk):
                         n['planned_arrival_date'], n['vehicle_number'], n['status'],
                         n['positions_count'], n['dm_count'], "..."
                     )
-                    tree.insert('', 'end', iid=n['id'], values=values, tags=(n['status'],))
+                nonlocal all_notifications_cache
+                all_notifications_cache = notifications
+                # Обновляем список клиентов в фильтре
+                client_names = sorted(list(set(n['client_name'] for n in all_notifications_cache)))
+                client_filter_combo['values'] = ["Все клиенты"] + client_names
+                apply_filters() # Применяем фильтры после загрузки
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось загрузить уведомления: {e}", parent=self)
+
 
         def refresh_all():
             refresh_notifications()
@@ -3691,6 +3697,10 @@ class AdminWindow(tk.Tk):
         # tree.bind("<Button-3>", show_context_menu) # Правый клик
         tree.bind("<Double-1>", lambda event: open_notification_editor(tree.focus())) # Двойной клик
         tree.bind("<<TreeviewSelect>>", on_tree_select) # Выбор элемента
+
+        # Привязываем события к фильтрам
+        client_filter_var.trace_add("write", apply_filters)
+        search_filter_var.trace_add("write", apply_filters)
 
         refresh_all()
 
