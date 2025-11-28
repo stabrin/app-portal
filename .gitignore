@@ -39,3 +39,8 @@ api_tests/
 
 # Игнорировать SQL дампы
 dump_*.sql
+
+# Папки сборки
+build/
+dist/
+*.spec
