@@ -95,3 +95,8 @@ git remote set-url origin https://stabrin:<ВАШ_PERSONAL_ACCESS_TOKEN>@github.
 git push origin main --force
 git remote set-url origin https://github.com/stabrin/app-portal.git
 
+Сбросить все установленные библиотеки в requirements.txt
+`pip freeze > requirements.txt`
+Устаносить бмблиотеки
+`pip install -r requirements.txt`
+
