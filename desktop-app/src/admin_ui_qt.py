@@ -663,6 +663,31 @@ class AdminWindowQt(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось скачать файл: {e}")
 
+    def delete_notification_doc(self):
+        """Удаляет выбранный документ уведомления."""
+        sel = self.notification_files_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите файл для удаления")
+            return
+
+        try:
+            file_info = self.notification_files_cache[sel]
+            file_id = file_info['id']
+            filename = file_info['filename']
+
+            reply = QMessageBox.question(self, "Подтверждение", f"Вы уверены, что хотите удалить файл '{filename}'?", QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            service.delete_notification_file(file_id)
+            QMessageBox.information(self, "Успех", "Файл успешно удален.")
+            # Обновляем список файлов
+            self.load_notification_files(self.current_notification_id)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {e}")
+
     def save_order_details(self):
         """Сохраняет детализацию заказа."""
         QMessageBox.information(self, "Функция", "Сохранение детализации (в разработке)")
