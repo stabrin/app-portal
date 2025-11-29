@@ -12,6 +12,7 @@ import logging
 
 import pandas as pd
 from .db_connector import get_client_db_connection
+from .catalogs_service import CatalogsService
 from .supply_notification_service import SupplyNotificationService
 import psycopg2
 import psycopg2.extras
@@ -536,7 +537,12 @@ class AdminWindowQt(QMainWindow):
 
     def create_new_notification(self):
         """Создает новое уведомление о поставке."""
-        QMessageBox.information(self, "Функция", "Создание нового уведомления (в разработке)")
+        # ИСПРАВЛЕНИЕ: Заменяем заглушку на вызов диалогового окна
+        dialog = NotificationEditorDialog(self, self.user_info)
+        # exec() открывает диалог модально и возвращает результат (Accepted или Rejected)
+        if dialog.exec():
+            # Если диалог был закрыт через "Сохранить", обновляем список
+            self.load_notifications()
 
     def open_notification_details(self):
         """Открывает детали выбранного уведомления."""
@@ -867,6 +873,121 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось архивировать уведомление: {e}")
+
+
+# --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
+class NotificationEditorDialog(QDialog):
+    def __init__(self, parent, user_info):
+        super().__init__(parent)
+        self.user_info = user_info
+        self.setWindowTitle("Новое уведомление о поставке")
+        self.setMinimumWidth(500)
+
+        # Инициализация сервисов
+        self.service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+        self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+
+        self._build_ui()
+        self._load_catalogs()
+        self._on_scenario_change() # Первичная загрузка клиентов
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        # Сценарий
+        self.scenario_combo = QComboBox()
+        self.scenario_combo.currentIndexChanged.connect(self._on_scenario_change)
+        form_layout.addRow("Сценарий маркировки:", self.scenario_combo)
+
+        # Клиент
+        self.client_combo = QComboBox()
+        form_layout.addRow("Клиент:", self.client_combo)
+
+        # Товарная группа
+        self.product_group_combo = QComboBox()
+        form_layout.addRow("Товарная группа:", self.product_group_combo)
+
+        # Дата прибытия
+        self.arrival_date_edit = QDateEdit(QDate.currentDate())
+        self.arrival_date_edit.setCalendarPopup(True)
+        self.arrival_date_edit.setDisplayFormat("yyyy-MM-dd")
+        form_layout.addRow("Планируемая дата прибытия:", self.arrival_date_edit)
+
+        # Номер ТС
+        self.vehicle_number_edit = QLineEdit()
+        form_layout.addRow("Номер контейнера/ТС:", self.vehicle_number_edit)
+
+        # Комментарии
+        self.comments_edit = QTextEdit()
+        self.comments_edit.setMaximumHeight(80)
+        form_layout.addRow("Комментарии:", self.comments_edit)
+
+        layout.addLayout(form_layout)
+
+        # Кнопки
+        button_box = QHBoxLayout()
+        btn_save = QPushButton("Создать")
+        btn_save.clicked.connect(self.save)
+        btn_cancel = QPushButton("Отмена")
+        btn_cancel.clicked.connect(self.reject)
+        button_box.addStretch()
+        button_box.addWidget(btn_save)
+        button_box.addWidget(btn_cancel)
+        layout.addLayout(button_box)
+
+    def _load_catalogs(self):
+        """Загружает данные для выпадающих списков."""
+        try:
+            self.scenarios = self.catalog_service.get_marking_scenarios()
+            self.scenario_combo.addItems([s['name'] for s in self.scenarios])
+
+            self.product_groups = self.catalog_service.get_product_groups()
+            self.product_group_combo.addItems([pg['display_name'] for pg in self.product_groups])
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить справочники: {e}")
+
+    def _on_scenario_change(self):
+        """Обновляет список клиентов при смене сценария."""
+        selected_scenario_name = self.scenario_combo.currentText()
+        scenario = next((s for s in self.scenarios if s['name'] == selected_scenario_name), None)
+        if not scenario: return
+
+        source = 'api' if scenario.get('scenario_data', {}).get('dm_source') == 'Заказ в ДМ.Код' else 'local'
+        self.client_combo.clear()
+        try:
+            self.clients = self.catalog_service.get_local_clients() if source == 'local' else self.catalog_service.get_participants_catalog()
+            self.client_combo.addItems([c['name'] for c in self.clients])
+            self.client_source = source
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить клиентов: {e}")
+
+    def save(self):
+        """Собирает данные и сохраняет новое уведомление."""
+        try:
+            # Сбор данных
+            scenario = self.scenarios[self.scenario_combo.currentIndex()]
+            client = self.clients[self.client_combo.currentIndex()]
+            pg = self.product_groups[self.product_group_combo.currentIndex()]
+
+            data = {
+                'scenario_id': scenario['id'],
+                'scenario_name': scenario['name'],
+                'client_name': client['name'],
+                'product_groups': [{'id': pg['id'], 'name': pg['display_name']}],
+                'planned_arrival_date': self.arrival_date_edit.date().toString("yyyy-MM-dd"),
+                'vehicle_number': self.vehicle_number_edit.text(),
+                'comments': self.comments_edit.toPlainText(),
+                'client_api_id': client.get('id') if self.client_source == 'api' else None,
+                'client_local_id': client.get('id') if self.client_source == 'local' else None,
+            }
+
+            new_id = self.service.create_notification(data)
+            QMessageBox.information(self, "Успех", f"Уведомление #{new_id} успешно создано.")
+            self.accept() # Закрываем диалог с успешным результатом
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить уведомление: {e}")
 
     def _build_save_config_page(self):
         widget = QWidget()
