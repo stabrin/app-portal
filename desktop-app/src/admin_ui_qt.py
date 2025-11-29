@@ -1015,8 +1015,77 @@ class NotificationEditorDialog(QDialog):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить уведомление: {e}")
 
+    def _build_save_config_page(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Создание файлов конфигурации для мобильного приложения."))
+        layout.addWidget(QLabel("Файлы будут сохранены в каталог, где запущена программа."))
+        btn_export = QPushButton("Сохранить файлы конфигурации")
+        btn_export.clicked.connect(self._save_config_with_default_dir)
+        layout.addWidget(btn_export)
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
+    def _build_save_config_page(self):
+        """Создает страницу для сохранения файлов конфигурации (config.ini, cert.pem)."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20) # Добавим отступы
+
+        info_label1 = QLabel("<h3>Создание файлов конфигурации для мобильного приложения</h3>")
+        info_label1.setWordWrap(True)
+        layout.addWidget(info_label1)
+
+        info_label2 = QLabel(
+            "Будут созданы файлы <b>config.ini</b> и <b>cert.pem</b> с настройками подключения к базе данных этого клиента. "
+            "Сохраните их в удобное место, чтобы передать на мобильное устройство."
+        )
+        info_label2.setWordWrap(True)
+        layout.addWidget(info_label2)
+
+        btn_save = QPushButton("Сохранить файлы конфигурации")
+        btn_save.setFixedSize(250, 40) # Зададим фиксированный размер кнопке
+        btn_save.clicked.connect(self._save_config_files)
+        layout.addWidget(btn_save, 0, Qt.AlignLeft) # Выравниваем кнопку по левому краю
+
+        layout.addStretch() # Добавляем растягивающееся пространство, чтобы прижать все к верху
+        widget.setLayout(layout)
+        return widget
+
+    def _save_config_files(self):
+        """Сохраняет файлы config.ini и cert.pem в выбранную пользователем папку."""
+        save_path = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения файлов конфигурации")
+        if not save_path:
+            return
+
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT setting_key, setting_value FROM ap_settings WHERE setting_key IN ('LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD')")
+                    settings_from_db = {row['setting_key']: row['setting_value'] for row in cur.fetchall()}
+
+            ssl_cert_content = self.user_info.get('client_db_config', {}).get('db_ssl_cert', '')
+
+            def xor_cipher(data, key):
+                return bytes([ord(c) ^ ord(k) for c, k in zip(data, key * (len(data) // len(key) + 1))])
+
+            encryption_key = "TildaKodSecretKey"
+            encrypted_bytes = xor_cipher(settings_from_db['DB_PASSWORD'], encryption_key)
+            encrypted_password_b64 = base64.b64encode(encrypted_bytes).decode('ascii')
+
+            ini_content = f"[database]\nhost = {settings_from_db['LOCAL_SERVER_ADDRESS']}\nport = {settings_from_db['LOCAL_SERVER_PORT']}\ndbname = {settings_from_db['DB_NAME']}\nuser = {settings_from_db['DB_USER']}\npassword = {encrypted_password_b64}"
+
+            with open(os.path.join(save_path, 'config.ini'), 'w', encoding='utf-8') as f:
+                f.write(ini_content)
+            if ssl_cert_content:
+                with open(os.path.join(save_path, 'cert.pem'), 'w', encoding='utf-8') as f:
+                    f.write(ssl_cert_content)
+            QMessageBox.information(self, "Успех", f"Файлы 'config.ini' и 'cert.pem' успешно сохранены в папку:\n{save_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать файлы конфигурации: {e}")
+
     def _build_workplaces_page(self):
-        """Создает страницу для управления складами и рабочими местами."""
         widget = QWidget()
         layout = QVBoxLayout()
 
@@ -1047,8 +1116,91 @@ class NotificationEditorDialog(QDialog):
         widget.setLayout(layout)
         return widget
 
+    @Slot()
+    def _on_menu_clicked(self, item: QTreeWidgetItem, column: int):
+        """Обработчик клика на пункт меню — переключает правую панель."""
+        text = item.text(column)
+        if text == "Управление уведомлениями":
+            try:
+                self.load_notifications()
+            except Exception:
+                logging.exception("Error loading notifications")
+            self.content_stack.setCurrentIndex(self.stack_indices['notifications'])
+        elif text == "Сохранить INI":
+            self.content_stack.setCurrentIndex(self.stack_indices['save_config'])
+        elif text == "Конфигурация складов":
+            try:
+                self.load_warehouses()
+            except Exception:
+                logging.exception("Error loading warehouses")
+            self.content_stack.setCurrentIndex(self.stack_indices['workplaces'])
+        else:
+            self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
+
+    def _save_config_with_default_dir(self):
+        """Сохраняет конфигурацию в каталог программы по умолчанию."""
+        if getattr(sys, 'frozen', False):
+            default_dir = os.path.dirname(sys.executable)
+        else:
+            default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        self.save_config_files(default_dir)
+
+    def save_config_files(self, save_path=None):
+        """Экспортирует конфигурационные файлы из клиентской БД (ap_settings) и сертификат."""
+        if not save_path:
+            save_path = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения файлов конфигурации")
+            if not save_path:
+                return
+
+        try:
+            # 1. Получаем настройки из БД клиента
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT setting_key, setting_value FROM ap_settings
+                        WHERE setting_key IN ('LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD')
+                    """)
+                    rows = cur.fetchall()
+                    settings_from_db = {r['setting_key']: r['setting_value'] for r in rows}
+
+            # 2. Получаем сертификат из user_info
+            ssl_cert_content = self.user_info.get('client_db_config', {}).get('db_ssl_cert', '')
+
+            required_keys = ['LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']
+            if not all(k in settings_from_db for k in required_keys):
+                missing = [k for k in required_keys if k not in settings_from_db]
+                QMessageBox.critical(self, "Ошибка", f"В таблице 'ap_settings' отсутствуют настройки: {', '.join(missing)}")
+                return
+
+            # Простое XOR-шифрование как в оригинале
+            def xor_cipher(data: str, key: str) -> bytes:
+                return bytes([ord(c) ^ ord(k) for c, k in zip(data, (key * (len(data) // len(key) + 1))[:len(data)])])
+
+            encryption_key = "TildaKodSecretKey"
+            encrypted_bytes = xor_cipher(settings_from_db['DB_PASSWORD'], encryption_key)
+            encrypted_password_b64 = base64.b64encode(encrypted_bytes).decode('ascii')
+
+            ini_content = (
+                "[database]\n"
+                f"host = {settings_from_db['LOCAL_SERVER_ADDRESS']}\n"
+                f"port = {settings_from_db['LOCAL_SERVER_PORT']}\n"
+                f"dbname = {settings_from_db['DB_NAME']}\n"
+                f"user = {settings_from_db['DB_USER']}\n"
+                f"password = {encrypted_password_b64}"
+            )
+
+            with open(os.path.join(save_path, 'config.ini'), 'w', encoding='utf-8') as f:
+                f.write(ini_content)
+            if ssl_cert_content:
+                with open(os.path.join(save_path, 'cert.pem'), 'w', encoding='utf-8') as f:
+                    f.write(ssl_cert_content)
+
+            QMessageBox.information(self, "Успех", f"Файлы сохранены в: {save_path}")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать файлы конфигурации: {e}")
+
     def load_warehouses(self):
-        """Загружает данные о складах в таблицу."""
         try:
             self.warehouses_table.setRowCount(0)
             with get_client_db_connection(self.user_info) as conn:
@@ -1076,7 +1228,6 @@ class NotificationEditorDialog(QDialog):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить список складов: {e}")
 
     def create_new_warehouse(self):
-        """Открывает диалоги для создания нового склада."""
         name, ok = QInputDialog.getText(self, "Новый склад", "Введите название нового склада:")
         if not ok or not name:
             return
@@ -1090,14 +1241,68 @@ class NotificationEditorDialog(QDialog):
                     if cur.fetchone():
                         QMessageBox.critical(self, "Ошибка", f"Склад '{name}' уже существует.")
                         return
+                    cur.execute("SELECT COALESCE(MAX(workplace_number), 0) FROM ap_workplaces WHERE warehouse_name = %s", (name,))
+                    max_num = cur.fetchone()[0]
                     for i in range(1, count + 1):
-                        cur.execute("INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)", (name, i))
+                        cur.execute("INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)", (name, max_num + i))
                 conn.commit()
             QMessageBox.information(self, "Успех", f"Склад '{name}' с {count} местами создан")
             self.load_warehouses()
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось создать склад: {e}")
+
+    def change_workplace_count(self):
+        sel = self.warehouses_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите склад")
+            return
+        name = self.warehouses_table.item(sel, 0).text()
+        current = int(self.warehouses_table.item(sel, 1).text())
+        new_count, ok = QInputDialog.getInt(self, "Изменить количество", f"Новое общее количество мест для склада '{name}':", current, 0, 10000)
+        if not ok or new_count == current:
+            return
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    if new_count > current:
+                        to_add = new_count - current
+                        cur.execute("SELECT COALESCE(MAX(workplace_number), 0) FROM ap_workplaces WHERE warehouse_name = %s", (name,))
+                        max_num = cur.fetchone()[0]
+                        for i in range(1, to_add + 1):
+                            cur.execute("INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)", (name, max_num + i))
+                        msg = f"Добавлено {to_add} новых рабочих мест."
+                    else:
+                        to_delete = current - new_count
+                        reply = QMessageBox.question(self, "Подтверждение", f"Удалить {to_delete} рабочих мест со склада '{name}'?", QMessageBox.Yes | QMessageBox.No)
+                        if reply != QMessageBox.Yes:
+                            return
+                        cur.execute("""
+                            DELETE FROM ap_workplaces
+                            WHERE id IN (
+                                SELECT id FROM ap_workplaces
+                                WHERE warehouse_name = %s
+                                ORDER BY workplace_number DESC
+                                LIMIT %s
+                            )
+                        """, (name, to_delete))
+                        msg = f"Удалено {to_delete} рабочих мест."
+                conn.commit()
+            QMessageBox.information(self, "Успех", msg)
+            self.load_warehouses()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось изменить количество мест: {e}")
+
+    def open_workplace_printing_dialog(self):
+        sel = self.warehouses_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите склад для печати")
+            return
+        warehouse_name = self.warehouses_table.item(sel, 0).text()
+        # Пока простой вызов — интеграция печати может потребовать win32, оставим вызов-плейсхолдер
+        QMessageBox.information(self, "Печать", f"Вызов печати этикеток для склада: {warehouse_name}")
+
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
