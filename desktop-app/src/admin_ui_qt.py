@@ -470,6 +470,9 @@ class AdminWindowQt(QMainWindow):
             if not summary_data:
                 return
 
+            # --- НОВЫЙ БЛОК: Инициализация словаря для итогов ---
+            totals = {f"d{i}_{m}": 0 for i in range(4) for m in ['ув', 'поз', 'дм']}
+
             for row_data in summary_data:
                 row = self.summary_table.rowCount()
                 self.summary_table.insertRow(row)
@@ -488,11 +491,44 @@ class AdminWindowQt(QMainWindow):
                         key = f"{day_key}_{metric}"
                         value = row_data.get(key)
                         if value is None: value = 0
+                        
+                        # --- НОВЫЙ БЛОК: Суммируем значения для итогов ---
+                        totals[key] += int(value)
+
                         it = QTableWidgetItem(str(int(value)))
                         it.setFlags(it.flags() & ~Qt.ItemIsEditable)
                         it.setTextAlignment(Qt.AlignCenter)
                         self.summary_table.setItem(row, col_index, it)
                         col_index += 1
+            
+            # --- НОВЫЙ БЛОК: Добавление итоговой строки ---
+            if summary_data:
+                total_row_index = self.summary_table.rowCount()
+                self.summary_table.insertRow(total_row_index)
+                
+                # Настройка шрифта и фона для итоговой строки
+                bold_font = self.summary_table.font()
+                bold_font.setBold(True)
+                total_bg_color = QColor("#E0E0E0") # Светло-серый
+
+                # Ячейка "ИТОГО"
+                total_label_item = QTableWidgetItem("ИТОГО")
+                total_label_item.setFont(bold_font)
+                total_label_item.setBackground(total_bg_color)
+                self.summary_table.setItem(total_row_index, 0, total_label_item)
+
+                # Заполнение итоговых значений
+                total_col_index = 1
+                for i in range(4):
+                    for metric in ['ув', 'поз', 'дм']:
+                        key = f"d{i}_{metric}"
+                        total_value_item = QTableWidgetItem(str(totals[key]))
+                        total_value_item.setFont(bold_font)
+                        total_value_item.setTextAlignment(Qt.AlignCenter)
+                        total_value_item.setBackground(total_bg_color)
+                        self.summary_table.setItem(total_row_index, total_col_index, total_value_item)
+                        total_col_index += 1
+
         except (Exception, psycopg2.Error) as e:
             traceback.print_exc()
             logging.debug(f"Не удалось загрузить сводку: {e}")
