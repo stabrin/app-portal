@@ -1,10 +1,10 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QTextEdit,
-    QLineEdit, QHeaderView,
+    QLineEdit, QHeaderView, QDateEdit,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
 )
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import Qt, Slot, QDate
 from PySide6.QtGui import QColor
 import sys
 import traceback
@@ -321,7 +321,10 @@ class AdminWindowQt(QMainWindow):
         # Правая половина - прочие поля
         right_form = QVBoxLayout()
         right_form.addWidget(QLabel("Планируемая дата прибытия:"))
-        self.notif_arrival_date_input = QLineEdit() # ИСПРАВЛЕНИЕ: QLabel -> QLineEdit
+        # ИСПРАВЛЕНИЕ: Заменяем QLineEdit на QDateEdit с календарем
+        self.notif_arrival_date_input = QDateEdit()
+        self.notif_arrival_date_input.setCalendarPopup(True)
+        self.notif_arrival_date_input.setDisplayFormat("yyyy-MM-dd")
         right_form.addWidget(self.notif_arrival_date_input)
         right_form.addWidget(QLabel("Номер контейнера/ТС:"))
         self.notif_vehicle_input = QLineEdit() # ИСПРАВЛЕНИЕ: QLabel -> QLineEdit
@@ -560,6 +563,8 @@ class AdminWindowQt(QMainWindow):
             
             # Сохраняем текущий ID
             self.current_notification_id = notif_id
+            # --- ИСПРАВЛЕНИЕ: Сохраняем все данные уведомления для последующего использования ---
+            self.current_notification_data = notif_data
             
             # Заполняем поля
             self.notif_scenario_label.setText(notif_data.get('scenario_name', ''))
@@ -571,7 +576,13 @@ class AdminWindowQt(QMainWindow):
             self.notif_product_label.setText(str(product_groups))
             
             self.notif_status_label.setText(notif_data.get('status', ''))
-            self.notif_arrival_date_input.setText(str(notif_data.get('planned_arrival_date', '') or ''))
+            # ИСПРАВЛЕНИЕ: Устанавливаем дату в QDateEdit
+            arrival_date_str = str(notif_data.get('planned_arrival_date', ''))
+            if arrival_date_str:
+                self.notif_arrival_date_input.setDate(QDate.fromString(arrival_date_str, "yyyy-MM-dd"))
+            else:
+                # Если даты нет, ставим сегодняшнюю
+                self.notif_arrival_date_input.setDate(QDate.currentDate())
             self.notif_vehicle_input.setText(notif_data.get('vehicle_number', '') or '')
             self.notif_comments_text.setPlainText(notif_data.get('comments', ''))
             
@@ -647,10 +658,14 @@ class AdminWindowQt(QMainWindow):
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             data_to_save = {
-                'planned_arrival_date': self.notif_arrival_date_input.text() or None,
+                # ИСПРАВЛЕНИЕ: Получаем дату из QDateEdit в нужном формате
+                'planned_arrival_date': self.notif_arrival_date_input.date().toString("yyyy-MM-dd") or None,
                 'vehicle_number': self.notif_vehicle_input.text(),
                 'comments': self.notif_comments_text.toPlainText()
             }
+            # --- ИСПРАВЛЕНИЕ: Добавляем товарные группы из сохраненных данных ---
+            if hasattr(self, 'current_notification_data'):
+                data_to_save['product_groups'] = self.current_notification_data.get('product_groups', [])
             service.update_notification(self.current_notification_id, data_to_save)
             QMessageBox.information(self, "Успех", "Изменения сохранены")
             self.load_notifications()
