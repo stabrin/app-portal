@@ -374,9 +374,9 @@ class ClientEditorDialog(QDialog):
             except Exception: pass
 
             self.cert_text.setPlainText(sslcert or '')
-            
-            # Загружаем пользователей для этого клиента
-            self.load_users_for_editor()
+
+            # Загружаем пользователей для этого клиента, передавая ID
+            self.load_users_for_editor(self.client_id)
         except Exception as e:
             logging.error(f"Ошибка загрузки клиента: {e}\n{traceback.format_exc()}")
             QMessageBox.critical(self, "Ошибка", "Не удалось загрузить данные клиента")
