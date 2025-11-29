@@ -437,9 +437,12 @@ class ClientEditorDialog(QDialog):
         if not self.client_id:
             QMessageBox.warning(self, "Внимание", "Сначала сохраните клиента перед инициализацией базы данных")
             return
+        # --- ИСПРАВЛЕНИЕ: Переносим импорт в начало, чтобы избежать UnboundLocalError ---
+        import psycopg2
         try:
+            # --- ИСПРАВЛЕНИЕ: Используем psycopg2.extras.RealDictCursor ---
             with get_main_db_connection() as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur: # Теперь psycopg2 определен
                     cur.execute("SELECT * FROM clients WHERE id = %s", (self.client_id,))
                     db_data = cur.fetchone()
             if not db_data:
@@ -463,7 +466,6 @@ class ClientEditorDialog(QDialog):
                 ssl_params_check = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file_check}
 
             try:
-                import psycopg2
                 with psycopg2.connect(host=db_host, port=db_port, dbname='postgres', user=db_user, password=db_password, **ssl_params_check) as conn_system:
                     conn_system.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
                     with conn_system.cursor() as cur:
@@ -510,15 +512,16 @@ class ClientEditorDialog(QDialog):
     def _run_ping_test(self):
         try:
             # Формируем конфиг из полей
+            # --- ИСПРАВЛЕНИЕ: Используем правильные имена виджетов (self.port_edit, self.dbname_edit и т.д.) ---
             db_config_from_ui = {
                 'db_host': self.host_edit.text().strip(),
-                'db_port': int(self.port_edit.value() or 5432),
+                'db_port': int(self.port_edit.value()),
                 'db_name': self.dbname_edit.text().strip(),
                 'db_user': self.dbuser_edit.text().strip(),
                 'db_password': self.dbpass_edit.text().strip(),
                 'db_ssl_cert': self.cert_text.toPlainText().strip(),
                 'local_server_address': self.local_server_addr_edit.text().strip(),
-                'local_server_port': int(self.local_server_port_edit.value() or 5432)
+                'local_server_port': int(self.local_server_port_edit.value())
             }
             from .db_connector import _attempt_db_connection
             # Попытка 1: внешний адрес с SSL
