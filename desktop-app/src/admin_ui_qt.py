@@ -301,41 +301,35 @@ class AdminWindowQt(QMainWindow):
         general_tab = QWidget()
         general_layout = QVBoxLayout()
 
-        form_layout = QHBoxLayout()
-        
-        # Левая половина - поля формы
-        left_form = QVBoxLayout()
-        left_form.addWidget(QLabel("Сценарий маркировки:"))
-        self.notif_scenario_label = QLabel("")
-        left_form.addWidget(self.notif_scenario_label)
-        left_form.addWidget(QLabel("Клиент:"))
-        self.notif_client_label = QLabel("")
-        left_form.addWidget(self.notif_client_label)
-        left_form.addWidget(QLabel("Товарная группа:"))
-        self.notif_product_label = QLabel("")
-        left_form.addWidget(self.notif_product_label)
-        left_form.addWidget(QLabel("Статус:"))
-        self.notif_status_label = QLabel("")
-        left_form.addWidget(self.notif_status_label)
+        # ИСПРАВЛЕНИЕ: Заменяем QHBoxLayout на QFormLayout для компоновки "ключ: значение"
+        from PySide6.QtWidgets import QFormLayout
+        form_layout = QFormLayout()
 
-        # Правая половина - прочие поля
-        right_form = QVBoxLayout()
-        right_form.addWidget(QLabel("Планируемая дата прибытия:"))
-        # ИСПРАВЛЕНИЕ: Заменяем QLineEdit на QDateEdit с календарем
+        # Создаем и добавляем виджеты парами
+        self.notif_scenario_label = QLabel("")
+        form_layout.addRow("Сценарий маркировки:", self.notif_scenario_label)
+
+        self.notif_client_label = QLabel("")
+        form_layout.addRow("Клиент:", self.notif_client_label)
+
+        self.notif_product_label = QLabel("")
+        form_layout.addRow("Товарная группа:", self.notif_product_label)
+
+        self.notif_status_label = QLabel("")
+        form_layout.addRow("Статус:", self.notif_status_label)
+
         self.notif_arrival_date_input = QDateEdit()
         self.notif_arrival_date_input.setCalendarPopup(True)
         self.notif_arrival_date_input.setDisplayFormat("yyyy-MM-dd")
-        right_form.addWidget(self.notif_arrival_date_input)
-        right_form.addWidget(QLabel("Номер контейнера/ТС:"))
-        self.notif_vehicle_input = QLineEdit() # ИСПРАВЛЕНИЕ: QLabel -> QLineEdit
-        right_form.addWidget(self.notif_vehicle_input)
-        right_form.addWidget(QLabel("Комментарии:"))
-        self.notif_comments_text = QTextEdit() # QTextEdit уже был правильным
-        self.notif_comments_text.setMaximumHeight(100)
-        right_form.addWidget(self.notif_comments_text)
+        form_layout.addRow("Планируемая дата прибытия:", self.notif_arrival_date_input)
 
-        form_layout.addLayout(left_form)
-        form_layout.addLayout(right_form)
+        self.notif_vehicle_input = QLineEdit()
+        form_layout.addRow("Номер контейнера/ТС:", self.notif_vehicle_input)
+
+        self.notif_comments_text = QTextEdit()
+        self.notif_comments_text.setMaximumHeight(100)
+        form_layout.addRow("Комментарии:", self.notif_comments_text)
+
         general_layout.addLayout(form_layout)
 
         # Кнопки действий
