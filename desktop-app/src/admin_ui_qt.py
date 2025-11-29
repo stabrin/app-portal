@@ -1,25 +1,964 @@
-from PySide6.QtWidgets import QMainWindow, QWidget, QLabel, QVBoxLayout, QApplication
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
+    QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog,
+    QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
+)
+from PySide6.QtCore import Qt, Slot
+from PySide6.QtGui import QColor
 import sys
+import traceback
+import logging
+
+from .db_connector import get_client_db_connection
+from .supply_notification_service import SupplyNotificationService
+import psycopg2
+import psycopg2.extras
+import base64
+import os
 
 
 class AdminWindowQt(QMainWindow):
+    """Переносная версия tkinter админ-интерфейса на PySide6 с левым меню и правой стеком контента."""
     def __init__(self, user_info: dict):
         super().__init__()
         self.user_info = user_info
-        self.setWindowTitle(f"Admin - {user_info.get('name', 'unknown')}")
+        self.setWindowTitle(f"Admin - {user_info.get('name', '')}")
+        self.resize(1200, 700)
         self._build_ui()
 
     def _build_ui(self):
-        central = QWidget()
+        main_widget = QWidget()
+        main_layout = QHBoxLayout()
+
+        # --- LEFT PANEL: TREE MENU (1/5) ---
+        self.menu_tree = QTreeWidget()
+        self.menu_tree.setHeaderLabel("Меню")
+        self.menu_tree.setMaximumWidth(250)
+        self.menu_tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.menu_tree.itemClicked.connect(self._on_menu_clicked)
+
+        # Главные пункты меню
+        item_notifications = QTreeWidgetItem(self.menu_tree, ["Управление уведомлениями"])
+        item_orders = QTreeWidgetItem(self.menu_tree, ["Управление заказами"])
+        item_tasks = QTreeWidgetItem(self.menu_tree, ["Управление задачами"])
+        item_admin = QTreeWidgetItem(self.menu_tree, ["Администрирование"])
+
+        # Подменю "Администрирование"
+        item_admin_config = QTreeWidgetItem(item_admin, ["Конфигурация"])
+        item_admin_print = QTreeWidgetItem(item_admin, ["Управление печатью"])
+        item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
+
+        # Подменю "Конфигурация"
+        item_config_save_ini = QTreeWidgetItem(item_admin_config, ["Сохранить INI"])
+        item_config_workplaces = QTreeWidgetItem(item_admin_config, ["Конфигурация складов"])
+
+        # Сохраняем ссылки для быстрого доступа
+        self.menu_items = {
+            'notifications': item_notifications,
+            'orders': item_orders,
+            'tasks': item_tasks,
+            'admin': item_admin,
+            'config': item_admin_config,
+            'print': item_admin_print,
+            'reports': item_admin_reports,
+            'save_ini': item_config_save_ini,
+            'workplaces': item_config_workplaces,
+        }
+
+        # Меню свернуто по умолчанию (не разворачиваем никакие пункты)
+
+        # --- RIGHT PANEL: STACKED WIDGET (4/5) ---
+        self.content_stack = QStackedWidget()
+
+        # Страница 0: Приветствие
+        self.page_welcome = self._build_welcome_page()
+        self.content_stack.addWidget(self.page_welcome)
+
+        # Страница 1: Управление уведомлениями
+        self.page_notifications = self._build_notifications_page()
+        self.content_stack.addWidget(self.page_notifications)
+
+        # Страница 2: Сохранение конфигурации
+        self.page_save_config = self._build_save_config_page()
+        self.content_stack.addWidget(self.page_save_config)
+
+        # Страница 3: Конфигурация складов
+        self.page_workplaces = self._build_workplaces_page()
+        self.content_stack.addWidget(self.page_workplaces)
+
+        # Страница 4: Пустая заглушка для остальных
+        self.page_placeholder = QWidget()
+        placeholder_layout = QVBoxLayout()
+        placeholder_layout.addWidget(QLabel("Раздел находится в разработке"))
+        self.page_placeholder.setLayout(placeholder_layout)
+        self.content_stack.addWidget(self.page_placeholder)
+
+        # Сохраняем индексы для быстрого доступа
+        self.stack_indices = {
+            'welcome': 0,
+            'notifications': 1,
+            'save_config': 2,
+            'workplaces': 3,
+            'placeholder': 4,
+        }
+
+        # Собираем основной layout
+        main_layout.addWidget(self.menu_tree, 1)
+        main_layout.addWidget(self.content_stack, 4)
+        main_widget.setLayout(main_layout)
+        self.setCentralWidget(main_widget)
+
+        # Показываем приветственную страницу по умолчанию
+        self.content_stack.setCurrentIndex(self.stack_indices['welcome'])
+
+    def _build_welcome_page(self):
+        """Страница приветствия при открытии админ-интерфейса."""
+        widget = QWidget()
         layout = QVBoxLayout()
-        label = QLabel("Admin UI (PySide6) - заглушка")
-        layout.addWidget(label)
-        central.setLayout(layout)
-        self.setCentralWidget(central)
+        layout.addStretch()
+
+        # Текст приветствия
+        username = self.user_info.get('name', 'Администратор')
+        welcome_label = QLabel(f"Добро пожаловать, {username}")
+        welcome_font = welcome_label.font()
+        welcome_font.setPointSize(18)
+        welcome_label.setFont(welcome_font)
+        welcome_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(welcome_label)
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
+    def _build_notifications_page(self):
+        """Страница управления уведомлениями о поставках - с переключением между списком и деталями."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Стек для переключения между списком и деталями
+        self.notifications_stack = QStackedWidget()
+        layout.addWidget(self.notifications_stack)
+
+        # Страница 1: Список уведомлений
+        self.page_notifications_list = self._build_notifications_list_page()
+        self.notifications_stack.addWidget(self.page_notifications_list)
+
+        # Страница 2: Детали уведомления
+        self.page_notification_details = self._build_notification_details_page()
+        self.notifications_stack.addWidget(self.page_notification_details)
+
+        # По умолчанию показываем список
+        self.notifications_stack.setCurrentIndex(0)
+
+        widget.setLayout(layout)
+        return widget
+
+    def _build_notifications_list_page(self):
+        """Таблица со списком уведомлений и сводкой по дням."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Кнопки управления
+        controls = QHBoxLayout()
+        btn_new = QPushButton("Новое уведомление")
+        btn_new.clicked.connect(self.create_new_notification)
+        btn_edit = QPushButton("Открыть")
+        btn_edit.clicked.connect(self.open_notification_details)
+        btn_delete = QPushButton("Удалить")
+        btn_delete.clicked.connect(self.delete_notification)
+        btn_archive = QPushButton("В архив")
+        btn_archive.clicked.connect(self.archive_notification)
+        
+        controls.addWidget(btn_new)
+        controls.addWidget(btn_edit)
+        controls.addWidget(btn_delete)
+        controls.addWidget(btn_archive)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        # Таблица уведомлений (9 видимых колонок + ID скрытый)
+        self.notifications_table = QTableWidget(0, 9)
+        self.notifications_table.setHorizontalHeaderLabels([
+            "ID", "Сценарий", "Клиент", "Товары", "Дата прибытия", "ТС/Контейнер", "Статус", "Позиций", "Кодов ДМ"
+        ])
+        
+        # Скрываем колонку ID
+        self.notifications_table.setColumnHidden(0, True)
+        
+        self.notifications_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.notifications_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.notifications_table.setStyleSheet("""
+            QTableWidget::item:selected {
+                background-color: #ADD8E6;
+            }
+        """)
+        # Двойной клик открывает детали
+        self.notifications_table.doubleClicked.connect(self.open_notification_details)
+        layout.addWidget(self.notifications_table)
+
+        # Сводка по дням (под таблицей)
+        summary_label = QLabel("Сводка по дням:")
+        layout.addWidget(summary_label)
+        
+        # Визуальная группировка: первая строка — даты, вторая — метрики, далее — данные
+        from datetime import datetime, timedelta
+        today = datetime.now().date()
+        date_labels = []
+        for i in range(4):
+            date_obj = today + timedelta(days=i)
+            date_labels.append(date_obj.strftime('%d.%m.%Y'))
+
+        # Всего 13 колонок: 1 (Клиент) + 4*3
+        self.summary_table = QTableWidget(2, 13)  # 2 строки для заголовков
+        # Первая строка: "Клиент" + даты (объединение по 3 колонки)
+        client_item = QTableWidgetItem("Клиент")
+        client_item.setFlags(client_item.flags() & ~Qt.ItemIsEditable)
+        self.summary_table.setItem(0, 0, client_item)
+        self.summary_table.setSpan(0, 0, 2, 1)  # "Клиент" объединяет 2 строки
+        for i, date in enumerate(date_labels):
+            col = 1 + i*3
+            date_item = QTableWidgetItem(date)
+            date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
+            date_item.setTextAlignment(Qt.AlignCenter)
+            self.summary_table.setItem(0, col, date_item)
+            self.summary_table.setSpan(0, col, 1, 3)  # Дата объединяет 3 колонки
+        # Вторая строка: метрики
+        for i in range(4):
+            col = 1 + i*3
+            for j, metric in enumerate(["Ув", "Поз", "ДМ"]):
+                metric_item = QTableWidgetItem(metric)
+                metric_item.setFlags(metric_item.flags() & ~Qt.ItemIsEditable)
+                metric_item.setTextAlignment(Qt.AlignCenter)
+                self.summary_table.setItem(1, col+j, metric_item)
+
+        # Стилизация и размеры
+        self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.summary_table.setSelectionMode(QTableWidget.SingleSelection)
+        self.summary_table.setMaximumHeight(170)
+        self.summary_table.setColumnWidth(0, 120)
+        for i in range(1, 13):
+            self.summary_table.setColumnWidth(i, 45)
+        self.summary_table.setStyleSheet("""
+            QTableWidget::item:selected {
+                background-color: #ADD8E6;
+            }
+            QTableWidget {
+                gridline-color: #E0E0E0;
+            }
+        """)
+        layout.addWidget(self.summary_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def _build_notification_details_page(self):
+        """Страница с деталями уведомления."""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        # Кнопка "Назад"
+        back_btn = QPushButton("← Вернуться к списку")
+        back_btn.clicked.connect(lambda: self.notifications_stack.setCurrentIndex(0))
+        layout.addWidget(back_btn)
+
+        # Основная область с вкладками
+        self.notification_details_notebook = self._create_notification_tabs()
+        layout.addWidget(self.notification_details_notebook)
+
+        widget.setLayout(layout)
+        return widget
+
+    def _create_notification_tabs(self):
+        """Создаёт виджет с вкладками для деталей уведомления."""
+        from PySide6.QtWidgets import QTabWidget, QTextEdit
+        
+        tabs = QTabWidget()
+
+        # Вкладка 1: Общая информация
+        general_tab = QWidget()
+        general_layout = QVBoxLayout()
+
+        form_layout = QHBoxLayout()
+        
+        # Левая половина - поля формы
+        left_form = QVBoxLayout()
+        left_form.addWidget(QLabel("Сценарий маркировки:"))
+        self.notif_scenario_label = QLabel("")
+        left_form.addWidget(self.notif_scenario_label)
+        left_form.addWidget(QLabel("Клиент:"))
+        self.notif_client_label = QLabel("")
+        left_form.addWidget(self.notif_client_label)
+        left_form.addWidget(QLabel("Товарная группа:"))
+        self.notif_product_label = QLabel("")
+        left_form.addWidget(self.notif_product_label)
+        left_form.addWidget(QLabel("Статус:"))
+        self.notif_status_label = QLabel("")
+        left_form.addWidget(self.notif_status_label)
+
+        # Правая половина - прочие поля
+        right_form = QVBoxLayout()
+        right_form.addWidget(QLabel("Планируемая дата прибытия:"))
+        self.notif_arrival_date_input = QInputDialog().getInputLabel() if False else QLabel("")
+        right_form.addWidget(self.notif_arrival_date_input)
+        right_form.addWidget(QLabel("Номер контейнера/ТС:"))
+        self.notif_vehicle_input = QLabel("")
+        right_form.addWidget(self.notif_vehicle_input)
+        right_form.addWidget(QLabel("Комментарии:"))
+        self.notif_comments_text = QTextEdit()
+        self.notif_comments_text.setMaximumHeight(100)
+        right_form.addWidget(self.notif_comments_text)
+
+        form_layout.addLayout(left_form)
+        form_layout.addLayout(right_form)
+        general_layout.addLayout(form_layout)
+
+        # Кнопки действий
+        actions_layout = QHBoxLayout()
+        btn_save = QPushButton("Сохранить изменения")
+        btn_save.clicked.connect(self.save_notification_changes)
+        btn_create_order = QPushButton("Создать заказ")
+        btn_create_order.clicked.connect(self.create_order_from_notification)
+        actions_layout.addWidget(btn_save)
+        actions_layout.addWidget(btn_create_order)
+        actions_layout.addStretch()
+        general_layout.addLayout(actions_layout)
+
+        general_layout.addStretch()
+        general_tab.setLayout(general_layout)
+        tabs.addTab(general_tab, "Общая информация")
+
+        # Вкладка 2: Документы
+        docs_tab = QWidget()
+        docs_layout = QVBoxLayout()
+        docs_controls = QHBoxLayout()
+        btn_upload_doc = QPushButton("Загрузить")
+        btn_upload_doc.clicked.connect(self.upload_notification_doc)
+        btn_download_doc = QPushButton("Скачать")
+        btn_download_doc.clicked.connect(self.download_notification_doc)
+        btn_delete_doc = QPushButton("Удалить")
+        btn_delete_doc.clicked.connect(self.delete_notification_doc)
+        docs_controls.addWidget(btn_upload_doc)
+        docs_controls.addWidget(btn_download_doc)
+        docs_controls.addWidget(btn_delete_doc)
+        docs_controls.addStretch()
+        docs_layout.addLayout(docs_controls)
+        self.notification_files_table = QTableWidget(0, 2)
+        self.notification_files_table.setHorizontalHeaderLabels(["Имя файла", "Размер"])
+        self.notification_files_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.notification_files_table.setSelectionMode(QTableWidget.SingleSelection)
+        docs_layout.addWidget(self.notification_files_table)
+        docs_tab.setLayout(docs_layout)
+        tabs.addTab(docs_tab, "Документы")
+
+        # Вкладка 3: Детализация заказа
+        details_tab = QWidget()
+        details_layout = QVBoxLayout()
+        details_controls = QHBoxLayout()
+        btn_download_template = QPushButton("Скачать шаблон")
+        btn_download_template.clicked.connect(self.download_order_template)
+        btn_upload_details = QPushButton("Загрузить из файла")
+        btn_upload_details.clicked.connect(self.upload_order_details)
+        btn_save_details = QPushButton("Сохранить детализацию")
+        btn_save_details.clicked.connect(self.save_order_details)
+        details_controls.addWidget(btn_download_template)
+        details_controls.addWidget(btn_upload_details)
+        details_controls.addWidget(btn_save_details)
+        details_controls.addStretch()
+        details_layout.addLayout(details_controls)
+        self.order_details_table = QTableWidget(0, 7)
+        self.order_details_table.setHorizontalHeaderLabels([
+            "ID", "GTIN", "Кол-во", "Агрегация", "Дата производства", "Срок годн. (мес)", "Годен до"
+        ])
+        self.order_details_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.order_details_table.setSelectionMode(QTableWidget.SingleSelection)
+        details_layout.addWidget(self.order_details_table)
+        details_tab.setLayout(details_layout)
+        tabs.addTab(details_tab, "Детализация заказа")
+
+        return tabs
+
+    def load_notifications(self):
+        """Загружает список уведомлений из БД клиента."""
+        try:
+            self.notifications_table.setRowCount(0)
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            notifications = service.get_notifications_with_counts()
+
+            for notif in notifications:
+                row = self.notifications_table.rowCount()
+                self.notifications_table.insertRow(row)
+                
+                # Обработка product_groups (может быть список, строка или None)
+                product_groups = notif.get('product_groups', '')
+                if isinstance(product_groups, list):
+                    # Если это список словарей, извлекаем значения
+                    if product_groups and isinstance(product_groups[0], dict):
+                        product_groups = ', '.join([str(pg.get('name', '')) if isinstance(pg, dict) else str(pg) for pg in product_groups])
+                    else:
+                        product_groups = ', '.join([str(pg) for pg in product_groups])
+                elif product_groups is None:
+                    product_groups = ''
+                
+                items = [
+                    str(notif.get('id', '')),  # Скрытая колонка ID
+                    notif.get('scenario_name', ''),
+                    notif.get('client_name', ''),
+                    str(product_groups),
+                    str(notif.get('planned_arrival_date', '')),
+                    notif.get('vehicle_number', ''),
+                    notif.get('status', ''),
+                    str(notif.get('positions_count', 0)),  # Новая колонка: позиции
+                    str(notif.get('dm_count', 0))  # Новая колонка: коды ДМ
+                ]
+                
+                # Определяем цвет фона в зависимости от статуса
+                status = notif.get('status', '')
+                bg_color = QColor("white")  # По умолчанию белый
+                
+                if status == 'Проект':
+                    bg_color = QColor("#FFB6C6")  # Светло-розовый (lightpink)
+                elif status == 'Ожидание':
+                    bg_color = QColor("#FFFFE0")  # Светло-жёлтый (light yellow)
+                elif status == 'Заказ создан':
+                    bg_color = QColor("#90EE90")  # Светло-зелёный (light green)
+                
+                for col, text in enumerate(items):
+                    it = QTableWidgetItem(str(text))
+                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                    it.setBackground(bg_color)
+                    self.notifications_table.setItem(row, col, it)
+            
+            # Загружаем сводку
+            self.load_summary_data()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить уведомления: {e}")
+
+    def load_summary_data(self):
+        """Загружает и отображает сводку по дням."""
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            summary_data = service.get_arrival_summary()
+            
+            self.summary_table.setRowCount(0)
+            
+            if not summary_data:
+                return
+            
+            for row_data in summary_data:
+                row = self.summary_table.rowCount()
+                self.summary_table.insertRow(row)
+                
+                # Первая колонка - название клиента
+                client_name = row_data.get('client_name', '')
+                it = QTableWidgetItem(str(client_name))
+                it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                self.summary_table.setItem(row, 0, it)
+                
+                # Остальные колонки - данные по дням (ув, поз, дм)
+                col_index = 1
+                for day_key in ['d0', 'd1', 'd2', 'd3']:
+                    # Сервис возвращает ключи в нижнем регистре с подчеркиванием
+                    for metric in ['ув', 'поз', 'дм']:
+                        key = f"{day_key}_{metric}"
+                        # Значение может быть None или число
+                        value = row_data.get(key)
+                        if value is None:
+                            value = 0
+                        it = QTableWidgetItem(str(int(value)))
+                        it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                        # Выравнивание по центру для числовых данных
+                        it.setTextAlignment(Qt.AlignCenter)
+                        self.summary_table.setItem(row, col_index, it)
+                        col_index += 1
+        except Exception as e:
+            traceback.print_exc()
+            logging.debug(f"Не удалось загрузить сводку: {e}")
+
+    def create_new_notification(self):
+        """Создает новое уведомление о поставке."""
+        QMessageBox.information(self, "Функция", "Создание нового уведомления (в разработке)")
+
+    def open_notification_details(self):
+        """Открывает детали выбранного уведомления."""
+        sel = self.notifications_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите уведомление для просмотра")
+            return
+        
+        notif_id = int(self.notifications_table.item(sel, 0).text())
+        self.load_notification_details(notif_id)
+        self.notifications_stack.setCurrentIndex(1)
+
+    def load_notification_details(self, notif_id):
+        """Загружает и отображает детали уведомления."""
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            notif_data = service.get_notification_by_id(notif_id)
+            
+            if not notif_data:
+                QMessageBox.critical(self, "Ошибка", "Не удалось загрузить данные уведомления")
+                return
+            
+            # Сохраняем текущий ID
+            self.current_notification_id = notif_id
+            
+            # Заполняем поля
+            self.notif_scenario_label.setText(notif_data.get('scenario_name', ''))
+            self.notif_client_label.setText(notif_data.get('client_name', ''))
+            
+            product_groups = notif_data.get('product_groups', '')
+            if isinstance(product_groups, list):
+                product_groups = ', '.join([str(pg.get('name', '')) if isinstance(pg, dict) else str(pg) for pg in product_groups])
+            self.notif_product_label.setText(str(product_groups))
+            
+            self.notif_status_label.setText(notif_data.get('status', ''))
+            self.notif_arrival_date_input.setText(str(notif_data.get('planned_arrival_date', '')))
+            self.notif_vehicle_input.setText(notif_data.get('vehicle_number', ''))
+            self.notif_comments_text.setPlainText(notif_data.get('comments', ''))
+            
+            # Загружаем документы
+            self.load_notification_files(notif_id)
+            
+            # Загружаем детализацию
+            self.load_order_details(notif_id)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить детали уведомления: {e}")
+
+    def load_notification_files(self, notif_id):
+        """Загружает список файлов для уведомления."""
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            files = service.get_notification_files(notif_id)
+            
+            self.notification_files_table.setRowCount(0)
+            self.notification_files_cache = files
+            
+            for file_info in files:
+                row = self.notification_files_table.rowCount()
+                self.notification_files_table.insertRow(row)
+                
+                items = [
+                    file_info.get('filename', ''),
+                    str(file_info.get('file_size', 0))
+                ]
+                
+                for col, text in enumerate(items):
+                    it = QTableWidgetItem(str(text))
+                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                    self.notification_files_table.setItem(row, col, it)
+        except Exception as e:
+            traceback.print_exc()
+
+    def load_order_details(self, notif_id):
+        """Загружает детализацию заказа для уведомления."""
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            details = service.get_notification_details(notif_id) if hasattr(service, 'get_notification_details') else []
+            
+            self.order_details_table.setRowCount(0)
+            
+            for detail in details:
+                row = self.order_details_table.rowCount()
+                self.order_details_table.insertRow(row)
+                
+                items = [
+                    str(detail.get('id', '')),
+                    detail.get('gtin', ''),
+                    str(detail.get('quantity', '')),
+                    detail.get('aggregation', ''),
+                    str(detail.get('production_date', '')),
+                    str(detail.get('shelf_life_months', '')),
+                    str(detail.get('expiry_date', ''))
+                ]
+                
+                for col, text in enumerate(items):
+                    it = QTableWidgetItem(str(text))
+                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                    self.order_details_table.setItem(row, col, it)
+        except Exception as e:
+            traceback.print_exc()
+
+    def save_notification_changes(self):
+        """Сохраняет изменения уведомления."""
+        if not hasattr(self, 'current_notification_id'):
+            QMessageBox.warning(self, "Ошибка", "Не выбрано уведомление")
+            return
+        
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            data_to_save = {
+                'vehicle_number': self.notif_vehicle_input.text(),
+                'comments': self.notif_comments_text.toPlainText()
+            }
+            service.update_notification(self.current_notification_id, data_to_save)
+            QMessageBox.information(self, "Успех", "Изменения сохранены")
+            self.load_notifications()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
+
+    def create_order_from_notification(self):
+        """Создаёт заказ из уведомления."""
+        if not hasattr(self, 'current_notification_id'):
+            QMessageBox.warning(self, "Ошибка", "Не выбрано уведомление")
+            return
+        
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            success, message = service.create_order_from_notification(self.current_notification_id)
+            if success:
+                QMessageBox.information(self, "Успех", message)
+                self.load_notifications()
+            else:
+                QMessageBox.warning(self, "Внимание", message)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать заказ: {e}")
+
+    def upload_notification_doc(self):
+        """Загружает документ для уведомления."""
+        if not hasattr(self, 'current_notification_id'):
+            QMessageBox.warning(self, "Ошибка", "Не выбрано уведомление")
+            return
+        
+        filepath = QFileDialog.getOpenFileName(self, "Выберите файл")[0]
+        if not filepath:
+            return
+        
+        try:
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            filename = os.path.basename(filepath)
+            service.add_notification_file(self.current_notification_id, filename, file_data, 'client_document')
+            QMessageBox.information(self, "Успех", "Файл успешно загружен")
+            self.load_notification_files(self.current_notification_id)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл: {e}")
+
+    def download_notification_doc(self):
+        """Скачивает документ от уведомления."""
+        sel = self.notification_files_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите файл для скачивания")
+            return
+        
+        try:
+            file_info = self.notification_files_cache[sel]
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            content, filename = service.get_file_content(file_info['id'])
+            
+            save_path = QFileDialog.getSaveFileName(self, "Сохранить файл", filename)[0]
+            try:
+                service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+                summary_data = service.get_arrival_summary()
+                # Очищаем все строки кроме заголовков
+                while self.summary_table.rowCount() > 2:
+                    self.summary_table.removeRow(2)
+                if not summary_data:
+                    return
+                for row_data in summary_data:
+                    row = self.summary_table.rowCount()
+                    self.summary_table.insertRow(row)
+                    # Первая колонка — название клиента
+                    client_name = row_data.get('client_name', row_data.get('client', ''))
+                    it = QTableWidgetItem(str(client_name))
+                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                    self.summary_table.setItem(row, 0, it)
+                    # Остальные колонки — данные по дням (ув, поз, дм)
+                    col_index = 1
+                    for i in range(4):
+                        day_key = f"d{i}"
+                        for metric in ['ув', 'поз', 'дм']:
+                            key = f"{day_key}_{metric}"
+                            value = row_data.get(key)
+                            if value is None:
+                                value = 0
+                            it = QTableWidgetItem(str(int(value)))
+                            it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                            it.setTextAlignment(Qt.AlignCenter)
+                            self.summary_table.setItem(row, col_index, it)
+                            col_index += 1
+            except Exception as e:
+                traceback.print_exc()
+                logging.debug(f"Не удалось загрузить сводку: {e}")
+    def save_order_details(self):
+        """Сохраняет детализацию заказа."""
+        QMessageBox.information(self, "Функция", "Сохранение детализации (в разработке)")
+
+    def delete_notification(self):
+        """Удаляет выбранное уведомление."""
+        sel = self.notifications_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите уведомление для удаления")
+            return
+        notif_id = int(self.notifications_table.item(sel, 0).text())
+        reply = QMessageBox.question(self, "Подтверждение", f"Удалить уведомление #{notif_id}?", QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            service.delete_notification(notif_id)
+            QMessageBox.information(self, "Успех", "Уведомление удалено")
+            self.load_notifications()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить уведомление: {e}")
+
+    def archive_notification(self):
+        """Архивирует выбранное уведомление."""
+        sel = self.notifications_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите уведомление для архивирования")
+            return
+        notif_id = int(self.notifications_table.item(sel, 0).text())
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            service.archive_notification(notif_id)
+            QMessageBox.information(self, "Успех", "Уведомление архивировано")
+            self.load_notifications()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось архивировать уведомление: {e}")
+
+    def _build_save_config_page(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Создание файлов конфигурации для мобильного приложения."))
+        layout.addWidget(QLabel("Файлы будут сохранены в каталог, где запущена программа."))
+        btn_export = QPushButton("Сохранить файлы конфигурации")
+        btn_export.clicked.connect(self._save_config_with_default_dir)
+        layout.addWidget(btn_export)
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
+    def _build_workplaces_page(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        controls = QHBoxLayout()
+        btn_create = QPushButton("Создать склад")
+        btn_create.clicked.connect(self.create_new_warehouse)
+        btn_change = QPushButton("Изменить кол-во")
+        btn_change.clicked.connect(self.change_workplace_count)
+        btn_print = QPushButton("Печать этикеток")
+        btn_print.clicked.connect(self.open_workplace_printing_dialog)
+        controls.addWidget(btn_create)
+        controls.addWidget(btn_change)
+        controls.addWidget(btn_print)
+        layout.addLayout(controls)
+
+        self.warehouses_table = QTableWidget(0, 2)
+        self.warehouses_table.setHorizontalHeaderLabels(["Название склада", "Кол-во рабочих мест"])
+        self.warehouses_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.warehouses_table.setSelectionMode(QTableWidget.SingleSelection)
+        # Стиль для подсветки выбранной строки
+        self.warehouses_table.setStyleSheet("""
+            QTableWidget::item:selected {
+                background-color: #ADD8E6;
+            }
+        """)
+        layout.addWidget(self.warehouses_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    @Slot()
+    def _on_menu_clicked(self, item: QTreeWidgetItem, column: int):
+        """Обработчик клика на пункт меню — переключает правую панель."""
+        text = item.text(column)
+        if text == "Управление уведомлениями":
+            try:
+                self.load_notifications()
+            except Exception:
+                logging.exception("Error loading notifications")
+            self.content_stack.setCurrentIndex(self.stack_indices['notifications'])
+        elif text == "Сохранить INI":
+            self.content_stack.setCurrentIndex(self.stack_indices['save_config'])
+        elif text == "Конфигурация складов":
+            try:
+                self.load_warehouses()
+            except Exception:
+                logging.exception("Error loading warehouses")
+            self.content_stack.setCurrentIndex(self.stack_indices['workplaces'])
+        else:
+            self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
+
+    def _save_config_with_default_dir(self):
+        """Сохраняет конфигурацию в каталог программы по умолчанию."""
+        if getattr(sys, 'frozen', False):
+            default_dir = os.path.dirname(sys.executable)
+        else:
+            default_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+        self.save_config_files(default_dir)
+
+    def save_config_files(self, save_path=None):
+        """Экспортирует конфигурационные файлы из клиентской БД (ap_settings) и сертификат."""
+        if not save_path:
+            save_path = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения файлов конфигурации")
+            if not save_path:
+                return
+
+        try:
+            # 1. Получаем настройки из БД клиента
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT setting_key, setting_value FROM ap_settings
+                        WHERE setting_key IN ('LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD')
+                    """)
+                    rows = cur.fetchall()
+                    settings_from_db = {r['setting_key']: r['setting_value'] for r in rows}
+
+            # 2. Получаем сертификат из user_info
+            ssl_cert_content = self.user_info.get('client_db_config', {}).get('db_ssl_cert', '')
+
+            required_keys = ['LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']
+            if not all(k in settings_from_db for k in required_keys):
+                missing = [k for k in required_keys if k not in settings_from_db]
+                QMessageBox.critical(self, "Ошибка", f"В таблице 'ap_settings' отсутствуют настройки: {', '.join(missing)}")
+                return
+
+            # Простое XOR-шифрование как в оригинале
+            def xor_cipher(data: str, key: str) -> bytes:
+                return bytes([ord(c) ^ ord(k) for c, k in zip(data, (key * (len(data) // len(key) + 1))[:len(data)])])
+
+            encryption_key = "TildaKodSecretKey"
+            encrypted_bytes = xor_cipher(settings_from_db['DB_PASSWORD'], encryption_key)
+            encrypted_password_b64 = base64.b64encode(encrypted_bytes).decode('ascii')
+
+            ini_content = (
+                "[database]\n"
+                f"host = {settings_from_db['LOCAL_SERVER_ADDRESS']}\n"
+                f"port = {settings_from_db['LOCAL_SERVER_PORT']}\n"
+                f"dbname = {settings_from_db['DB_NAME']}\n"
+                f"user = {settings_from_db['DB_USER']}\n"
+                f"password = {encrypted_password_b64}"
+            )
+
+            with open(os.path.join(save_path, 'config.ini'), 'w', encoding='utf-8') as f:
+                f.write(ini_content)
+            if ssl_cert_content:
+                with open(os.path.join(save_path, 'cert.pem'), 'w', encoding='utf-8') as f:
+                    f.write(ssl_cert_content)
+
+            QMessageBox.information(self, "Успех", f"Файлы сохранены в: {save_path}")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать файлы конфигурации: {e}")
+
+    def load_warehouses(self):
+        try:
+            self.warehouses_table.setRowCount(0)
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT warehouse_name, COUNT(*) as workplace_count
+                        FROM ap_workplaces
+                        GROUP BY warehouse_name
+                        ORDER BY warehouse_name
+                    """)
+                    rows = cur.fetchall()
+
+            for r in rows:
+                row = self.warehouses_table.rowCount()
+                self.warehouses_table.insertRow(row)
+                it_name = QTableWidgetItem(r['warehouse_name'])
+                it_count = QTableWidgetItem(str(r['workplace_count']))
+                # Делаем ячейки нередактируемыми
+                it_name.setFlags(it_name.flags() & ~Qt.ItemIsEditable)
+                it_count.setFlags(it_count.flags() & ~Qt.ItemIsEditable)
+                self.warehouses_table.setItem(row, 0, it_name)
+                self.warehouses_table.setItem(row, 1, it_count)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить список складов: {e}")
+
+    def create_new_warehouse(self):
+        name, ok = QInputDialog.getText(self, "Новый склад", "Введите название нового склада:")
+        if not ok or not name:
+            return
+        count, ok2 = QInputDialog.getInt(self, "Количество мест", "Введите количество рабочих мест:", 1, 1, 10000)
+        if not ok2:
+            return
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1 FROM ap_workplaces WHERE warehouse_name = %s LIMIT 1", (name,))
+                    if cur.fetchone():
+                        QMessageBox.critical(self, "Ошибка", f"Склад '{name}' уже существует.")
+                        return
+                    cur.execute("SELECT COALESCE(MAX(workplace_number), 0) FROM ap_workplaces WHERE warehouse_name = %s", (name,))
+                    max_num = cur.fetchone()[0]
+                    for i in range(1, count + 1):
+                        cur.execute("INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)", (name, max_num + i))
+                conn.commit()
+            QMessageBox.information(self, "Успех", f"Склад '{name}' с {count} местами создан")
+            self.load_warehouses()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать склад: {e}")
+
+    def change_workplace_count(self):
+        sel = self.warehouses_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите склад")
+            return
+        name = self.warehouses_table.item(sel, 0).text()
+        current = int(self.warehouses_table.item(sel, 1).text())
+        new_count, ok = QInputDialog.getInt(self, "Изменить количество", f"Новое общее количество мест для склада '{name}':", current, 0, 10000)
+        if not ok or new_count == current:
+            return
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    if new_count > current:
+                        to_add = new_count - current
+                        cur.execute("SELECT COALESCE(MAX(workplace_number), 0) FROM ap_workplaces WHERE warehouse_name = %s", (name,))
+                        max_num = cur.fetchone()[0]
+                        for i in range(1, to_add + 1):
+                            cur.execute("INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)", (name, max_num + i))
+                        msg = f"Добавлено {to_add} новых рабочих мест."
+                    else:
+                        to_delete = current - new_count
+                        reply = QMessageBox.question(self, "Подтверждение", f"Удалить {to_delete} рабочих мест со склада '{name}'?", QMessageBox.Yes | QMessageBox.No)
+                        if reply != QMessageBox.Yes:
+                            return
+                        cur.execute("""
+                            DELETE FROM ap_workplaces
+                            WHERE id IN (
+                                SELECT id FROM ap_workplaces
+                                WHERE warehouse_name = %s
+                                ORDER BY workplace_number DESC
+                                LIMIT %s
+                            )
+                        """, (name, to_delete))
+                        msg = f"Удалено {to_delete} рабочих мест."
+                conn.commit()
+            QMessageBox.information(self, "Успех", msg)
+            self.load_warehouses()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось изменить количество мест: {e}")
+
+    def open_workplace_printing_dialog(self):
+        sel = self.warehouses_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите склад для печати")
+            return
+        warehouse_name = self.warehouses_table.item(sel, 0).text()
+        # Пока простой вызов — интеграция печати может потребовать win32, оставим вызов-плейсхолдер
+        QMessageBox.information(self, "Печать", f"Вызов печати этикеток для склада: {warehouse_name}")
 
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    w = AdminWindowQt({'name': 'local-admin'})
+    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
     w.show()
     sys.exit(app.exec())
+
