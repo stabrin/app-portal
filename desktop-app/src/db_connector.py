@@ -74,14 +74,18 @@ def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedCo
                 if all(ext_params.values()):
                     with _attempt_db_connection(ext_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
                         if conn:
-                            conn_params = {**ext_params, 'sslmode': 'verify-full', 'sslrootcert': _get_cert_path(db_config.get('db_ssl_cert'))}
-            except psycopg2.OperationalError: pass
+                            # --- ИЗМЕНЕНИЕ: Добавляем проверку существования файла сертификата ---
+                            cert_path = _get_cert_path(db_config.get('db_ssl_cert'))
+                            if cert_path:
+                                conn_params = {**ext_params, 'sslmode': 'verify-full', 'sslrootcert': cert_path}
+            except Exception as e:
+                logging.warning(f"get_client_pool: Попытка подключения по внешнему адресу не удалась: {e}")
 
         # 2. Попытка с внутренним адресом
         if not conn_params:
             try:
-                host = db_config.get('local_server_address') if not is_local_mode else db_config.get('db_host')
-                port = db_config.get('local_server_port') if not is_local_mode else db_config.get('db_port')
+                host = db_config.get('local_server_address', db_config.get('db_host'))
+                port = db_config.get('local_server_port', db_config.get('db_port'))
                 loc_params = {
                     'host': host, 'port': port, 'dbname': db_config.get('db_name'),
                     'user': db_config.get('db_user'), 'password': db_config.get('db_password'), 'connect_timeout': 5
@@ -90,7 +94,8 @@ def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedCo
                     with _attempt_db_connection(loc_params, None, 'disable') as conn:
                         if conn:
                             conn_params = {**loc_params, 'sslmode': 'disable'}
-            except psycopg2.OperationalError: pass
+            except Exception as e:
+                logging.warning(f"get_client_pool: Попытка подключения по внутреннему адресу не удалась: {e}")
 
         if not conn_params:
             raise ConnectionError(f"Не удалось создать пул для клиента {pool_key}")
