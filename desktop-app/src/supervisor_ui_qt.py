@@ -551,26 +551,34 @@ class ClientEditorDialog(QDialog):
             from .db_connector import _attempt_db_connection
             
             # Попытка 1: внешний адрес с SSL
-            add_log(f"Шаг 1: Попытка подключения по внешнему адресу {db_config_from_ui['db_host']}:{db_config_from_ui['db_port']} с SSL...")
-            try:
-                with _attempt_db_connection(db_config_from_ui, db_config_from_ui['db_ssl_cert'], 'verify-full') as conn:
-                    if conn:
-                        add_log("УСПЕХ: Подключение по внешнему адресу с SSL прошло успешно!", "SUCCESS")
-                        log_dialog.exec()
-                        return # Выходим, если успешно
-            except Exception as e:
-                add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+            ext_host = db_config_from_ui['db_host']
+            if ext_host:
+                add_log(f"Шаг 1: Попытка подключения по внешнему адресу {ext_host}:{db_config_from_ui['db_port']} с SSL...")
+                try:
+                    with _attempt_db_connection(db_config_from_ui, db_config_from_ui['db_ssl_cert'], 'verify-full') as conn:
+                        if conn:
+                            add_log("УСПЕХ: Подключение по внешнему адресу с SSL прошло успешно!", "SUCCESS")
+                            log_dialog.exec()
+                            return # Выходим, если успешно
+                except Exception as e:
+                    add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+            else:
+                add_log("Шаг 1: Пропущен. Внешний адрес не указан.", "INFO")
 
             # Попытка 2: внутренний адрес без SSL
-            add_log(f"Шаг 2: Попытка подключения по внутреннему адресу {db_config_from_ui['local_server_address']}:{db_config_from_ui['local_server_port']} без SSL...")
-            try:
-                with _attempt_db_connection(db_config_from_ui, None, 'disable') as conn:
-                    if conn:
-                        add_log("УСПЕХ: Подключение по внутреннему адресу без SSL прошло успешно!", "SUCCESS")
-                        log_dialog.exec()
-                        return # Выходим, если успешно
-            except Exception as e:
-                add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+            local_host = db_config_from_ui['local_server_address']
+            if local_host:
+                add_log(f"Шаг 2: Попытка подключения по внутреннему адресу {local_host}:{db_config_from_ui['local_server_port']} без SSL...")
+                try:
+                    with _attempt_db_connection(db_config_from_ui, None, 'disable', use_local=True) as conn:
+                        if conn:
+                            add_log("УСПЕХ: Подключение по внутреннему адресу без SSL прошло успешно!", "SUCCESS")
+                            log_dialog.exec()
+                            return # Выходим, если успешно
+                except Exception as e:
+                    add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+            else:
+                add_log("Шаг 2: Пропущен. Внутренний адрес не указан.", "INFO")
             
             add_log("ПРОВАЛ: Не удалось подключиться ни по одному из адресов.", "ERROR")
             log_dialog.exec()

@@ -178,15 +178,22 @@ def _get_cert_path(ssl_cert_content: Optional[str]) -> Optional[str]:
     return fp.name
 
 @contextmanager
-def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Optional[str], ssl_mode: str = 'disable'):
+def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Optional[str], ssl_mode: str = 'disable', use_local: bool = False):
     """Попытка подключения. Закрывает соединение при выходе."""
     temp_cert_file = None
     conn = None
     try:
         conn_params = base_params.copy()
-        conn_params.pop('db_ssl_cert_content', None)
         conn_params['sslmode'] = ssl_mode
         conn_params['connect_timeout'] = 5
+
+        # --- ИСПРАВЛЕНИЕ: Используем правильный хост в зависимости от флага use_local ---
+        if use_local:
+            conn_params['host'] = conn_params.get('local_server_address')
+            conn_params['port'] = conn_params.get('local_server_port')
+        else:
+            conn_params['host'] = conn_params.get('db_host')
+            conn_params['port'] = conn_params.get('db_port')
 
         if ssl_cert_content and ssl_mode == 'verify-full':
             with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
@@ -196,15 +203,13 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
 
         required_keys = ['host', 'port', 'dbname', 'user', 'password']
         if not all(conn_params.get(k) for k in required_keys):
+            logging.warning(f"Пропуск попытки подключения: не все обязательные параметры указаны. Host: {conn_params.get('host')}")
             yield None
             return
 
         conn = psycopg2.connect(**conn_params)
         yield conn 
 
-    except psycopg2.OperationalError as e:
-        logging.warning(f"Connection attempt failed: {e}")
-        yield None
     finally:
         if conn:
             conn.close()
