@@ -704,6 +704,31 @@ class AdminWindowQt(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось скачать шаблон: {e}")
 
+    def upload_order_details(self):
+        """Загружает детализацию заказа из Excel-файла."""
+        if not hasattr(self, 'current_notification_id'):
+            QMessageBox.warning(self, "Внимание", "Сначала выберите уведомление.")
+            return
+
+        reply = QMessageBox.question(self, "Подтверждение", "Загрузка из файла полностью заменит текущую детализацию. Продолжить?", QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите Excel-файл", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath:
+            return
+
+        try:
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            rows_processed = service.process_formalized_file(self.current_notification_id, file_data)
+            self.load_order_details(self.current_notification_id) # Обновляем таблицу
+            QMessageBox.information(self, "Успех", f"Файл успешно обработан. Загружено {rows_processed} строк.")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось обработать файл: {e}")
+
     def save_order_details(self):
         """Сохраняет детализацию заказа."""
         QMessageBox.information(self, "Функция", "Сохранение детализации (в разработке)")
