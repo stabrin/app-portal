@@ -1,27 +1,67 @@
-# run.py
 import sys
 import os
 import logging
 
-# --- ИСПРАВЛЕНИЕ: Добавляем явные импорты для PyInstaller ---
-# Это решает проблему "Hidden import not found" при компиляции.
+# --- [FIX START] УНИВЕРСАЛЬНЫЙ FIX ПУТЕЙ (EXE + IDE) ---
+# Этот блок гарантирует, что Windows найдет DLL (libdmtx и msvcr120)
+# как в скомпилированном виде, так и при запуске через VS Code.
+
+if getattr(sys, 'frozen', False):
+    # --- РЕЖИМ EXE ---
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller: DLL лежат во временной папке _internal
+        base_dir = sys._MEIPASS 
+    else:
+        # Nuitka: DLL лежат рядом с файлом .exe
+        base_dir = os.path.dirname(sys.executable)
+else:
+    # --- РЕЖИМ IDE (VS Code) ---
+    # DLL (msvcr120.dll) лежит в той же папке, что и run.py (desktop-app)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Добавляем папку в путь поиска DLL (Обязательно для libdmtx)
+try:
+    # Для Python 3.8+ это основной способ указать папку с DLL
+    if hasattr(os, 'add_dll_directory'):
+        os.add_dll_directory(base_dir)
+    
+    # Дополнительно добавляем в PATH для старых библиотек и надежности
+    os.environ['PATH'] = base_dir + os.pathsep + os.environ['PATH']
+    
+    # print(f"DEBUG: DLL search path added: {base_dir}") # Раскомментируйте для отладки
+except Exception as e:
+    print(f"WARNING: Failed to set DLL path: {e}")
+# --- [FIX END] ---
+
+
+# --- ИСПРАВЛЕНИЕ: Добавляем явные импорты для сборщиков ---
 import babel.numbers
 import jinja2
-# import _cffi_backend
-# import mx.DateTime
 
-# Добавляем папку desktop-app в путь, чтобы Python мог найти пакет 'src'.
-# Это необходимо для запуска как из исходников, так и после сборки PyInstaller.
+# Добавляем папку desktop-app в путь системных модулей
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # --- НОВЫЙ БЛОК: Централизованная настройка логирования ---
 from dotenv import load_dotenv
-project_root = os.path.dirname(os.path.abspath(__file__))
+
+# Определяем корень проекта для логов и .env
+if getattr(sys, 'frozen', False):
+    # Если exe - берем папку, где лежит exe файл
+    if hasattr(sys, '_MEIPASS'):
+         # PyInstaller OneDir
+         project_root = os.path.dirname(sys.executable)
+    else:
+         # Nuitka Standalone
+         project_root = os.path.dirname(sys.executable)
+else:
+    # Если код - берем текущую папку
+    project_root = os.path.dirname(os.path.abspath(__file__))
+
 dotenv_path = os.path.join(project_root, '.env')
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path=dotenv_path)
 
-# Получаем уровень логирования из .env, по умолчанию 'INFO'
+# Получаем уровень логирования
 log_level_str = os.getenv('LOG_LEVEL', 'INFO').upper()
 log_level = getattr(logging, log_level_str, logging.INFO)
 
@@ -34,7 +74,16 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
 from src.auth import main
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logging.critical(f"CRITICAL ERROR AT STARTUP: {e}", exc_info=True)
+        # Если консоль закрывается мгновенно в EXE, этот input поможет увидеть ошибку
+        if getattr(sys, 'frozen', False):
+             # Проверяем, есть ли консоль, прежде чем просить ввод
+             if sys.stdout and sys.stdout.isatty():
+                input("Press Enter to exit...")

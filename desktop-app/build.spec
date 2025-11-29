@@ -1,71 +1,115 @@
-# build.spec
-
-# Этот файл является конфигурацией для PyInstaller.
-# Он указывает, как правильно собрать ваше приложение в исполняемый файл.
-
+# -*- mode: python ; coding: utf-8 -*-
 import os
-import pkg_resources
+import sys
+import glob
+from PyInstaller.utils.hooks import collect_dynamic_libs
 
-# --- Шаг 1: Находим DLL для pylibdmtx ---
-# Это критически важный шаг, так как без DLL библиотека не будет работать.
-# Используем pkg_resources для надежного поиска DLL внутри установленного пакета.
-# Этот метод работает независимо от версии пакета или структуры папок.
+# --- ОПРЕДЕЛЯЕМ ПУТИ ---
+# SPECPATH - это папка, где лежит этот файл (desktop-app)
 try:
-    libdmtx_dll_path = pkg_resources.resource_filename('pylibdmtx', 'libdmtx-64.dll')
-except (pkg_resources.DistributionNotFound, KeyError):
-    raise FileNotFoundError(
-        "Не удалось найти libdmtx-64.dll. "
-        "Убедитесь, что pylibdmtx установлена корректно (`pip install pylibdmtx`)."
-    )
+    spec_folder = SPECPATH
+except NameError:
+    spec_folder = os.path.dirname(os.path.abspath(__file__))
 
-# --- Шаг 2: Анализ зависимостей ---
-# PyInstaller анализирует ваш код, начиная с auth.py, и находит все импорты.
+project_root = os.path.abspath(os.path.join(spec_folder, '..'))
+
+print(f"INFO: Папка спецификации: {spec_folder}")
+print(f"INFO: Корень проекта: {project_root}")
+
+# --- 1. DLL: libdmtx ---
+import pylibdmtx
+pylibdmtx_dir = os.path.dirname(pylibdmtx.__file__)
+libdmtx_dll = os.path.join(pylibdmtx_dir, 'libdmtx-64.dll')
+
+# --- 2. DLL: msvcr120.dll (Важно!) ---
+# Ищем его в папке desktop-app (вы его туда положили для Nuitka)
+local_msvcr = os.path.join(spec_folder, 'msvcr120.dll')
+
+# --- 3. Системные DLL Python ---
+python_dir = os.path.dirname(sys.executable)
+msvc_dlls = glob.glob(os.path.join(python_dir, 'vcruntime*.dll')) + \
+            glob.glob(os.path.join(python_dir, 'msvcp*.dll'))
+
+# ФОРМИРУЕМ СПИСОК БИНАРНИКОВ
+# (путь_откуда, путь_куда) -> '.' это корень exe
+my_binaries = [(libdmtx_dll, '.')]
+
+for dll in msvc_dlls:
+    my_binaries.append((dll, '.'))
+
+if os.path.exists(local_msvcr):
+    print(f"INFO: Добавляем msvcr120.dll: {local_msvcr}")
+    my_binaries.append((local_msvcr, '.'))
+else:
+    print("WARNING: msvcr120.dll не найден в папке desktop-app! Приложение может упасть.")
+
+
+# --- 4. ФАЙЛЫ ДАННЫХ (.env и secrets) ---
+my_datas = []
+
+# А .env (лежит в desktop-app, копируем в корень exe)
+env_path = os.path.join(spec_folder, '.env')
+if os.path.exists(env_path):
+    print("INFO: Добавляем .env")
+    my_datas.append((env_path, '.'))
+else:
+    print("WARNING: .env не найден!")
+
+# Б secrets (лежит в корне проекта, копируем в папку secrets)
+secrets_path = os.path.join(project_root, 'secrets')
+if os.path.exists(secrets_path):
+    print("INFO: Добавляем папку secrets")
+    my_datas.append((secrets_path, 'secrets'))
+else:
+    print("WARNING: Папка secrets не найдена!")
+
+
+# --- СБОРКА ---
 a = Analysis(
     ['run.py'],
     pathex=[],
-    # Явно указываем, что нужно включить DLL. Она будет лежать в корневой папке приложения.
-    binaries=[(libdmtx_dll_path, '.')],
-    # Указываем, какие файлы данных нужно скопировать.
-    # ('путь/откуда', 'путь/куда_в_сборке').
-    # Копируем всю папку secrets в корень сборки.
-    datas=[
-        ('../secrets', 'secrets')
-    ],
-    # Иногда PyInstaller "пропускает" некоторые импорты.
-    # Здесь мы явно указываем их, чтобы избежать ошибок во время выполнения.
+    binaries=my_binaries,
+    datas=my_datas,
     hiddenimports=[
         'pylibdmtx.pylibdmtx',
         'babel.numbers',
-        'pytz', # Для работы с часовыми поясами
-        'dateutil', # Для работы с датами
-        'psycopg2.extras' # Явно включаем extras для psycopg2
+        'pytz', 
+        'dateutil', 
+        'psycopg2.extras',
+        'jinja2',
+        'PIL'
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['mx', 'mx.DateTime'],
+    noarchive=False,
+    optimize=0,
 )
 
-# --- Шаг 3: Создание архива приложения ---
 pyz = PYZ(a.pure)
 
-# --- Шаг 4: Создание исполняемого файла ---
 exe = EXE(
     pyz,
     a.scripts,
     [],
-    name='TildaKod', # Имя вашего .exe файла
+    name='TildaKod',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     runtime_tmpdir=None,
-    console=False,  # False - для GUI-приложений, чтобы не открывалась черная консоль. Установите в True для отладки.
-    icon='../ts.ico'  # Путь к иконке приложения
+    # Включите True, если снова будет падать, чтобы успеть прочитать ошибку
+    # Но лучше запускать через терминал.
+    console=False, 
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon='../ts.ico', 
 )
 
-# --- Шаг 5: Сборка итоговой папки ---
-# coll - это итоговая папка со всеми файлами.
 coll = COLLECT(
     exe,
     a.binaries,
@@ -73,5 +117,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='TildaKod', # Название итоговой папки
+    name='TildaKod',
 )

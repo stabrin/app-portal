@@ -11,16 +11,32 @@ import requests
 import base64
 import configparser
 
-# --- Настройка путей для импорта ---
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+# --- УНИВЕРСАЛЬНОЕ ОПРЕДЕЛЕНИЕ КОРНЯ ПРОЕКТА --- 
+if getattr(sys, 'frozen', False):
+    # Если запущено как EXE (Nuitka или PyInstaller)
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller (временная папка)
+        project_root = sys._MEIPASS
+    else:
+        # Nuitka (папка рядом с exe)
+        project_root = os.path.dirname(sys.executable)
+else:
+    # Если запущено как скрипт (IDE)
+    # Предполагаем, что этот файл (auth.py) лежит в src/, а корень на уровень выше
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 
-# --- ИСПРАВЛЕНИЕ: Загружаем переменные окружения в самом начале ---
+# --- ЗАГРУЗКА ПЕРЕМЕННЫХ ОКРУЖЕНИЯ ---
 from dotenv import load_dotenv
 dotenv_path = os.path.join(project_root, '.env')
+
 if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path=dotenv_path)
+    # Полезно для отладки, если консоль включена
+    print(f"DEBUG: .env загружен из {dotenv_path}")
 else:
-    logging.warning(f"Файл .env не найден по пути: {dotenv_path}. Переменные окружения могут быть не установлены.")
+    # Важно: если файл не найден, пишем полный путь, где искали
+    import logging
+    logging.warning(f"Файл .env не найден! Искал здесь: {dotenv_path}")
 
 # --- НАДЁЖНОЕ РЕШЕНИЕ ПРОБЛЕМЫ С ВИРТУАЛЬНЫМ ОКРУЖЕНИЕМ ---
 # Принудительно добавляем путь к библиотекам виртуального окружения.

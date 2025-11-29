@@ -1,53 +1,64 @@
-# src/utils.py
 import sys
 import os
 import pandas as pd
 from psycopg2 import sql
 from psycopg2.extras import execute_values
 
-
-def resource_path(relative_path):
-    """
-    Возвращает абсолютный путь к ресурсу. Работает как для исходников,
-    так и для скомпилированного приложения (PyInstaller).
-    """
-    try:
-        # PyInstaller создает временную папку и сохраняет путь в _MEIPASS
-        base_path = sys._MEIPASS
-    except AttributeError:
-        # --- ИЗМЕНЕНИЕ: Если мы не в скомпилированном приложении, базовый путь - это корень 'desktop-app' ---
-        # os.path.dirname(__file__) -> .../desktop-app/src
-        # os.path.join(..., '..') -> .../desktop-app
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-
-    return os.path.join(base_path, relative_path)
-
 def project_root_path(relative_path):
     """
-    Возвращает абсолютный путь к ресурсу относительно корня всего проекта (app-portal).
-    Используется для доступа к общим ресурсам, таким как папка 'secrets'.
+    ГЛАВНАЯ ФУНКЦИЯ ПУТЕЙ (SMART VERSION).
+    Возвращает абсолютный путь к ресурсу.
     """
-    # --- ИСПРАВЛЕНИЕ: Упрощаем логику для надежной работы в скомпилированном приложении ---
-    try:
-        # В скомпилированном приложении _MEIPASS - это путь к временной папке с ресурсами.
-        base_path = sys._MEIPASS
-    except AttributeError:
-        # В режиме разработки, корень проекта - это две папки вверх от текущего файла (src/utils.py)
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-    return os.path.join(base_path, relative_path)
+    if getattr(sys, 'frozen', False):
+        # --- РЕЖИМ СБОРКИ (EXE) ---
+        # В собранном виде все файлы (и .env, и secrets) лежат в одной куче (в корне)
+        
+        # 1. PyInstaller
+        if hasattr(sys, '_MEIPASS'):
+            base_path = sys._MEIPASS
+        # 2. Nuitka
+        else:
+            base_path = os.path.dirname(sys.executable)
+            
+        return os.path.join(base_path, relative_path)
+            
+    else:
+        # --- РЕЖИМ РАЗРАБОТКИ (IDE) ---
+        # Здесь файлы могут быть разбросаны. Ищем их "умно".
+        
+        # utils.py лежит в .../desktop-app/src
+        src_dir = os.path.dirname(__file__)
+        
+        # Вариант 1: Ищем внутри desktop-app (../)
+        # Пример: d:/Projects/app-portal/desktop-app/.env
+        path_in_desktop_app = os.path.abspath(os.path.join(src_dir, '..', relative_path))
+        
+        # Вариант 2: Ищем в корне проекта (../../)
+        # Пример: d:/Projects/app-portal/secrets
+        path_in_project_root = os.path.abspath(os.path.join(src_dir, '..', '..', relative_path))
+
+        # Логика проверки:
+        if os.path.exists(path_in_desktop_app):
+            return path_in_desktop_app
+        elif os.path.exists(path_in_project_root):
+            return path_in_project_root
+        else:
+            # Если нигде не нашли, возвращаем путь в desktop-app (чтобы ошибка в логе была понятной)
+            return path_in_desktop_app
+
+def resource_path(relative_path):
+    """Обертка для совместимости."""
+    return project_root_path(relative_path)
 
 def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_column: str):
     """
-    Универсальная функция для UPSERT данных в любую таблицу.
-    Адаптировано из datamatrix-app.
+    Универсальная функция для UPSERT данных.
     """
-    # --- ИЗМЕНЕНИЕ: Проверяем, что dataframe не None и не пустой ---
     if dataframe is None or dataframe.empty:
         return
 
     columns = dataframe.columns.tolist()
     
-    # --- ИСПРАВЛЕНИЕ: Обработка как строки, так и списка для pk_column ---
     if isinstance(pk_column, list):
         conflict_target = sql.SQL(', ').join(map(sql.Identifier, pk_column))
         pk_list = pk_column
@@ -60,7 +71,7 @@ def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_colum
     set_clause = sql.SQL(', ').join(
         sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col)) for col in update_columns
     )
-    # --- ИЗМЕНЕНИЕ: Если нет колонок для обновления (только PK), используем DO NOTHING ---
+    
     if not update_columns:
         action_on_conflict = sql.SQL("DO NOTHING")
     else:
