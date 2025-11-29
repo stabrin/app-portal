@@ -362,8 +362,10 @@ class AdminWindowQt(QMainWindow):
         docs_controls.addWidget(btn_delete_doc)
         docs_controls.addStretch()
         docs_layout.addLayout(docs_controls)
-        self.notification_files_table = QTableWidget(0, 2)
-        self.notification_files_table.setHorizontalHeaderLabels(["Имя файла", "Размер"])
+        # ИСПРАВЛЕНИЕ: Убираем колонку "Размер" и делаем одну колонку на всю ширину
+        self.notification_files_table = QTableWidget(0, 1)
+        self.notification_files_table.setHorizontalHeaderLabels(["Имя файла"])
+        self.notification_files_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.notification_files_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.notification_files_table.setSelectionMode(QTableWidget.SingleSelection)
         docs_layout.addWidget(self.notification_files_table)
@@ -604,15 +606,11 @@ class AdminWindowQt(QMainWindow):
                 row = self.notification_files_table.rowCount()
                 self.notification_files_table.insertRow(row)
                 
-                items = [
-                    file_info.get('filename', ''),
-                    str(file_info.get('file_size', 0))
-                ]
-                
-                for col, text in enumerate(items):
-                    it = QTableWidgetItem(str(text))
-                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-                    self.notification_files_table.setItem(row, col, it)
+                # ИСПРАВЛЕНИЕ: Заполняем только одну колонку
+                filename = file_info.get('filename', '')
+                it = QTableWidgetItem(filename)
+                it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                self.notification_files_table.setItem(row, 0, it)
         except Exception as e:
             traceback.print_exc()
 
