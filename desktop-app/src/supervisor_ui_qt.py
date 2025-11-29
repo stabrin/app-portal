@@ -41,11 +41,6 @@ class SupervisorWindowQt(QMainWindow):
         self._build_clients_tab()
         tabs.addTab(self.clients_tab, "Клиенты")
 
-        # Users tab
-        self.users_tab = QWidget()
-        self._build_users_tab()
-        tabs.addTab(self.users_tab, "Пользователи")
-
         # Tools tab
         self.tools_tab = QWidget()
         self._build_tools_tab()
@@ -81,29 +76,6 @@ class SupervisorWindowQt(QMainWindow):
         layout.addLayout(btn_layout)
         layout.addWidget(self.clients_table)
         self.clients_tab.setLayout(layout)
-
-    def _build_users_tab(self):
-        layout = QVBoxLayout()
-        btn_layout = QHBoxLayout()
-        load_users_btn = QPushButton("Загрузить пользователей для выбранного клиента")
-        load_users_btn.clicked.connect(self.load_users_for_selected_client)
-        # Эти кнопки теперь находятся в редакторе клиента, что логичнее
-        # new_user_btn = QPushButton("Новый пользователь")
-        # new_user_btn.clicked.connect(self.open_user_editor)
-        # edit_user_btn = QPushButton("Редактировать пользователя")
-        # edit_user_btn.clicked.connect(self.edit_selected_user)
-        # delete_user_btn = QPushButton("Удалить пользователя")
-        # delete_user_btn.clicked.connect(self.delete_selected_user)
-
-        btn_layout.addWidget(load_users_btn)
-        # btn_layout.addWidget(new_user_btn)
-
-        self.users_table = QTableWidget(0, 5)
-        self.users_table.setHorizontalHeaderLabels(["ID", "Имя", "Логин", "Роль", "Активен"])
-
-        layout.addLayout(btn_layout)
-        layout.addWidget(self.users_table)
-        self.users_tab.setLayout(layout)
 
     def _build_tools_tab(self):
         layout = QVBoxLayout()
@@ -163,8 +135,7 @@ class SupervisorWindowQt(QMainWindow):
 
     @Slot()
     def on_client_selected(self, row, col):
-        # When user selects a client, auto-load its users
-        self.load_users_for_selected_client()
+        pass # Теперь пользователи загружаются в редакторе
 
     @Slot()
     def run_db_setup(self):
@@ -228,34 +199,6 @@ class SupervisorWindowQt(QMainWindow):
         if not item: return None
         return int(item.text())
 
-    @Slot()
-    def load_users_for_selected_client(self):
-        client_id = self._get_selected_client_id()
-        if not client_id:
-            QMessageBox.warning(self, "Внимание", "Сначала выберите клиента в списке клиентов.")
-            return
-        self.load_users(client_id)
-
-    def load_users(self, client_id: int):
-        try:
-            with get_main_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT id, name, login, role, is_active FROM users WHERE client_id = %s ORDER BY name;", (client_id,))
-                    rows = cur.fetchall()
-
-            self.users_table.setRowCount(0)
-            for r in rows:
-                row = self.users_table.rowCount()
-                self.users_table.insertRow(row)
-                self.users_table.setItem(row, 0, QTableWidgetItem(str(r[0])))
-                self.users_table.setItem(row, 1, QTableWidgetItem(str(r[1] or '')))
-                self.users_table.setItem(row, 2, QTableWidgetItem(str(r[2] or '')))
-                self.users_table.setItem(row, 3, QTableWidgetItem(str(r[3] or '')))
-                self.users_table.setItem(row, 4, QTableWidgetItem(str(bool(r[4]))))
-        except Exception as e:
-            logging.error(f"Ошибка загрузки пользователей: {e}\n{traceback.format_exc()}")
-            QMessageBox.critical(self, "Ошибка", "Не удалось загрузить список пользователей.")
-
     def open_client_editor(self, client_id: int = None):
         dlg = ClientEditorDialog(parent=self, client_id=client_id)
         if dlg.exec():
@@ -316,7 +259,7 @@ class ClientEditorDialog(QDialog):
         super().__init__(parent)
         self.client_id = client_id
         self.setWindowTitle(f"Редактор клиента: {client_id}" if client_id else "Новый клиент")
-        self.resize(700, 500)
+        self.resize(800, 600)
         self._build_ui()
         if client_id:
             self._load_client()
@@ -431,6 +374,9 @@ class ClientEditorDialog(QDialog):
             except Exception: pass
 
             self.cert_text.setPlainText(sslcert or '')
+            
+            # Загружаем пользователей для этого клиента
+            self.load_users_for_editor()
         except Exception as e:
             logging.error(f"Ошибка загрузки клиента: {e}\n{traceback.format_exc()}")
             QMessageBox.critical(self, "Ошибка", "Не удалось загрузить данные клиента")
@@ -777,10 +723,7 @@ class UserEditorDialog(QDialog):
         self.setLayout(layout)
 
     def save(self):
-        try:
-            if not self.client_id:
-                QMessageBox.warning(self, "Внимание", "Client ID не задан")
-                return
+        try:            
             name = self.name_edit.text().strip()
             login = self.login_edit.text().strip()
             password = self.pass_edit.text()
@@ -799,13 +742,14 @@ class UserEditorDialog(QDialog):
                         (name, login, hashed, role, client_id_to_save)
                     )
                 conn.commit()
-            # Синхронизируем только администраторов, не супервизоров
-            try:
-                synced = sync_user_with_client_db(self.client_id, login, hashed, True, True)
-                if not synced:
-                    logging.warning(f"Не удалось синхронизировать пользователя {login} с клиентской БД (id={self.client_id})")
-            except Exception:
-                logging.exception('sync_user_with_client_db failed')
+            # Синхронизируем только администраторов, не супервизоров.
+            if not self.is_supervisor and self.client_id:
+                try:
+                    synced = sync_user_with_client_db(self.client_id, login, hashed, True, True)
+                    if not synced:
+                        logging.warning(f"Не удалось синхронизировать пользователя {login} с клиентской БД (id={self.client_id})")
+                except Exception:
+                    logging.exception('sync_user_with_client_db failed')
 
             QMessageBox.information(self, "Успех", f"{role.capitalize()} создан")
             self.accept()
