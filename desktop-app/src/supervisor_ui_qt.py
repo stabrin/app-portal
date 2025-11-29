@@ -478,12 +478,12 @@ class ClientEditorDialog(QDialog):
                         if not exists:
                             add_log(f"ОШИБКА: База данных '{db_name}' не найдена.", "ERROR")
                             # Предложим сохранить команды создания БД в файл
-                            msg = f"База данных '{db_name}' не найдена на сервере {db_host}.\n\nХотите сохранить команды для ее создания в файл?"
+                            msg = f"База данных '{db_name}' не найдена на сервере {db_host}.\n\nХотите сохранить команды для ее создания в SQL-файл?"
                             if QMessageBox.question(self, "База данных не найдена", msg, QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
                                 # --- ИЗМЕНЕНИЕ: Добавляем GRANT CONNECT для основного пользователя ---
                                 sql_commands = (
                                     f"CREATE DATABASE {db_name};\n"
-                                    f"GRANT CONNECT ON DATABASE {db_name} TO {db_user};\n"
+                                    f"GRANT CONNECT ON DATABASE {db_name} TO \"{db_user}\";\n"
                                 )
                                 fn, _ = QFileDialog.getSaveFileName(self, "Сохранить SQL", f"create_{db_name}.sql", "SQL Files (*.sql);;Text files (*.txt)")
                                 if fn:

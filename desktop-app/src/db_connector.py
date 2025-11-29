@@ -79,7 +79,9 @@ def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedCo
                             if cert_path:
                                 conn_params = {**ext_params, 'sslmode': 'verify-full', 'sslrootcert': cert_path}
             except Exception as e:
-                logging.warning(f"get_client_pool: Попытка подключения по внешнему адресу не удалась: {e}")
+                # --- ИЗМЕНЕНИЕ: Добавляем в лог параметры подключения для диагностики ---
+                log_params = {k: v for k, v in ext_params.items() if k != 'password'}
+                logging.warning(f"get_client_pool: Попытка подключения по внешнему адресу не удалась. Параметры: {log_params}. Ошибка: {e}")
 
         # 2. Попытка с внутренним адресом
         if not conn_params:
@@ -95,7 +97,9 @@ def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedCo
                         if conn:
                             conn_params = {**loc_params, 'sslmode': 'disable'}
             except Exception as e:
-                logging.warning(f"get_client_pool: Попытка подключения по внутреннему адресу не удалась: {e}")
+                # --- ИЗМЕНЕНИЕ: Добавляем в лог параметры подключения для диагностики ---
+                log_params = {k: v for k, v in loc_params.items() if k != 'password'}
+                logging.warning(f"get_client_pool: Попытка подключения по внутреннему адресу не удалась. Параметры: {log_params}. Ошибка: {e}")
 
         if not conn_params:
             raise ConnectionError(f"Не удалось создать пул для клиента {pool_key}")
