@@ -114,6 +114,32 @@ class AdminWindowQt(QMainWindow):
         # Показываем приветственную страницу по умолчанию
         self.content_stack.setCurrentIndex(self.stack_indices['welcome'])
 
+    @Slot(QTreeWidgetItem, int)
+    def _on_menu_clicked(self, item: QTreeWidgetItem, column: int):
+        """Обработчик клика на пункт меню — переключает правую панель."""
+        text = item.text(column)
+        
+        # В зависимости от текста пункта меню, переключаем страницу
+        if text == "Управление уведомлениями":
+            try:
+                # При переключении на уведомления, загружаем их
+                self.load_notifications()
+            except Exception:
+                logging.exception("Error loading notifications on menu click")
+            self.content_stack.setCurrentIndex(self.stack_indices['notifications'])
+        elif text == "Сохранить INI":
+            self.content_stack.setCurrentIndex(self.stack_indices['save_config'])
+        elif text == "Конфигурация складов":
+            try:
+                # При переключении на склады, загружаем их
+                self.load_warehouses()
+            except Exception:
+                logging.exception("Error loading warehouses on menu click")
+            self.content_stack.setCurrentIndex(self.stack_indices['workplaces'])
+        else:
+            # Для всех остальных пунктов пока показываем заглушку
+            self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
+
     def _build_welcome_page(self):
         """Страница приветствия при открытии админ-интерфейса."""
         widget = QWidget()
