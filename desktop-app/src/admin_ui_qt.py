@@ -9,6 +9,7 @@ import sys
 import traceback
 import logging
 
+import pandas as pd
 from .db_connector import get_client_db_connection
 from .supply_notification_service import SupplyNotificationService
 import psycopg2
@@ -687,6 +688,21 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {e}")
+
+    def download_order_template(self):
+        """Скачивает шаблон для детализации заказа."""
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            df = service.get_formalization_template()
+
+            save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить шаблон", "template_details.xlsx", "Excel Files (*.xlsx)")
+
+            if save_path:
+                df.to_excel(save_path, index=False)
+                QMessageBox.information(self, "Успех", f"Шаблон успешно сохранен в: {save_path}")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось скачать шаблон: {e}")
 
     def save_order_details(self):
         """Сохраняет детализацию заказа."""
