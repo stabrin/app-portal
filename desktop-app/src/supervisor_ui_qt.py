@@ -46,11 +46,6 @@ class SupervisorWindowQt(QMainWindow):
         self._build_tools_tab()
         tabs.addTab(self.tools_tab, "Инструменты")
 
-        # Вкладка Супервизоры
-        self.supervisors_tab = QWidget()
-        self._build_supervisors_tab()
-        tabs.addTab(self.supervisors_tab, "Супервизоры")
-
         self.setCentralWidget(tabs)
 
     def _build_clients_tab(self):
@@ -79,33 +74,22 @@ class SupervisorWindowQt(QMainWindow):
 
     def _build_tools_tab(self):
         layout = QVBoxLayout()
-        self.run_db_setup_btn = QPushButton("Инициализировать / Обновить главную БД")
-        self.run_db_setup_btn.clicked.connect(self.run_db_setup)
-
-        self.ping_widget = QWidget()
-        ping_layout = QVBoxLayout()
-        ping_label = QLabel("Ping test (используется в редакторе клиента)")
-        ping_layout.addWidget(ping_label)
-
-        layout.addWidget(self.run_db_setup_btn)
-        layout.addLayout(ping_layout)
-        self.tools_tab.setLayout(layout)
-
-    def _build_supervisors_tab(self):
-        """Создает вкладку для управления супервизорами."""
-        layout = QVBoxLayout()
-        btn_layout = QHBoxLayout()
-
-        self.supervisors_table = QTableWidget(0, 3)
-        self.supervisors_table.setHorizontalHeaderLabels(["ID", "Имя", "Логин"])
-
+        
+        # --- НОВЫЙ БЛОК: Кнопки и таблица супервизоров ---
+        top_btn_layout = QHBoxLayout()
+        run_db_setup_btn = QPushButton("Инициализировать / Обновить главную БД")
+        run_db_setup_btn.clicked.connect(self.run_db_setup)
         add_supervisor_btn = QPushButton("Создать супервизора")
         add_supervisor_btn.clicked.connect(self.create_supervisor)
-        btn_layout.addWidget(add_supervisor_btn)
-
-        layout.addLayout(btn_layout)
+        top_btn_layout.addWidget(run_db_setup_btn)
+        top_btn_layout.addWidget(add_supervisor_btn)
+        
+        self.supervisors_table = QTableWidget(0, 3)
+        self.supervisors_table.setHorizontalHeaderLabels(["ID", "Имя", "Логин"])
+        
+        layout.addLayout(top_btn_layout)
         layout.addWidget(self.supervisors_table)
-        self.supervisors_tab.setLayout(layout)
+        self.tools_tab.setLayout(layout)
         self.load_supervisors() # Загружаем при создании
 
     def load_supervisors(self):
@@ -300,6 +284,8 @@ class ClientEditorDialog(QDialog):
         self.init_db_btn.setEnabled(bool(self.client_id))
         self.init_db_btn.clicked.connect(self.run_client_db_setup)
         ping_btn = QPushButton("Пинг-тест")
+        # --- ИСПРАВЛЕНИЕ: Пинг-тест теперь использует правильные имена виджетов ---
+        # и показывает детальный лог в отдельном окне.
         ping_btn.clicked.connect(self._run_ping_test)
         save_btn = QPushButton("Сохранить")
         save_btn.clicked.connect(self.save)
@@ -437,6 +423,21 @@ class ClientEditorDialog(QDialog):
         if not self.client_id:
             QMessageBox.warning(self, "Внимание", "Сначала сохраните клиента перед инициализацией базы данных")
             return
+        
+        # --- НОВЫЙ БЛОК: Окно с логом, как для главной БД ---
+        log_dialog = QDialog(self)
+        log_dialog.setWindowTitle("Инициализация БД клиента")
+        log_dialog.setMinimumSize(600, 400)
+        log_layout = QVBoxLayout()
+        log_text = QTextEdit()
+        log_text.setReadOnly(True)
+        log_layout.addWidget(log_text)
+        log_dialog.setLayout(log_layout)
+
+        def add_log(message, level="INFO"):
+            log_text.append(f"[{level}] {message}")
+            QApplication.processEvents() # Обновляем UI
+
         # --- ИСПРАВЛЕНИЕ: Переносим импорт в начало, чтобы избежать UnboundLocalError ---
         import psycopg2
         try:
@@ -447,6 +448,8 @@ class ClientEditorDialog(QDialog):
                     db_data = cur.fetchone()
             if not db_data:
                 raise ValueError("Не удалось найти данные для подключения к БД клиента.")
+            
+            add_log("Данные клиента из главной БД получены.")
 
             # Проверка существования БД клиента на сервере
             db_host = db_data.get('db_host')
@@ -464,6 +467,7 @@ class ClientEditorDialog(QDialog):
                     fp.write(db_ssl_cert)
                     temp_cert_file_check = fp.name
                 ssl_params_check = {'sslmode': 'verify-full', 'sslrootcert': temp_cert_file_check}
+            add_log(f"Проверка существования БД '{db_name}' на сервере {db_host}...")
 
             try:
                 with psycopg2.connect(host=db_host, port=db_port, dbname='postgres', user=db_user, password=db_password, **ssl_params_check) as conn_system:
@@ -472,6 +476,7 @@ class ClientEditorDialog(QDialog):
                         cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_name,))
                         exists = cur.fetchone() is not None
                         if not exists:
+                            add_log(f"ОШИБКА: База данных '{db_name}' не найдена.", "ERROR")
                             # Предложим сохранить команды создания БД в файл
                             msg = f"База данных '{db_name}' не найдена на сервере {db_host}.\nХотите сохранить команды для создания в файл?"
                             if QMessageBox.question(self, "База данных не найдена", msg, QMessageBox.Yes | QMessageBox.No) == QMessageBox.Yes:
@@ -482,6 +487,7 @@ class ClientEditorDialog(QDialog):
                                         f.write(sql_commands)
                                     QMessageBox.information(self, "Успех", f"Команды сохранены в файл:\n{fn}")
                             return
+                        add_log("БД найдена. Проверка пройдена.")
             finally:
                 if temp_cert_file_check and os.path.exists(temp_cert_file_check):
                     try:
@@ -489,6 +495,7 @@ class ClientEditorDialog(QDialog):
                     except Exception:
                         pass
 
+            add_log("Подключение к БД клиента для обновления схемы...")
             # Подключаемся к клиентской БД через пул и выполняем update_client_db_schema
             from .db_connector import get_client_db_connection
             db_data['id'] = self.client_id
@@ -497,20 +504,38 @@ class ClientEditorDialog(QDialog):
                 with get_client_db_connection(user_info_for_client_db) as client_conn:
                     if not client_conn:
                         raise ConnectionError("Не удалось установить соединение с БД клиента.")
+                    add_log("Соединение установлено. Запуск обновления схемы...")
                     success = update_client_db_schema(client_conn)
                     if success:
-                        QMessageBox.information(self, "Успех", "Схема базы данных клиента успешно обновлена.")
+                        add_log("УСПЕХ: Схема базы данных клиента успешно обновлена.", "SUCCESS")
                     else:
-                        QMessageBox.critical(self, "Ошибка", "Произошла ошибка при обновлении схемы. См. логи.")
+                        add_log("ОШИБКА: Произошла ошибка при обновлении схемы. См. логи приложения.", "ERROR")
             except Exception as e:
                 logging.error(f"Не удалось выполнить инициализацию БД клиента: {e}\n{traceback.format_exc()}")
-                QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить инициализацию: {e}")
+                add_log(f"КРИТИЧЕСКАЯ ОШИБКА: {e}", "ERROR")
         except Exception as e:
             logging.error(f"Ошибка в run_client_db_setup: {e}\n{traceback.format_exc()}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось выполнить инициализацию: {e}")
+            add_log(f"КРИТИЧЕСКАЯ ОШИБКА: {e}", "ERROR")
+        
+        log_dialog.exec() # Показываем окно с логом
 
     def _run_ping_test(self):
+        # --- ИСПРАВЛЕНИЕ: Пинг-тест теперь показывает детальный лог в отдельном окне ---
+        log_dialog = QDialog(self)
+        log_dialog.setWindowTitle("Лог Пинг-теста")
+        log_dialog.setMinimumSize(600, 400)
+        log_layout = QVBoxLayout()
+        log_text = QTextEdit()
+        log_text.setReadOnly(True)
+        log_layout.addWidget(log_text)
+        log_dialog.setLayout(log_layout)
+
+        def add_log(message, level="INFO"):
+            log_text.append(f"[{level}] {message}")
+            QApplication.processEvents() # Обновляем UI
+
         try:
+            add_log("Начало пинг-теста...")
             # Формируем конфиг из полей
             # --- ИСПРАВЛЕНИЕ: Используем правильные имена виджетов (self.port_edit, self.dbname_edit и т.д.) ---
             db_config_from_ui = {
@@ -524,26 +549,35 @@ class ClientEditorDialog(QDialog):
                 'local_server_port': int(self.local_server_port_edit.value())
             }
             from .db_connector import _attempt_db_connection
+            
             # Попытка 1: внешний адрес с SSL
+            add_log(f"Шаг 1: Попытка подключения по внешнему адресу {db_config_from_ui['db_host']}:{db_config_from_ui['db_port']} с SSL...")
             try:
                 with _attempt_db_connection(db_config_from_ui, db_config_from_ui['db_ssl_cert'], 'verify-full') as conn:
                     if conn:
-                        QMessageBox.information(self, "Успех", "Успешное подключение по внешнему адресу с SSL")
-                        return
+                        add_log("УСПЕХ: Подключение по внешнему адресу с SSL прошло успешно!", "SUCCESS")
+                        log_dialog.exec()
+                        return # Выходим, если успешно
             except Exception as e:
-                logging.info(f"Ping step1 failed: {e}")
+                add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+
             # Попытка 2: внутренний адрес без SSL
+            add_log(f"Шаг 2: Попытка подключения по внутреннему адресу {db_config_from_ui['local_server_address']}:{db_config_from_ui['local_server_port']} без SSL...")
             try:
                 with _attempt_db_connection(db_config_from_ui, None, 'disable') as conn:
                     if conn:
-                        QMessageBox.information(self, "Успех", "Успешное подключение по внутреннему адресу без SSL")
-                        return
+                        add_log("УСПЕХ: Подключение по внутреннему адресу без SSL прошло успешно!", "SUCCESS")
+                        log_dialog.exec()
+                        return # Выходим, если успешно
             except Exception as e:
-                logging.info(f"Ping step2 failed: {e}")
-            QMessageBox.critical(self, "Ошибка", "Не удалось подключиться ни по одному из адресов.")
+                add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+            
+            add_log("ПРОВАЛ: Не удалось подключиться ни по одному из адресов.", "ERROR")
+            log_dialog.exec()
         except Exception as e:
             logging.error(f"Ping test error: {e}\n{traceback.format_exc()}")
-            QMessageBox.critical(self, "Ошибка", f"Ping тест завершился ошибкой: {e}")
+            add_log(f"КРИТИЧЕСКАЯ ОШИБКА: {e}", "ERROR")
+            log_dialog.exec()
 
     def load_users_for_editor(self, c_id: int):
         try:
