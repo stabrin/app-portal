@@ -197,9 +197,22 @@ class AdminWindowQt(QMainWindow):
         # Двойной клик открывает детали
         self.notifications_table.doubleClicked.connect(self.open_notification_details)
         layout.addWidget(self.notifications_table)
-        
-        # ИСПРАВЛЕНИЕ: Растягиваем колонки таблицы уведомлений на всю ширину
-        self.notifications_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
+        # ИСПРАВЛЕНИЕ: Устанавливаем разумную ширину для большинства колонок,
+        # а последнюю растягиваем, чтобы занять все свободное место.
+        header = self.notifications_table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Сценарий
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Клиент
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Товары
+        header.setSectionResizeMode(4, QHeaderView.Fixed)
+        self.notifications_table.setColumnWidth(4, 110) # Дата прибытия
+        header.setSectionResizeMode(5, QHeaderView.Fixed)
+        self.notifications_table.setColumnWidth(5, 120) # ТС/Контейнер
+        header.setSectionResizeMode(6, QHeaderView.Fixed)
+        self.notifications_table.setColumnWidth(6, 100) # Статус
+        header.setSectionResizeMode(7, QHeaderView.Fixed)
+        self.notifications_table.setColumnWidth(7, 70) # Позиций
+        header.setSectionResizeMode(8, QHeaderView.Stretch) # Кодов ДМ (растягивается)
 
         # Сводка по дням (под таблицей)
         summary_label = QLabel("Сводка по дням:")
