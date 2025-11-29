@@ -389,6 +389,8 @@ class AdminWindowQt(QMainWindow):
         self.order_details_table.setHorizontalHeaderLabels([
             "ID", "GTIN", "Кол-во", "Агрегация", "Дата производства", "Срок годн. (мес)", "Годен до"
         ])
+        # ИСПРАВЛЕНИЕ: Скрываем системную колонку ID
+        self.order_details_table.setColumnHidden(0, True)
         self.order_details_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.order_details_table.setSelectionMode(QTableWidget.SingleSelection)
         details_layout.addWidget(self.order_details_table)
@@ -638,7 +640,7 @@ class AdminWindowQt(QMainWindow):
                 
                 for col, text in enumerate(items):
                     it = QTableWidgetItem(str(text))
-                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                    # ИСПРАВЛЕНИЕ: Убираем флаг, запрещающий редактирование, чтобы ячейки были изменяемыми
                     self.order_details_table.setItem(row, col, it)
         except Exception as e:
             traceback.print_exc()
