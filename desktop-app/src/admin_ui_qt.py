@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QLineEdit,
+    QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QTextEdit,
+    QLineEdit, QHeaderView,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
 )
 from PySide6.QtCore import Qt, Slot
@@ -196,6 +197,9 @@ class AdminWindowQt(QMainWindow):
         # Двойной клик открывает детали
         self.notifications_table.doubleClicked.connect(self.open_notification_details)
         layout.addWidget(self.notifications_table)
+        
+        # ИСПРАВЛЕНИЕ: Растягиваем колонки таблицы уведомлений на всю ширину
+        self.notifications_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
         # Сводка по дням (под таблицей)
         summary_label = QLabel("Сводка по дням:")
@@ -236,9 +240,10 @@ class AdminWindowQt(QMainWindow):
         self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.summary_table.setSelectionMode(QTableWidget.SingleSelection)
         self.summary_table.setMaximumHeight(170)
-        self.summary_table.setColumnWidth(0, 120)
-        for i in range(1, 13):
-            self.summary_table.setColumnWidth(i, 45)
+        # ИСПРАВЛЕНИЕ: Убираем фиксированную ширину и растягиваем колонки
+        self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # ИСПРАВЛЕНИЕ: Скрываем номера строк (вертикальный заголовок)
+        self.summary_table.verticalHeader().setVisible(False)
         self.summary_table.setStyleSheet("""
             QTableWidget::item:selected {
                 background-color: #ADD8E6;
