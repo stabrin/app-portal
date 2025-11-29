@@ -1,10 +1,11 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QMessageBox, QTabWidget, QApplication, QLabel, QLineEdit,
-    QDialog, QFormLayout, QTextEdit, QSpinBox
+    QDialog, QFormLayout, QTextEdit, QSpinBox, QDialogButtonBox
 )
 from PySide6.QtWidgets import QFileDialog
 from PySide6.QtCore import Slot
+import bcrypt
 import sys
 import logging
 import traceback
@@ -50,6 +51,11 @@ class SupervisorWindowQt(QMainWindow):
         self._build_tools_tab()
         tabs.addTab(self.tools_tab, "Инструменты")
 
+        # Вкладка Супервизоры
+        self.supervisors_tab = QWidget()
+        self._build_supervisors_tab()
+        tabs.addTab(self.supervisors_tab, "Супервизоры")
+
         self.setCentralWidget(tabs)
 
     def _build_clients_tab(self):
@@ -81,10 +87,16 @@ class SupervisorWindowQt(QMainWindow):
         btn_layout = QHBoxLayout()
         load_users_btn = QPushButton("Загрузить пользователей для выбранного клиента")
         load_users_btn.clicked.connect(self.load_users_for_selected_client)
-        new_user_btn = QPushButton("Новый пользователь")
-        new_user_btn.clicked.connect(self.open_user_editor)
+        # Эти кнопки теперь находятся в редакторе клиента, что логичнее
+        # new_user_btn = QPushButton("Новый пользователь")
+        # new_user_btn.clicked.connect(self.open_user_editor)
+        # edit_user_btn = QPushButton("Редактировать пользователя")
+        # edit_user_btn.clicked.connect(self.edit_selected_user)
+        # delete_user_btn = QPushButton("Удалить пользователя")
+        # delete_user_btn.clicked.connect(self.delete_selected_user)
+
         btn_layout.addWidget(load_users_btn)
-        btn_layout.addWidget(new_user_btn)
+        # btn_layout.addWidget(new_user_btn)
 
         self.users_table = QTableWidget(0, 5)
         self.users_table.setHorizontalHeaderLabels(["ID", "Имя", "Логин", "Роль", "Активен"])
@@ -106,6 +118,53 @@ class SupervisorWindowQt(QMainWindow):
         layout.addWidget(self.run_db_setup_btn)
         layout.addLayout(ping_layout)
         self.tools_tab.setLayout(layout)
+
+    def _build_supervisors_tab(self):
+        """Создает вкладку для управления супервизорами."""
+        layout = QVBoxLayout()
+        btn_layout = QHBoxLayout()
+
+        self.supervisors_table = QTableWidget(0, 3)
+        self.supervisors_table.setHorizontalHeaderLabels(["ID", "Имя", "Логин"])
+
+        add_supervisor_btn = QPushButton("Создать супервизора")
+        add_supervisor_btn.clicked.connect(self.create_supervisor)
+        btn_layout.addWidget(add_supervisor_btn)
+
+        layout.addLayout(btn_layout)
+        layout.addWidget(self.supervisors_table)
+        self.supervisors_tab.setLayout(layout)
+        self.load_supervisors() # Загружаем при создании
+
+    def load_supervisors(self):
+        try:
+            with get_main_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id, name, login FROM users WHERE role = 'супервизор' ORDER BY name;")
+                    rows = cur.fetchall()
+            self.supervisors_table.setRowCount(0)
+            for r in rows:
+                row_pos = self.supervisors_table.rowCount()
+                self.supervisors_table.insertRow(row_pos)
+                self.supervisors_table.setItem(row_pos, 0, QTableWidgetItem(str(r[0])))
+                self.supervisors_table.setItem(row_pos, 1, QTableWidgetItem(str(r[1])))
+                self.supervisors_table.setItem(row_pos, 2, QTableWidgetItem(str(r[2])))
+        except Exception as e:
+            logging.error(f"Ошибка загрузки супервизоров: {e}\n{traceback.format_exc()}")
+            QMessageBox.critical(self, "Ошибка", "Не удалось загрузить список супервизоров.")
+
+    def create_supervisor(self):
+        """Открывает диалог создания супервизора."""
+        # Можно создать отдельный класс диалога, но для простоты используем UserEditorDialog
+        # с флагом is_supervisor
+        dlg = UserEditorDialog(parent=self, client_id=None, is_supervisor=True)
+        if dlg.exec():
+            self.load_supervisors()
+
+    @Slot()
+    def on_client_selected(self, row, col):
+        # When user selects a client, auto-load its users
+        self.load_users_for_selected_client()
 
     @Slot()
     def run_db_setup(self):
@@ -170,13 +229,6 @@ class SupervisorWindowQt(QMainWindow):
         return int(item.text())
 
     @Slot()
-    def on_client_selected(self, row, col):
-        # When user selects a client, auto-load its users
-        client_id = self._get_selected_client_id()
-        if client_id:
-            self.load_users(client_id)
-
-    @Slot()
     def load_users_for_selected_client(self):
         client_id = self._get_selected_client_id()
         if not client_id:
@@ -216,15 +268,6 @@ class SupervisorWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Выберите клиента для редактирования.")
             return
         self.open_client_editor(client_id)
-
-    def open_user_editor(self):
-        client_id = self._get_selected_client_id()
-        if not client_id:
-            QMessageBox.warning(self, "Внимание", "Выберите клиента перед созданием пользователя.")
-            return
-        dlg = UserEditorDialog(parent=self, client_id=client_id)
-        if dlg.exec():
-            self.load_users(client_id)
 
 
 def sync_user_with_client_db(client_id: int, user_login: str, password_hash: str, is_admin: bool, is_active: bool):
@@ -267,63 +310,12 @@ def sync_user_with_client_db(client_id: int, user_login: str, password_hash: str
             pass
         return False
 
-    def open_client_editor(self):
-        dlg = ClientEditorDialog(parent=self)
-        if dlg.exec():
-            # saved, reload clients
-            self.load_clients()
-
-    def edit_selected_client(self):
-        client_id = self._get_selected_client_id()
-        if not client_id:
-            QMessageBox.warning(self, "Внимание", "Выберите клиента для редактирования.")
-            return
-        dlg = ClientEditorDialog(parent=self, client_id=client_id)
-        if dlg.exec():
-            self.load_clients()
-
-    def open_user_editor(self):
-        client_id = self._get_selected_client_id()
-        if not client_id:
-            QMessageBox.warning(self, "Внимание", "Выберите клиента перед созданием пользователя.")
-            return
-        dlg = UserEditorDialog(parent=self, client_id=client_id)
-        if dlg.exec():
-            self.load_users(client_id)
-
-    @Slot()
-    def run_db_setup(self):
-        try:
-            script_path = resource_path(os.path.join('scripts', 'setup_database.py'))
-            # Явно указываем кодировку и поведение при ошибках декодирования,
-            # чтобы избежать UnicodeDecodeError в потоках чтения на Windows
-            result = subprocess.run(
-                [sys.executable, script_path],
-                capture_output=True,
-                text=True,
-                check=False,
-                encoding='utf-8',
-                errors='replace'
-            )
-            success = result.returncode == 0
-            # Защита на случай, если stdout/stderr == None
-            out_text = (result.stdout or '')
-            err_text = (result.stderr or '')
-            msg = out_text.strip() or err_text.strip() or 'Готово.'
-            if success:
-                QMessageBox.information(self, "Успех", msg)
-            else:
-                QMessageBox.critical(self, "Ошибка", msg)
-        except Exception as e:
-            logging.error(f"Ошибка при запуске setup_database: {e}\n{traceback.format_exc()}")
-            QMessageBox.critical(self, "Ошибка", "Не удалось запустить инициализацию БД. См. логи.")
-
 
 class ClientEditorDialog(QDialog):
     def __init__(self, parent=None, client_id: int = None):
         super().__init__(parent)
         self.client_id = client_id
-        self.setWindowTitle("Редактор клиента" if client_id else "Новый клиент")
+        self.setWindowTitle(f"Редактор клиента: {client_id}" if client_id else "Новый клиент")
         self.resize(700, 500)
         self._build_ui()
         if client_id:
@@ -341,6 +333,8 @@ class ClientEditorDialog(QDialog):
         self.api_base_edit = QLineEdit()
         self.api_email_edit = QLineEdit()
         self.api_pass_edit = QLineEdit()
+        self.local_server_addr_edit = QLineEdit()
+        self.local_server_port_edit = QSpinBox(); self.local_server_port_edit.setMaximum(65535); self.local_server_port_edit.setValue(5432)
 
         form.addRow("Имя", self.name_edit)
         form.addRow("DB Host", self.host_edit)
@@ -351,6 +345,8 @@ class ClientEditorDialog(QDialog):
         form.addRow("API Base URL", self.api_base_edit)
         form.addRow("API Email", self.api_email_edit)
         form.addRow("API Password", self.api_pass_edit)
+        form.addRow("Локальный адрес сервера", self.local_server_addr_edit)
+        form.addRow("Локальный порт сервера", self.local_server_port_edit)
 
         cert_label = QLabel("SSL сертификат (PEM)")
         self.cert_text = QTextEdit()
@@ -358,6 +354,7 @@ class ClientEditorDialog(QDialog):
 
         btn_layout = QHBoxLayout()
         self.init_db_btn = QPushButton("Инициализировать/Обновить БД клиента")
+        self.init_db_btn.setEnabled(bool(self.client_id))
         self.init_db_btn.clicked.connect(self.run_client_db_setup)
         ping_btn = QPushButton("Пинг-тест")
         ping_btn.clicked.connect(self._run_ping_test)
@@ -403,12 +400,22 @@ class ClientEditorDialog(QDialog):
         try:
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT id, name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password FROM clients WHERE id = %s", (self.client_id,))
+                    cur.execute("""
+                        SELECT id, name, db_host, db_port, db_name, db_user, db_password, 
+                               db_ssl_cert, api_base_url, api_email, api_password,
+                               local_server_address, local_server_port 
+                        FROM clients WHERE id = %s
+                    """, (self.client_id,))
                     row = cur.fetchone()
             if not row:
                 QMessageBox.critical(self, "Ошибка", "Клиент не найден")
                 return
-            (_, name, host, port, dbname, dbuser, dbpass, sslcert, api_base, api_email, api_pass) = row
+            (
+                _, name, host, port, dbname, dbuser, dbpass, sslcert, 
+                api_base, api_email, api_pass,
+                local_addr, local_port
+            ) = row
+
             self.name_edit.setText(name or '')
             self.host_edit.setText(host or '')
             try: self.port_edit.setValue(int(port or 5432))
@@ -419,6 +426,10 @@ class ClientEditorDialog(QDialog):
             self.api_base_edit.setText(api_base or '')
             self.api_email_edit.setText(api_email or '')
             self.api_pass_edit.setText(api_pass or '')
+            self.local_server_addr_edit.setText(local_addr or '')
+            try: self.local_server_port_edit.setValue(int(local_port or 5432))
+            except Exception: pass
+
             self.cert_text.setPlainText(sslcert or '')
         except Exception as e:
             logging.error(f"Ошибка загрузки клиента: {e}\n{traceback.format_exc()}")
@@ -436,18 +447,38 @@ class ClientEditorDialog(QDialog):
             api_base = self.api_base_edit.text().strip()
             api_email = self.api_email_edit.text().strip()
             api_pass = self.api_pass_edit.text().strip()
+            local_addr = self.local_server_addr_edit.text().strip()
+            local_port = int(self.local_server_port_edit.value())
 
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
                     if self.client_id:
                         cur.execute("""
-                            UPDATE clients SET name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, db_password=%s, db_ssl_cert=%s, api_base_url=%s, api_email=%s, api_password=%s WHERE id=%s
-                        """, (name, host, port, dbname, dbuser, dbpass, sslcert, api_base, api_email, api_pass, self.client_id))
+                            UPDATE clients SET 
+                                name=%s, db_host=%s, db_port=%s, db_name=%s, db_user=%s, 
+                                db_password=%s, db_ssl_cert=%s, api_base_url=%s, api_email=%s, 
+                                api_password=%s, local_server_address=%s, local_server_port=%s
+                            WHERE id=%s
+                        """, (
+                            name, host, port, dbname, dbuser, dbpass, sslcert, 
+                            api_base, api_email, api_pass, local_addr, local_port,
+                            self.client_id
+                        ))
                     else:
                         cur.execute("""
-                            INSERT INTO clients (name, db_host, db_port, db_name, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password)
-                            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        """, (name, host, port, dbname, dbuser, dbpass, sslcert, api_base, api_email, api_pass))
+                            INSERT INTO clients (
+                                name, db_host, db_port, db_name, db_user, db_password, 
+                                db_ssl_cert, api_base_url, api_email, api_password,
+                                local_server_address, local_server_port
+                            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id
+                        """, (
+                            name, host, port, dbname, dbuser, dbpass, sslcert, 
+                            api_base, api_email, api_pass, local_addr, local_port
+                        ))
+                        new_id = cur.fetchone()[0]
+                        self.client_id = new_id
+                        self.init_db_btn.setEnabled(True)
+                        self.setWindowTitle(f"Редактор клиента: {new_id}")
                 conn.commit()
             QMessageBox.information(self, "Успех", "Данные сохранены")
             self.accept()
@@ -540,8 +571,8 @@ class ClientEditorDialog(QDialog):
                 'db_user': self.dbuser_edit.text().strip(),
                 'db_password': self.dbpass_edit.text().strip(),
                 'db_ssl_cert': self.cert_text.toPlainText().strip(),
-                'local_server_address': '',
-                'local_server_port': 5432
+                'local_server_address': self.local_server_addr_edit.text().strip(),
+                'local_server_port': int(self.local_server_port_edit.value() or 5432)
             }
             from .db_connector import _attempt_db_connection
             # Попытка 1: внешний адрес с SSL
@@ -715,10 +746,11 @@ class ClientEditorDialog(QDialog):
 
 
 class UserEditorDialog(QDialog):
-    def __init__(self, parent=None, client_id: int = None):
+    def __init__(self, parent=None, client_id: int = None, is_supervisor: bool = False):
         super().__init__(parent)
         self.client_id = client_id
-        self.setWindowTitle("Новый пользователь")
+        self.is_supervisor = is_supervisor
+        self.setWindowTitle("Новый супервизор" if is_supervisor else "Новый пользователь")
         self._build_ui()
 
     def _build_ui(self):
@@ -756,12 +788,18 @@ class UserEditorDialog(QDialog):
                 QMessageBox.warning(self, "Внимание", "Все поля обязательны")
                 return
             import bcrypt
+            role = 'супервизор' if self.is_supervisor else 'администратор'
+            client_id_to_save = None if self.is_supervisor else self.client_id
+
             hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             with get_main_db_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("INSERT INTO users (name, login, password_hash, role, client_id, is_active) VALUES (%s,%s,%s,'администратор',%s, TRUE)", (name, login, hashed, self.client_id))
+                    cur.execute(
+                        "INSERT INTO users (name, login, password_hash, role, client_id, is_active) VALUES (%s,%s,%s,%s,%s, TRUE)", 
+                        (name, login, hashed, role, client_id_to_save)
+                    )
                 conn.commit()
-            # Попытка синхронизировать пользователя с клиентской БД (если настроено)
+            # Синхронизируем только администраторов, не супервизоров
             try:
                 synced = sync_user_with_client_db(self.client_id, login, hashed, True, True)
                 if not synced:
@@ -769,22 +807,8 @@ class UserEditorDialog(QDialog):
             except Exception:
                 logging.exception('sync_user_with_client_db failed')
 
-            QMessageBox.information(self, "Успех", "Пользователь создан")
+            QMessageBox.information(self, "Успех", f"{role.capitalize()} создан")
             self.accept()
         except Exception as e:
             logging.error(f"Ошибка создания пользователя: {e}\n{traceback.format_exc()}")
-            QMessageBox.critical(self, "Ошибка", f"Не удалось создать пользователя: {e}")
-
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    w = SupervisorWindowQt({'name': 'local-supervisor'})
-    w.show()
-    sys.exit(app.exec())
-
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    w = SupervisorWindowQt({'name': 'local-supervisor'})
-    w.show()
-    sys.exit(app.exec())
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать {role.lower()}: {e}")
