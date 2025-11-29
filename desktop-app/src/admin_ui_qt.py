@@ -800,7 +800,40 @@ class AdminWindowQt(QMainWindow):
 
     def save_order_details(self):
         """Сохраняет детализацию заказа."""
-        QMessageBox.information(self, "Функция", "Сохранение детализации (в разработке)")
+        if not hasattr(self, 'current_notification_id'):
+            QMessageBox.warning(self, "Внимание", "Не выбрано уведомление для сохранения.")
+            return
+
+        details_to_save = []
+        try:
+            for row in range(self.order_details_table.rowCount()):
+                # Функция для безопасного получения текста из ячейки
+                def get_item_text(r, c):
+                    item = self.order_details_table.item(r, c)
+                    return item.text().strip() if item else ""
+
+                # Функция для безопасного преобразования в int или None
+                def to_int_or_none(value_str):
+                    return int(value_str) if value_str.isdigit() else None
+
+                # Собираем данные из строки
+                row_data = (
+                    int(get_item_text(row, 0)),  # id
+                    get_item_text(row, 1) or None,  # gtin
+                    to_int_or_none(get_item_text(row, 2)),  # quantity
+                    to_int_or_none(get_item_text(row, 3)),  # aggregation
+                    get_item_text(row, 4) or None,  # production_date
+                    to_int_or_none(get_item_text(row, 5)),  # shelf_life_months
+                    get_item_text(row, 6) or None,  # expiry_date
+                )
+                details_to_save.append(row_data)
+
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            service.save_notification_details(details_to_save)
+            QMessageBox.information(self, "Успех", "Изменения в детализации успешно сохранены.")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить детализацию: {e}")
 
     def delete_notification(self):
         """Удаляет выбранное уведомление."""
