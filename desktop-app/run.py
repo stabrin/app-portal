@@ -75,15 +75,33 @@ logging.basicConfig(
     ]
 )
 
-from src.auth import main
+# Выбор режима UI: 'tk' (по умолчанию) или 'qt'
+ui_mode = os.getenv('DESKTOP_UI', 'tk').lower()
+
+def _get_main_callable():
+    """Возвращает функцию main() для выбранного UI без немедленного импорта тяжёлых модулей."""
+    if ui_mode == 'qt':
+        logging.info('DESKTOP_UI=qt — запуск PySide6 варианта интерфейса')
+        from src.auth_qt import main as qt_main
+        return qt_main
+    else:
+        logging.info('DESKTOP_UI=tk (по умолчанию) — запуск Tkinter варианта интерфейса')
+        from src.auth import main as tk_main
+        return tk_main
+
 
 if __name__ == "__main__":
+    main_callable = None
     try:
-        main()
+        main_callable = _get_main_callable()
+        main_callable()
     except Exception as e:
         logging.critical(f"CRITICAL ERROR AT STARTUP: {e}", exc_info=True)
         # Если консоль закрывается мгновенно в EXE, этот input поможет увидеть ошибку
         if getattr(sys, 'frozen', False):
-             # Проверяем, есть ли консоль, прежде чем просить ввод
-             if sys.stdout and sys.stdout.isatty():
-                input("Press Enter to exit...")
+            # Проверяем, есть ли консоль, прежде чем просить ввод
+            try:
+                if sys.stdout and sys.stdout.isatty():
+                    input("Press Enter to exit...")
+            except Exception:
+                pass
