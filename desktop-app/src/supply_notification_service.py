@@ -157,6 +157,23 @@ class SupplyNotificationService:
             conn.commit()
             logging.info(f"Уведомление ID: {notification_id} успешно обновлено.")
 
+    def delete_notification(self, notification_id: int):
+        """Удаляет уведомление и связанные с ним данные."""
+        logging.info(f"Удаление уведомления ID: {notification_id}")
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM ap_supply_notification_details WHERE notification_id = %s", (notification_id,))
+                cur.execute("DELETE FROM ap_supply_notification_files WHERE notification_id = %s", (notification_id,))
+                cur.execute("DELETE FROM ap_supply_notifications WHERE id = %s", (notification_id,))
+            conn.commit()
+
+    def archive_notification(self, notification_id: int):
+        """Перемещает уведомление в архив."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
+            conn.commit()
+
     def create_or_recreate_order_from_notification(self, notification_id: int, force_recreate: bool = False):
         """
         Создает или обновляет заказ в таблице 'orders' на основе данных из уведомления о поставке.

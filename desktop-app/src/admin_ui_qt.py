@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog,
+    QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QLineEdit,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
 )
 from PySide6.QtCore import Qt, Slot
@@ -298,13 +298,13 @@ class AdminWindowQt(QMainWindow):
         # Правая половина - прочие поля
         right_form = QVBoxLayout()
         right_form.addWidget(QLabel("Планируемая дата прибытия:"))
-        self.notif_arrival_date_input = QInputDialog().getInputLabel() if False else QLabel("")
+        self.notif_arrival_date_input = QLineEdit() # ИСПРАВЛЕНИЕ: QLabel -> QLineEdit
         right_form.addWidget(self.notif_arrival_date_input)
         right_form.addWidget(QLabel("Номер контейнера/ТС:"))
-        self.notif_vehicle_input = QLabel("")
+        self.notif_vehicle_input = QLineEdit() # ИСПРАВЛЕНИЕ: QLabel -> QLineEdit
         right_form.addWidget(self.notif_vehicle_input)
         right_form.addWidget(QLabel("Комментарии:"))
-        self.notif_comments_text = QTextEdit()
+        self.notif_comments_text = QTextEdit() # QTextEdit уже был правильным
         self.notif_comments_text.setMaximumHeight(100)
         right_form.addWidget(self.notif_comments_text)
 
@@ -430,7 +430,7 @@ class AdminWindowQt(QMainWindow):
             
             # Загружаем сводку
             self.load_summary_data()
-        except Exception as e:
+        except (Exception, psycopg2.Error) as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить уведомления: {e}")
 
@@ -439,39 +439,38 @@ class AdminWindowQt(QMainWindow):
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             summary_data = service.get_arrival_summary()
-            
-            self.summary_table.setRowCount(0)
-            
+
+            # ИСПРАВЛЕНИЕ: Очищаем только строки с данными, оставляя заголовки
+            while self.summary_table.rowCount() > 2:
+                self.summary_table.removeRow(2)
+
             if not summary_data:
                 return
-            
+
             for row_data in summary_data:
                 row = self.summary_table.rowCount()
                 self.summary_table.insertRow(row)
-                
+
                 # Первая колонка - название клиента
-                client_name = row_data.get('client_name', '')
+                client_name = row_data.get('client_name', row_data.get('client', ''))
                 it = QTableWidgetItem(str(client_name))
                 it.setFlags(it.flags() & ~Qt.ItemIsEditable)
                 self.summary_table.setItem(row, 0, it)
-                
+
                 # Остальные колонки - данные по дням (ув, поз, дм)
                 col_index = 1
-                for day_key in ['d0', 'd1', 'd2', 'd3']:
-                    # Сервис возвращает ключи в нижнем регистре с подчеркиванием
+                for i in range(4):
+                    day_key = f"d{i}"
                     for metric in ['ув', 'поз', 'дм']:
                         key = f"{day_key}_{metric}"
-                        # Значение может быть None или число
                         value = row_data.get(key)
-                        if value is None:
-                            value = 0
+                        if value is None: value = 0
                         it = QTableWidgetItem(str(int(value)))
                         it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-                        # Выравнивание по центру для числовых данных
                         it.setTextAlignment(Qt.AlignCenter)
                         self.summary_table.setItem(row, col_index, it)
                         col_index += 1
-        except Exception as e:
+        except (Exception, psycopg2.Error) as e:
             traceback.print_exc()
             logging.debug(f"Не удалось загрузить сводку: {e}")
 
@@ -513,13 +512,13 @@ class AdminWindowQt(QMainWindow):
             self.notif_product_label.setText(str(product_groups))
             
             self.notif_status_label.setText(notif_data.get('status', ''))
-            self.notif_arrival_date_input.setText(str(notif_data.get('planned_arrival_date', '')))
-            self.notif_vehicle_input.setText(notif_data.get('vehicle_number', ''))
+            self.notif_arrival_date_input.setText(str(notif_data.get('planned_arrival_date', '') or ''))
+            self.notif_vehicle_input.setText(notif_data.get('vehicle_number', '') or '')
             self.notif_comments_text.setPlainText(notif_data.get('comments', ''))
             
             # Загружаем документы
             self.load_notification_files(notif_id)
-            
+
             # Загружаем детализацию
             self.load_order_details(notif_id)
         except Exception as e:
@@ -589,6 +588,7 @@ class AdminWindowQt(QMainWindow):
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             data_to_save = {
+                'planned_arrival_date': self.notif_arrival_date_input.text() or None,
                 'vehicle_number': self.notif_vehicle_input.text(),
                 'comments': self.notif_comments_text.toPlainText()
             }
@@ -607,7 +607,8 @@ class AdminWindowQt(QMainWindow):
         
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            success, message = service.create_order_from_notification(self.current_notification_id)
+            # ИСПРАВЛЕНИЕ: Используем правильное имя метода
+            success, message, needs_confirmation = service.create_or_recreate_order_from_notification(self.current_notification_id)
             if success:
                 QMessageBox.information(self, "Успех", message)
                 self.load_notifications()
@@ -961,4 +962,3 @@ if __name__ == '__main__':
     w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
     w.show()
     sys.exit(app.exec())
-
