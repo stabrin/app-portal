@@ -253,10 +253,14 @@ class AdminWindowQt(QMainWindow):
         self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.summary_table.setSelectionMode(QTableWidget.SingleSelection)
         self.summary_table.setMaximumHeight(170)
-        # ИСПРАВЛЕНИЕ: Убираем фиксированную ширину и растягиваем колонки
-        self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # ИСПРАВЛЕНИЕ: Скрываем номера строк (вертикальный заголовок)
+        # ИСПРАВЛЕНИЕ: Скрываем стандартные заголовки (и номера строк, и номера колонок)
         self.summary_table.verticalHeader().setVisible(False)
+        self.summary_table.horizontalHeader().setVisible(False)
+        # ИСПРАВЛЕНИЕ: Устанавливаем режим растягивания для колонок с данными,
+        # а для клиента задаем фиксированную ширину.
+        self.summary_table.setColumnWidth(0, 200) # Ширина для колонки "Клиент"
+        for i in range(1, 13):
+            self.summary_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
         self.summary_table.setStyleSheet("""
             QTableWidget::item:selected {
                 background-color: #ADD8E6;
