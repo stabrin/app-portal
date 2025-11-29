@@ -1,10 +1,10 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QMessageBox, QTabWidget, QApplication, QLabel, QLineEdit,
-    QDialog, QFormLayout, QTextEdit, QSpinBox, QDialogButtonBox
+    QDialog, QFormLayout, QTextEdit, QSpinBox, QDialogButtonBox, QFileDialog,
+    QAbstractItemView
 )
-from PySide6.QtWidgets import QFileDialog
-from PySide6.QtCore import Slot
+from PySide6.QtCore import Slot, Qt
 import bcrypt
 import sys
 import logging
@@ -67,6 +67,13 @@ class SupervisorWindowQt(QMainWindow):
         self.clients_table = QTableWidget(0, 4)
         self.clients_table.setHorizontalHeaderLabels(["ID", "Имя", "DB Host", "Создано"])
         self.clients_table.cellClicked.connect(self.on_client_selected)
+        # Выделяем всю строку и разрешаем только одиночный выбор
+        self.clients_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.clients_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        # Отключаем редактирование ячеек через UI
+        self.clients_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Немного стилизуем подсветку выбранной строки
+        self.clients_table.setStyleSheet("QTableWidget::item:selected{background-color: #cde8ff}")
 
         layout.addLayout(btn_layout)
         layout.addWidget(self.clients_table)
@@ -163,10 +170,11 @@ class SupervisorWindowQt(QMainWindow):
             for r in rows:
                 row = self.clients_table.rowCount()
                 self.clients_table.insertRow(row)
-                self.clients_table.setItem(row, 0, QTableWidgetItem(str(r[0])))
-                self.clients_table.setItem(row, 1, QTableWidgetItem(str(r[1])))
-                self.clients_table.setItem(row, 2, QTableWidgetItem(str(r[2] or '')))
-                self.clients_table.setItem(row, 3, QTableWidgetItem(str(r[3] or '')))
+                items = [QTableWidgetItem(str(r[0])), QTableWidgetItem(str(r[1])), QTableWidgetItem(str(r[2] or '')), QTableWidgetItem(str(r[3] or ''))]
+                for c, it in enumerate(items):
+                    # Сделаем элемент не редактируемым (страховка), но оставим возможность выбора
+                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                    self.clients_table.setItem(row, c, it)
 
             if count == 0:
                 # Подсказка для тестирования — если нет клиентов, покажем сообщение
@@ -537,11 +545,9 @@ class ClientEditorDialog(QDialog):
         def add_log(message, level="INFO"):
             log_text.append(f"[{level}] {message}")
             QApplication.processEvents() # Обновляем UI
-
         try:
             add_log("Начало пинг-теста...")
             # Формируем конфиг из полей
-            # --- ИСПРАВЛЕНИЕ: Используем правильные имена виджетов (self.port_edit, self.dbname_edit и т.д.) ---
             db_config_from_ui = {
                 'db_host': self.host_edit.text().strip(),
                 'db_port': int(self.port_edit.value()),
@@ -553,38 +559,52 @@ class ClientEditorDialog(QDialog):
                 'local_server_port': int(self.local_server_port_edit.value())
             }
             from .db_connector import _attempt_db_connection
-            
-            # Попытка 1: внешний адрес с SSL
+
+            ext_ok = False
+            loc_ok = False
+
+            # Попытка 1: внешний адрес с SSL (если указан)
             ext_host = db_config_from_ui['db_host']
             if ext_host:
-                add_log(f"Шаг 1: Попытка подключения по внешнему адресу {ext_host}:{db_config_from_ui['db_port']} с SSL...")
+                masked_pw = '***' if db_config_from_ui.get('db_password') else '<нет>'
+                cert_present = bool(db_config_from_ui.get('db_ssl_cert'))
+                add_log(f"Шаг 1: Попытка подключения по внешнему адресу {ext_host}:{db_config_from_ui['db_port']} с SSL... (user={db_config_from_ui.get('db_user')}, password={masked_pw}, cert_present={cert_present})")
                 try:
                     with _attempt_db_connection(db_config_from_ui, db_config_from_ui['db_ssl_cert'], 'verify-full') as conn:
                         if conn:
+                            ext_ok = True
                             add_log("УСПЕХ: Подключение по внешнему адресу с SSL прошло успешно!", "SUCCESS")
-                            log_dialog.exec()
-                            return # Выходим, если успешно
+                        else:
+                            add_log("Внешняя попытка вернула None (недостаточно параметров или предварительная проверка не пройдена)", "WARNING")
                 except Exception as e:
                     add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+                    add_log(traceback.format_exc(), "DEBUG")
             else:
                 add_log("Шаг 1: Пропущен. Внешний адрес не указан.", "INFO")
 
-            # Попытка 2: внутренний адрес без SSL
+            # Попытка 2: внутренний адрес без SSL (если указан) — выполняем всегда, если есть адрес
             local_host = db_config_from_ui['local_server_address']
             if local_host:
-                add_log(f"Шаг 2: Попытка подключения по внутреннему адресу {local_host}:{db_config_from_ui['local_server_port']} без SSL...")
+                masked_pw = '***' if db_config_from_ui.get('db_password') else '<нет>'
+                add_log(f"Шаг 2: Попытка подключения по внутреннему адресу {local_host}:{db_config_from_ui['local_server_port']} без SSL... (user={db_config_from_ui.get('db_user')}, password={masked_pw})")
                 try:
                     with _attempt_db_connection(db_config_from_ui, None, 'disable', use_local=True) as conn:
                         if conn:
+                            loc_ok = True
                             add_log("УСПЕХ: Подключение по внутреннему адресу без SSL прошло успешно!", "SUCCESS")
-                            log_dialog.exec()
-                            return # Выходим, если успешно
+                        else:
+                            add_log("Внутренняя попытка вернула None (недостаточно параметров или предварительная проверка не пройдена)", "WARNING")
                 except Exception as e:
                     add_log(f"ОШИБКА: Не удалось подключиться. {e}", "ERROR")
+                    add_log(traceback.format_exc(), "DEBUG")
             else:
                 add_log("Шаг 2: Пропущен. Внутренний адрес не указан.", "INFO")
-            
-            add_log("ПРОВАЛ: Не удалось подключиться ни по одному из адресов.", "ERROR")
+
+            # Итог
+            if ext_ok or loc_ok:
+                add_log(f"ИТОГ: Пинг завершён. Внешний: {ext_ok}, Внутренний: {loc_ok}", "SUCCESS")
+            else:
+                add_log("ПРОВАЛ: Не удалось подключиться ни по одному из адресов.", "ERROR")
             log_dialog.exec()
         except Exception as e:
             logging.error(f"Ping test error: {e}\n{traceback.format_exc()}")

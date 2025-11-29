@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import logging
+import traceback
 import psycopg2
 from contextlib import contextmanager
 from psycopg2 import pool
@@ -63,48 +64,76 @@ def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedCo
         logging.info(f"Пул для клиента (ключ: {pool_key}) не найден. Создаю...")
         conn_params = None
         is_local_mode = not isinstance(pool_key, int)
+        logging.debug(f"get_client_pool: db_config = {{{', '.join(f'{k}: {v}' for k,v in (db_config or {}).items() if k != 'db_password')}}}")
 
         # 1. Попытка с внешним адресом (SSL)
         if not is_local_mode:
             try:
                 ext_params = {
-                    'host': db_config.get('db_host'), 'port': db_config.get('db_port'), 'dbname': db_config.get('db_name'),
-                    'user': db_config.get('db_user'), 'password': db_config.get('db_password'), 'connect_timeout': 3
+                    'host': db_config.get('db_host'), 
+                    'port': db_config.get('db_port'), 
+                    'dbname': db_config.get('db_name'),
+                    'user': db_config.get('db_user'), 
+                    'password': db_config.get('db_password'), 
+                    'connect_timeout': 3
                 }
-                if all(ext_params.values()):
+                # Проверяем обязательные поля (без пустых значений)
+                required = ['host', 'port', 'dbname', 'user', 'password']
+                if all(ext_params.get(k) for k in required):
+                    logging.debug(f"get_client_pool: Попытка подключения по внешнему адресу {ext_params['host']}:{ext_params['port']}")
                     with _attempt_db_connection(ext_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
                         if conn:
-                            # --- ИЗМЕНЕНИЕ: Добавляем проверку существования файла сертификата ---
+                            logging.info(f"get_client_pool: Успешное подключение по внешнему адресу с SSL")
                             cert_path = _get_cert_path(db_config.get('db_ssl_cert'))
                             if cert_path:
                                 conn_params = {**ext_params, 'sslmode': 'verify-full', 'sslrootcert': cert_path}
+                            else:
+                                conn_params = {**ext_params, 'sslmode': 'disable'}
+                else:
+                    missing = [k for k in required if not ext_params.get(k)]
+                    logging.debug(f"get_client_pool: Пропуск внешнего подключения — отсутствуют поля {missing}")
             except Exception as e:
-                # --- ИЗМЕНЕНИЕ: Добавляем в лог параметры подключения для диагностики ---
                 log_params = {k: v for k, v in ext_params.items() if k != 'password'}
                 logging.warning(f"get_client_pool: Попытка подключения по внешнему адресу не удалась. Параметры: {log_params}. Ошибка: {e}")
 
-        # 2. Попытка с внутренним адресом
+        # 2. Попытка с внутренним адресом (без SSL)
         if not conn_params:
             try:
-                host = db_config.get('local_server_address', db_config.get('db_host'))
-                port = db_config.get('local_server_port', db_config.get('db_port'))
+                loc_host = db_config.get('local_server_address') or db_config.get('db_host')
+                loc_port = db_config.get('local_server_port') or db_config.get('db_port')
                 loc_params = {
-                    'host': host, 'port': port, 'dbname': db_config.get('db_name'),
-                    'user': db_config.get('db_user'), 'password': db_config.get('db_password'), 'connect_timeout': 5
+                    'host': loc_host, 
+                    'port': loc_port, 
+                    'dbname': db_config.get('db_name'),
+                    'user': db_config.get('db_user'), 
+                    'password': db_config.get('db_password'), 
+                    'connect_timeout': 5
                 }
-                if all(loc_params.values()):
+                required = ['host', 'port', 'dbname', 'user', 'password']
+                if all(loc_params.get(k) for k in required):
+                    logging.debug(f"get_client_pool: Попытка подключения по внутреннему адресу {loc_host}:{loc_port}")
                     with _attempt_db_connection(loc_params, None, 'disable') as conn:
                         if conn:
+                            logging.info(f"get_client_pool: Успешное подключение по внутреннему адресу без SSL")
                             conn_params = {**loc_params, 'sslmode': 'disable'}
+                else:
+                    missing = [k for k in required if not loc_params.get(k)]
+                    logging.debug(f"get_client_pool: Пропуск внутреннего подключения — отсутствуют поля {missing}")
             except Exception as e:
-                # --- ИЗМЕНЕНИЕ: Добавляем в лог параметры подключения для диагностики ---
                 log_params = {k: v for k, v in loc_params.items() if k != 'password'}
                 logging.warning(f"get_client_pool: Попытка подключения по внутреннему адресу не удалась. Параметры: {log_params}. Ошибка: {e}")
 
         if not conn_params:
+            logging.error(f"get_client_pool: Ни одна попытка подключения не удалась. pool_key={pool_key}, is_local_mode={is_local_mode}")
             raise ConnectionError(f"Не удалось создать пул для клиента {pool_key}")
 
-        client_db_pools[pool_key] = pool.ThreadedConnectionPool(1, 5, **conn_params)
+        try:
+            logging.info(f"get_client_pool: Создаю пул для клиента {pool_key} с параметрами: host={conn_params.get('host')}, port={conn_params.get('port')}, dbname={conn_params.get('dbname')}")
+            client_db_pools[pool_key] = pool.ThreadedConnectionPool(1, 5, **conn_params)
+            logging.info(f"get_client_pool: Пул успешно создан для клиента {pool_key}")
+        except Exception as e:
+            logging.error(f"get_client_pool: Ошибка при создании ThreadedConnectionPool: {e}\n{traceback.format_exc()}")
+            raise
 
     return client_db_pools[pool_key]
 
@@ -196,19 +225,34 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
         conn_params['sslmode'] = ssl_mode
         conn_params['connect_timeout'] = 5
 
-        # --- ИСПРАВЛЕНИЕ: Используем правильный хост в зависимости от флага use_local ---
+        # Выбираем адрес/порт для подключения, принимая во внимание возможные ключи
+        # base_params может содержать ключи 'host'/'port' или 'db_host'/'db_port' или 'local_server_address'/'local_server_port'.
         if use_local:
-            conn_params['host'] = conn_params.get('local_server_address')
-            conn_params['port'] = conn_params.get('local_server_port')
+            host = conn_params.get('local_server_address') or conn_params.get('host') or conn_params.get('db_host')
+            port = conn_params.get('local_server_port') or conn_params.get('port') or conn_params.get('db_port')
         else:
-            conn_params['host'] = conn_params.get('db_host')
-            conn_params['port'] = conn_params.get('db_port')
+            host = conn_params.get('host') or conn_params.get('db_host') or conn_params.get('local_server_address')
+            port = conn_params.get('port') or conn_params.get('db_port') or conn_params.get('local_server_port')
+        conn_params['host'] = host
+        conn_params['port'] = port
 
         if ssl_cert_content and ssl_mode == 'verify-full':
             with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
                 fp.write(ssl_cert_content.strip())
                 temp_cert_file = fp.name
             conn_params['sslrootcert'] = temp_cert_file
+        # Нормализуем возможные альтернативные имена ключей, которые могут
+        # приходить из UI (db_name, db_user, db_password)
+        conn_params['dbname'] = conn_params.get('dbname') or conn_params.get('db_name')
+        conn_params['user'] = conn_params.get('user') or conn_params.get('db_user')
+        conn_params['password'] = conn_params.get('password') or conn_params.get('db_password')
+
+        # Debug: покажем, какие параметры сформированы (пароль маскируем)
+        try:
+            debug_params = {k: ('***' if k == 'password' and conn_params.get(k) else conn_params.get(k)) for k in ('host','port','dbname','user','password')}
+            logging.debug(f"_attempt_db_connection: conn_params prepared: {debug_params}")
+        except Exception:
+            logging.debug("_attempt_db_connection: unable to prepare debug_params")
 
         required_keys = ['host', 'port', 'dbname', 'user', 'password']
         if not all(conn_params.get(k) for k in required_keys):
@@ -216,7 +260,11 @@ def _attempt_db_connection(base_params: Dict[str, Any], ssl_cert_content: Option
             yield None
             return
 
-        conn = psycopg2.connect(**conn_params)
+        # Фильтруем только поддерживаемые psycopg2 параметры, чтобы
+        # не передавать лишние ключи (например, 'id').
+        allowed_keys = ('host','port','dbname','user','password','connect_timeout','sslmode','sslrootcert')
+        filtered = {k: conn_params[k] for k in allowed_keys if k in conn_params and conn_params.get(k) is not None}
+        conn = psycopg2.connect(**filtered)
         yield conn 
 
     finally:
