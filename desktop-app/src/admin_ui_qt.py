@@ -649,44 +649,20 @@ class AdminWindowQt(QMainWindow):
             return
         
         try:
+            # ИСПРАВЛЕНИЕ: Получаем ID файла из кэша, а не из виджета
             file_info = self.notification_files_cache[sel]
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             content, filename = service.get_file_content(file_info['id'])
             
-            save_path = QFileDialog.getSaveFileName(self, "Сохранить файл", filename)[0]
-            try:
-                service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-                summary_data = service.get_arrival_summary()
-                # Очищаем все строки кроме заголовков
-                while self.summary_table.rowCount() > 2:
-                    self.summary_table.removeRow(2)
-                if not summary_data:
-                    return
-                for row_data in summary_data:
-                    row = self.summary_table.rowCount()
-                    self.summary_table.insertRow(row)
-                    # Первая колонка — название клиента
-                    client_name = row_data.get('client_name', row_data.get('client', ''))
-                    it = QTableWidgetItem(str(client_name))
-                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-                    self.summary_table.setItem(row, 0, it)
-                    # Остальные колонки — данные по дням (ув, поз, дм)
-                    col_index = 1
-                    for i in range(4):
-                        day_key = f"d{i}"
-                        for metric in ['ув', 'поз', 'дм']:
-                            key = f"{day_key}_{metric}"
-                            value = row_data.get(key)
-                            if value is None:
-                                value = 0
-                            it = QTableWidgetItem(str(int(value)))
-                            it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-                            it.setTextAlignment(Qt.AlignCenter)
-                            self.summary_table.setItem(row, col_index, it)
-                            col_index += 1
-            except Exception as e:
-                traceback.print_exc()
-                logging.debug(f"Не удалось загрузить сводку: {e}")
+            save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", filename)
+            if save_path:
+                with open(save_path, 'wb') as f:
+                    f.write(content)
+                QMessageBox.information(self, "Успех", f"Файл сохранен в: {save_path}")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось скачать файл: {e}")
+
     def save_order_details(self):
         """Сохраняет детализацию заказа."""
         QMessageBox.information(self, "Функция", "Сохранение детализации (в разработке)")
