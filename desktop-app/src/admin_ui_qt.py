@@ -232,9 +232,21 @@ class OrderEditorFrameQt(QWidget):
                 with conn.cursor() as cur:
                     logging.debug(f"Удаление старой детализации для заказа ID: {self.order_id}...")
                     cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
-                    logging.debug("Старая детализация удалена. Запуск upsert_data_to_db...")
-                    from .utils import upsert_data_to_db
-                    upsert_data_to_db(cur, 'dmkod_aggregation_details', df, ['order_id', 'gtin'])
+                    logging.debug("Старая детализация удалена. Запуск массовой вставки...")
+                    
+                    # --- ИСПРАВЛЕНИЕ: Заменяем UPSERT на прямой INSERT ---
+                    from psycopg2.extras import execute_values
+                    
+                    # Убедимся, что колонки в DataFrame соответствуют таблице
+                    cols = ['order_id', 'gtin', 'dm_quantity', 'aggregation_level', 'production_date', 'expiry_date']
+                    df_to_insert = df[[c for c in cols if c in df.columns]]
+                    
+                    insert_query = f"""
+                        INSERT INTO dmkod_aggregation_details ({", ".join(df_to_insert.columns)}) 
+                        VALUES %s
+                    """
+                    data_tuples = [tuple(x) for x in df_to_insert.to_numpy()]
+                    execute_values(cur, insert_query, data_tuples)
                     logging.debug("upsert_data_to_db завершен.")
                 conn.commit()
             QMessageBox.information(self, "Успех", f"Детализация импортирована. Загружено {len(df)} строк.")
