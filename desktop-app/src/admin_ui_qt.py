@@ -1016,18 +1016,6 @@ class NotificationEditorDialog(QDialog):
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить уведомление: {e}")
 
     def _build_save_config_page(self):
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Создание файлов конфигурации для мобильного приложения."))
-        layout.addWidget(QLabel("Файлы будут сохранены в каталог, где запущена программа."))
-        btn_export = QPushButton("Сохранить файлы конфигурации")
-        btn_export.clicked.connect(self._save_config_with_default_dir)
-        layout.addWidget(btn_export)
-        layout.addStretch()
-        widget.setLayout(layout)
-        return widget
-
-    def _build_save_config_page(self):
         """Создает страницу для сохранения файлов конфигурации (config.ini, cert.pem)."""
         widget = QWidget()
         layout = QVBoxLayout()
