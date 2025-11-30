@@ -2267,7 +2267,7 @@ class AdminWindowQt(QMainWindow):
 
         # Заглушки для остальных справочников
         self._build_product_groups_tab(notebook)
-        notebook.addTab(QLabel("Раздел 'Товары' в разработке"), "Товары")
+        self._build_products_tab(notebook) # Реализуем эту вкладку
         notebook.addTab(QLabel("Раздел 'Сценарии маркировки' в разработке"), "Сценарии маркировки")
 
         return widget
@@ -2725,6 +2725,164 @@ class AdminWindowQt(QMainWindow):
             df = pd.read_excel(filepath, dtype={'id': str})
             self.catalog_service.process_product_groups_import(df)
             self._refresh_product_groups()
+            QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
+
+    def _build_products_tab(self, parent_notebook):
+        """Создает вкладку для управления справочником товаров."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Панель кнопок
+        controls_layout = QHBoxLayout()
+        btn_add = QPushButton("Добавить")
+        btn_edit = QPushButton("Редактировать")
+        btn_delete = QPushButton("Удалить")
+        btn_export = QPushButton("Выгрузить в Excel")
+        btn_import = QPushButton("Загрузить из Excel")
+        btn_refresh = QPushButton("Обновить")
+        controls_layout.addWidget(btn_add)
+        controls_layout.addWidget(btn_edit)
+        controls_layout.addWidget(btn_delete)
+        controls_layout.addStretch()
+        controls_layout.addWidget(btn_export)
+        controls_layout.addWidget(btn_import)
+        controls_layout.addWidget(btn_refresh)
+        layout.addLayout(controls_layout)
+
+        # Таблица
+        self.products_table = QTableWidget(0, 5)
+        self.products_table.setHorizontalHeaderLabels(["GTIN", "Наименование", "Описание 1", "Описание 2", "Описание 3"])
+        self.products_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.products_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.products_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.products_table)
+        
+        parent_notebook.addTab(tab, "Товары")
+
+        # Привязка обработчиков
+        btn_refresh.clicked.connect(self._refresh_products)
+        btn_add.clicked.connect(self._add_product)
+        btn_edit.clicked.connect(self._edit_product)
+        self.products_table.doubleClicked.connect(self._edit_product)
+        btn_delete.clicked.connect(self._delete_product)
+        btn_export.clicked.connect(self._export_products)
+        btn_import.clicked.connect(self._import_products)
+
+        # Загрузка данных при первом открытии
+        self._refresh_products()
+
+    def _refresh_products(self):
+        """Обновляет данные в таблице товаров."""
+        try:
+            self.products_table.setRowCount(0)
+            products = self.catalog_service.get_products()
+            for prod in products:
+                row = self.products_table.rowCount()
+                self.products_table.insertRow(row)
+                self.products_table.setItem(row, 0, QTableWidgetItem(prod.get('gtin', '')))
+                self.products_table.setItem(row, 1, QTableWidgetItem(prod.get('name', '')))
+                self.products_table.setItem(row, 2, QTableWidgetItem(prod.get('description_1', '')))
+                self.products_table.setItem(row, 3, QTableWidgetItem(prod.get('description_2', '')))
+                self.products_table.setItem(row, 4, QTableWidgetItem(prod.get('description_3', '')))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить товары: {e}")
+
+    def _open_product_editor(self, product_data=None):
+        """Открывает диалог для редактирования товара."""
+        is_new = product_data is None
+        product_data = product_data or {}
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Редактор товара")
+        layout = QVBoxLayout(dialog)
+        form_layout = QFormLayout()
+
+        fields = {
+            'gtin': QLineEdit(product_data.get('gtin', '')),
+            'name': QLineEdit(product_data.get('name', '')),
+            'description_1': QLineEdit(product_data.get('description_1', '')),
+            'description_2': QLineEdit(product_data.get('description_2', '')),
+            'description_3': QLineEdit(product_data.get('description_3', ''))
+        }
+
+        if not is_new:
+            fields['gtin'].setReadOnly(True)
+
+        form_layout.addRow("GTIN:", fields['gtin'])
+        form_layout.addRow("Наименование:", fields['name'])
+        form_layout.addRow("Описание 1:", fields['description_1'])
+        form_layout.addRow("Описание 2:", fields['description_2'])
+        form_layout.addRow("Описание 3:", fields['description_3'])
+        
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec():
+            try:
+                result = {key: widget.text() for key, widget in fields.items()}
+                if not result.get('gtin') or not result.get('name'):
+                    raise ValueError("GTIN и Наименование являются обязательными полями.")
+                
+                self.catalog_service.upsert_product(result)
+                self._refresh_products()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить товар: {e}")
+
+    def _add_product(self):
+        self._open_product_editor()
+
+    def _edit_product(self):
+        sel_row = self.products_table.currentRow()
+        if sel_row < 0: return
+        
+        product_data = {
+            'gtin': self.products_table.item(sel_row, 0).text(),
+            'name': self.products_table.item(sel_row, 1).text(),
+            'description_1': self.products_table.item(sel_row, 2).text(),
+            'description_2': self.products_table.item(sel_row, 3).text(),
+            'description_3': self.products_table.item(sel_row, 4).text()
+        }
+        self._open_product_editor(product_data)
+
+    def _delete_product(self):
+        sel_row = self.products_table.currentRow()
+        if sel_row < 0: return
+
+        gtin = self.products_table.item(sel_row, 0).text()
+        if QMessageBox.question(self, "Подтверждение", f"Удалить товар с GTIN '{gtin}'?") == QMessageBox.Yes:
+            try:
+                self.catalog_service.delete_product(gtin)
+                self._refresh_products()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить товар: {e}")
+
+    def _export_products(self):
+        try:
+            df = self.catalog_service.get_products_template()
+            products = self.catalog_service.get_products()
+            if products:
+                df = pd.DataFrame(products)
+
+            filepath, _ = QFileDialog.getSaveFileName(self, "Выгрузка: Товары", "products.xlsx", "Excel Files (*.xlsx)")
+            if filepath:
+                df.to_excel(filepath, index=False)
+                QMessageBox.information(self, "Успех", "Справочник 'Товары' выгружен.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выгрузить файл: {e}")
+
+    def _import_products(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Импорт: Товары", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath: return
+        try:
+            df = pd.read_excel(filepath, dtype={'gtin': str})
+            self.catalog_service.process_products_import(df)
+            self._refresh_products()
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
