@@ -2266,7 +2266,7 @@ class AdminWindowQt(QMainWindow):
         self._build_local_clients_tab(notebook)
 
         # Заглушки для остальных справочников
-        notebook.addTab(QLabel("Раздел 'Товарные группы' в разработке"), "Товарные группы")
+        self._build_product_groups_tab(notebook)
         notebook.addTab(QLabel("Раздел 'Товары' в разработке"), "Товары")
         notebook.addTab(QLabel("Раздел 'Сценарии маркировки' в разработке"), "Сценарии маркировки")
 
@@ -2401,6 +2401,168 @@ class AdminWindowQt(QMainWindow):
             df = pd.read_excel(filepath, dtype={'id': str, 'inn': str})
             self.catalog_service.process_local_clients_import(df)
             self._refresh_local_clients()
+            QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
+
+    def _build_product_groups_tab(self, parent_notebook):
+        """Создает вкладку для управления товарными группами."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Панель кнопок
+        controls_layout = QHBoxLayout()
+        btn_add = QPushButton("Добавить")
+        btn_edit = QPushButton("Редактировать")
+        btn_delete = QPushButton("Удалить")
+        btn_export = QPushButton("Выгрузить в Excel")
+        btn_import = QPushButton("Загрузить из Excel")
+        btn_refresh = QPushButton("Обновить")
+        controls_layout.addWidget(btn_add)
+        controls_layout.addWidget(btn_edit)
+        controls_layout.addWidget(btn_delete)
+        controls_layout.addStretch()
+        controls_layout.addWidget(btn_export)
+        controls_layout.addWidget(btn_import)
+        controls_layout.addWidget(btn_refresh)
+        layout.addLayout(controls_layout)
+
+        # Таблица
+        self.product_groups_table = QTableWidget(0, 6)
+        self.product_groups_table.setHorizontalHeaderLabels(["ID", "Системное имя", "Отображаемое имя", "Нужен ФИАС", "Шаблон кода", "Шаблон ДМ"])
+        self.product_groups_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.product_groups_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.product_groups_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.product_groups_table)
+        
+        parent_notebook.addTab(tab, "Товарные группы")
+
+        # Привязка обработчиков
+        btn_refresh.clicked.connect(self._refresh_product_groups)
+        btn_add.clicked.connect(self._add_product_group)
+        btn_edit.clicked.connect(self._edit_product_group)
+        self.product_groups_table.doubleClicked.connect(self._edit_product_group)
+        btn_delete.clicked.connect(self._delete_product_group)
+        btn_export.clicked.connect(self._export_product_groups)
+        btn_import.clicked.connect(self._import_product_groups)
+
+        # Загрузка данных при первом открытии
+        self._refresh_product_groups()
+
+    def _refresh_product_groups(self):
+        """Обновляет данные в таблице товарных групп."""
+        try:
+            self.product_groups_table.setRowCount(0)
+            groups = self.catalog_service.get_product_groups()
+            for group in groups:
+                row = self.product_groups_table.rowCount()
+                self.product_groups_table.insertRow(row)
+                self.product_groups_table.setItem(row, 0, QTableWidgetItem(str(group['id'])))
+                self.product_groups_table.setItem(row, 1, QTableWidgetItem(group.get('group_name', '')))
+                self.product_groups_table.setItem(row, 2, QTableWidgetItem(group.get('display_name', '')))
+                self.product_groups_table.setItem(row, 3, QTableWidgetItem(str(group.get('fias_required', False))))
+                self.product_groups_table.setItem(row, 4, QTableWidgetItem(group.get('code_template', '')))
+                self.product_groups_table.setItem(row, 5, QTableWidgetItem(group.get('dm_template', '')))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить товарные группы: {e}")
+
+    def _open_product_group_editor(self, group_data=None):
+        """Открывает универсальный диалог для редактирования товарной группы."""
+        is_new = group_data is None
+        group_data = group_data or {}
+        
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Редактор товарной группы")
+        layout = QVBoxLayout(dialog)
+        form_layout = QFormLayout()
+
+        # Создаем поля ввода
+        fields = {
+            'group_name': QLineEdit(group_data.get('group_name', '')),
+            'display_name': QLineEdit(group_data.get('display_name', '')),
+            'fias_required': QCheckBox(),
+            'code_template': QLineEdit(group_data.get('code_template', '')),
+            'dm_template': QLineEdit(group_data.get('dm_template', ''))
+        }
+        fields['fias_required'].setChecked(bool(group_data.get('fias_required', False)))
+
+        form_layout.addRow("Системное имя:", fields['group_name'])
+        form_layout.addRow("Отображаемое имя:", fields['display_name'])
+        form_layout.addRow("Нужен ФИАС:", fields['fias_required'])
+        form_layout.addRow("Шаблон кода:", fields['code_template'])
+        form_layout.addRow("Шаблон ДМ:", fields['dm_template'])
+        
+        layout.addLayout(form_layout)
+
+        # Кнопки
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec():
+            try:
+                result = {key: widget.text() if isinstance(widget, QLineEdit) else widget.isChecked() for key, widget in fields.items()}
+                if not is_new:
+                    result['id'] = group_data['id']
+                
+                self.catalog_service.upsert_product_group(result)
+                self._refresh_product_groups()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить товарную группу: {e}")
+
+    def _add_product_group(self):
+        self._open_product_group_editor()
+
+    def _edit_product_group(self):
+        sel_row = self.product_groups_table.currentRow()
+        if sel_row < 0: return
+        
+        group_data = {
+            'id': int(self.product_groups_table.item(sel_row, 0).text()),
+            'group_name': self.product_groups_table.item(sel_row, 1).text(),
+            'display_name': self.product_groups_table.item(sel_row, 2).text(),
+            'fias_required': self.product_groups_table.item(sel_row, 3).text().lower() == 'true',
+            'code_template': self.product_groups_table.item(sel_row, 4).text(),
+            'dm_template': self.product_groups_table.item(sel_row, 5).text()
+        }
+        self._open_product_group_editor(group_data)
+
+    def _delete_product_group(self):
+        sel_row = self.product_groups_table.currentRow()
+        if sel_row < 0: return
+
+        group_id = int(self.product_groups_table.item(sel_row, 0).text())
+        group_name = self.product_groups_table.item(sel_row, 2).text()
+
+        if QMessageBox.question(self, "Подтверждение", f"Удалить товарную группу '{group_name}'?") == QMessageBox.Yes:
+            try:
+                self.catalog_service.delete_product_group(group_id)
+                self._refresh_product_groups()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить товарную группу: {e}")
+
+    def _export_product_groups(self):
+        try:
+            df = self.catalog_service.get_product_groups_template()
+            groups = self.catalog_service.get_product_groups()
+            if groups:
+                df = pd.DataFrame(groups)
+
+            filepath, _ = QFileDialog.getSaveFileName(self, "Выгрузка: Товарные группы", "product_groups.xlsx", "Excel Files (*.xlsx)")
+            if filepath:
+                df.to_excel(filepath, index=False)
+                QMessageBox.information(self, "Успех", "Справочник выгружен.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выгрузить файл: {e}")
+
+    def _import_product_groups(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Импорт: Товарные группы", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath: return
+        try:
+            df = pd.read_excel(filepath, dtype={'id': str})
+            self.catalog_service.process_product_groups_import(df)
+            self._refresh_product_groups()
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
