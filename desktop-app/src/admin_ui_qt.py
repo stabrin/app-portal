@@ -1530,8 +1530,8 @@ class AdminWindowQt(QMainWindow):
             items_to_add = [
                 str(order['order_date']),
                 f"{order['client_name']} / Заказ № {order['id']}",
-                # --- ИСПРАВЛЕНИЕ: Отображаем post_processing вместо статуса ---
-                order.get('scenario_data', {}).get('post_processing', order['status']),
+                # --- ИСПРАВЛЕНИЕ: Добавляем проверку на None для scenario_data ---
+                (order.get('scenario_data') or {}).get('post_processing', order['status']),
                 # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
                     str(order.get('positions_count', 0)),
                     str(order.get('dm_count', 0)),
