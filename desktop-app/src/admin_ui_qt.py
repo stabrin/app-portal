@@ -1279,7 +1279,7 @@ class AdminWindowQt(QMainWindow):
         main_splitter.addWidget(bottom_widget)
         main_splitter.setSizes([500, 200])
         
-        main_layout.addWidget(top_splitter)
+        main_layout.addWidget(main_splitter)
 
         # Привязываем обработчики к фильтрам
         table_widget.itemSelectionChanged.connect(lambda: self.on_order_select(is_archive))
