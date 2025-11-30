@@ -3001,7 +3001,8 @@ class AdminWindowQt(QMainWindow):
                 self.scenarios_table.setItem(row, 0, QTableWidgetItem(str(s['id'])))
                 self.scenarios_table.setItem(row, 1, QTableWidgetItem(s.get('name', '')))
                 
-                scenario_data_str = json.dumps(s.get('scenario_data', {}), indent=2, ensure_ascii=False)
+                # --- ИСПРАВЛЕНИЕ: Отображаем JSON как одну строку без форматирования ---
+                scenario_data_str = json.dumps(s.get('scenario_data', {}), ensure_ascii=False)
                 self.scenarios_table.setItem(row, 2, QTableWidgetItem(scenario_data_str))
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить сценарии: {e}")
