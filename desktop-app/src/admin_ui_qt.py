@@ -1131,6 +1131,8 @@ class AdminWindowQt(QMainWindow):
             self.content_stack.setCurrentIndex(self.stack_indices['notifications'])
         elif text == "Управление заказами":
             try:
+                # --- ИСПРАВЛЕНИЕ: Загружаем статистику при первом открытии ---
+                self._load_order_statistics()
                 self.load_orders(is_archive=False) # Загружаем активные заказы
             except Exception:
                 logging.exception("Error loading orders on menu click")
@@ -1440,13 +1442,18 @@ class AdminWindowQt(QMainWindow):
 
     def _load_order_statistics(self):
         """Загружает и отображает статистику по активным заказам."""
+        # --- ИСПРАВЛЕНИЕ: Определяем, какую таблицу обновлять, и проверяем, нужно ли это делать ---
+        current_tab_index = self.orders_tab_widget.currentIndex()
+        target_table = self.in_progress_stats_table if current_tab_index == 0 else self.archive_stats_table
+        
+        # Если выбрана вкладка "Архив", просто очищаем ее таблицу статистики и выходим
+        if current_tab_index == 1:
+            target_table.setRowCount(0)
+            return
+            
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             stats_data = service.get_order_statistics()
-            
-            # --- ИСПРАВЛЕНИЕ: Определяем, какую таблицу обновлять ---
-            current_tab_index = self.orders_tab_widget.currentIndex()
-            target_table = self.in_progress_stats_table if current_tab_index == 0 else self.archive_stats_table
             
             target_table.setRowCount(0)
             if not stats_data:
