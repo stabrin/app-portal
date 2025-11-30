@@ -57,6 +57,7 @@ class AdminWindowQt(QMainWindow):
         self.archive_orders_cache = []
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         self._build_ui()
+        self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
         self._setup_api_status_checker() # Настраиваем и запускаем проверку API
 
     def _build_ui(self):
@@ -148,12 +149,25 @@ class AdminWindowQt(QMainWindow):
 
         # --- НОВЫЙ БЛОК: Создание строки состояния и индикатора API ---
         status_bar = self.statusBar()
+        
+        # Индикатор API
+        status_bar.addPermanentWidget(QLabel("API:"))
         self.api_status_indicator = QLabel()
         self.api_status_indicator.setFixedSize(16, 16)
         self.api_status_indicator.setToolTip("Статус подключения к API ДМ.Код\nДвойной клик для принудительного обновления токена.")
-        # Устанавливаем начальный (серый) цвет
         self._set_api_status_color(None) 
         status_bar.addPermanentWidget(self.api_status_indicator)
+
+        # Разделитель
+        status_bar.addPermanentWidget(QLabel("  |  "))
+
+        # Индикатор БД
+        status_bar.addPermanentWidget(QLabel("БД:"))
+        self.db_status_indicator = QLabel()
+        self.db_status_indicator.setFixedSize(16, 16)
+        self.db_status_indicator.setToolTip("Статус подключения к базе данных клиента.\nДвойной клик для проверки соединения.")
+        self._set_db_status_color(None)
+        status_bar.addPermanentWidget(self.db_status_indicator)
 
         # Показываем приветственную страницу по умолчанию
         self.content_stack.setCurrentIndex(self.stack_indices['welcome'])
@@ -168,6 +182,17 @@ class AdminWindowQt(QMainWindow):
         self.api_check_timer.setInterval(600 * 1000) # 600 секунд = 10 минут
         self.api_check_timer.timeout.connect(self._update_api_status)
         self.api_check_timer.start()
+
+    def _setup_db_status_checker(self):
+        """Настраивает и запускает периодическую проверку статуса БД."""
+        # Запускаем первую проверку сразу
+        self._update_db_status()
+
+        # Создаем таймер для периодических проверок (каждые 5 минут)
+        self.db_check_timer = QTimer(self)
+        self.db_check_timer.setInterval(300 * 1000) # 300 секунд = 5 минут
+        self.db_check_timer.timeout.connect(self._update_db_status)
+        self.db_check_timer.start()
 
     @Slot()
     def _update_api_status(self):
@@ -186,6 +211,23 @@ class AdminWindowQt(QMainWindow):
 
         self.thread.start()
 
+    @Slot()
+    def _update_db_status(self):
+        """Запускает проверку БД в фоновом потоке."""
+        self.db_thread = QThread()
+        self.db_worker = DbStatusWorker(self.user_info)
+        self.db_worker.moveToThread(self.db_thread)
+
+        self.db_thread.started.connect(self.db_worker.run)
+        self.db_worker.finished.connect(self._set_db_status_color)
+        
+        # Очистка после завершения
+        self.db_worker.finished.connect(self.db_thread.quit)
+        self.db_worker.finished.connect(self.db_worker.deleteLater)
+        self.db_thread.finished.connect(self.db_thread.deleteLater)
+
+        self.db_thread.start()
+
     @Slot(bool)
     def _set_api_status_color(self, is_valid):
         """Устанавливает цвет индикатора в зависимости от статуса."""
@@ -202,12 +244,32 @@ class AdminWindowQt(QMainWindow):
             }}
         """)
 
+    @Slot(bool)
+    def _set_db_status_color(self, is_connected):
+        """Устанавливает цвет индикатора БД."""
+        if is_connected is None:
+            color = "grey" # Начальный статус
+        else:
+            color = "green" if is_connected else "red"
+        
+        self.db_status_indicator.setStyleSheet(f"""
+            QLabel {{
+                background-color: {color};
+                border-radius: 8px;
+                border: 1px solid black;
+            }}
+        """)
+
     def mouseDoubleClickEvent(self, event):
         """Обрабатывает двойной клик по окну (для индикатора)."""
         if self.api_status_indicator.underMouse():
             logging.info("Принудительное обновление токена API по двойному клику...")
             QMessageBox.information(self, "Обновление токена", "Запущено принудительное обновление токена API...")
             self._update_api_status() # Просто запускаем обычную проверку
+        elif self.db_status_indicator.underMouse():
+            logging.info("Принудительная проверка соединения с БД по двойному клику...")
+            QMessageBox.information(self, "Проверка соединения", "Запущена проверка соединения с базой данных...")
+            self._update_db_status()
         super().mouseDoubleClickEvent(event)
 
     @Slot(QTreeWidgetItem, int)
