@@ -397,6 +397,12 @@ class AdminWindowQt(QMainWindow):
         self.notification_files_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.notification_files_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.notification_files_table.setSelectionMode(QTableWidget.SingleSelection)
+        # ИСПРАВЛЕНИЕ: Делаем таблицу нередактируемой
+        self.notification_files_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # ИСПРАВЛЕНИЕ: Добавляем подсветку для выбранной строки
+        self.notification_files_table.setStyleSheet("""
+            QTableWidget::item:selected { background-color: #ADD8E6; }
+        """)
         docs_layout.addWidget(self.notification_files_table)
         docs_tab.setLayout(docs_layout)
         tabs.addTab(docs_tab, "Документы")
