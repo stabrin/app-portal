@@ -178,11 +178,20 @@ class AdminWindowQt(QMainWindow):
         self.orders_tab_widget = QTabWidget()
         
         # Вкладка "В работе"
-        in_progress_widget, self.in_progress_orders_table, self.in_progress_management_stack = self._create_orders_view(is_archive=False)
+        # --- ИСПРАВЛЕНИЕ: Распаковываем все 5 возвращаемых значений ---
+        (in_progress_widget, 
+         self.in_progress_orders_table, 
+         self.in_progress_management_stack, 
+         self.in_progress_client_filter, 
+         self.in_progress_search_filter) = self._create_orders_view(is_archive=False)
         self.orders_tab_widget.addTab(in_progress_widget, "В работе")
 
         # Вкладка "Архив"
-        archive_widget, self.archive_orders_table, self.archive_management_stack = self._create_orders_view(is_archive=True)
+        (archive_widget, 
+         self.archive_orders_table, 
+         self.archive_management_stack, 
+         self.archive_client_filter, 
+         self.archive_search_filter) = self._create_orders_view(is_archive=True)
         self.orders_tab_widget.addTab(archive_widget, "Архив")
 
         self.orders_tab_widget.currentChanged.connect(self._on_orders_tab_changed)
