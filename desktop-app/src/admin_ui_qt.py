@@ -908,13 +908,13 @@ class AdminWindowQt(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
 
-        info_label1 = QLabel("<h3>Создание файлов конфигурации для мобильного приложения</h3>")
+        info_label1 = QLabel("<h3>Создание файлов конфигурации для локального подключения к базе данных клиента</h3>")
         info_label1.setWordWrap(True)
         layout.addWidget(info_label1)
 
         info_label2 = QLabel(
             "Будут созданы файлы <b>config.ini</b> и <b>cert.pem</b> с настройками подключения к базе данных этого клиента. "
-            "Сохраните их в удобное место, чтобы передать на мобильное устройство."
+            "Сохраните их в удобное место, чтобы иметь возможность подключаться по локальной сети к базе данных этого клиента."
         )
         info_label2.setWordWrap(True)
         layout.addWidget(info_label2)
