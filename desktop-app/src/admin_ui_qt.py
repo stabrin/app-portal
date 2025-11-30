@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QTextEdit,
-    QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox,
+    QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
 )
 from PySide6.QtCore import Qt, Slot, QDate
@@ -81,6 +81,10 @@ class AdminWindowQt(QMainWindow):
         self.page_notifications = self._build_notifications_page()
         self.content_stack.addWidget(self.page_notifications)
 
+        # Страница 2: Управление заказами
+        self.page_orders = self._build_orders_page()
+        self.content_stack.addWidget(self.page_orders)
+
         # Страница 2: Сохранение конфигурации
         self.page_save_config = self._build_save_config_page()
         self.content_stack.addWidget(self.page_save_config)
@@ -100,9 +104,10 @@ class AdminWindowQt(QMainWindow):
         self.stack_indices = {
             'welcome': 0,
             'notifications': 1,
-            'save_config': 2,
-            'workplaces': 3,
-            'placeholder': 4,
+            'orders': 2,
+            'save_config': 3,
+            'workplaces': 4,
+            'placeholder': 5,
         }
 
         # Собираем основной layout
@@ -127,6 +132,12 @@ class AdminWindowQt(QMainWindow):
             except Exception:
                 logging.exception("Error loading notifications on menu click")
             self.content_stack.setCurrentIndex(self.stack_indices['notifications'])
+        elif text == "Управление заказами":
+            try:
+                self.load_orders(is_archive=False) # Загружаем активные заказы
+            except Exception:
+                logging.exception("Error loading orders on menu click")
+            self.content_stack.setCurrentIndex(self.stack_indices['orders'])
         elif text == "Сохранить INI":
             self.content_stack.setCurrentIndex(self.stack_indices['save_config'])
         elif text == "Конфигурация складов":
@@ -158,6 +169,112 @@ class AdminWindowQt(QMainWindow):
         layout.addStretch()
         widget.setLayout(layout)
         return widget
+
+    def _build_orders_page(self):
+        """Создает страницу для управления заказами с вкладками 'В работе' и 'Архив'."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        self.orders_tab_widget = QTabWidget()
+        
+        # Вкладка "В работе"
+        in_progress_widget, self.in_progress_orders_table, self.in_progress_management_stack = self._create_orders_view(is_archive=False)
+        self.orders_tab_widget.addTab(in_progress_widget, "В работе")
+
+        # Вкладка "Архив"
+        archive_widget, self.archive_orders_table, self.archive_management_stack = self._create_orders_view(is_archive=True)
+        self.orders_tab_widget.addTab(archive_widget, "Архив")
+
+        self.orders_tab_widget.currentChanged.connect(self._on_orders_tab_changed)
+
+        layout.addWidget(self.orders_tab_widget)
+        return widget
+
+    def _create_orders_view(self, is_archive):
+        """Создает UI для одной вкладки заказов (активных или архивных)."""
+        # Основной виджет вкладки
+        view_widget = QWidget()
+        main_layout = QVBoxLayout(view_widget)
+
+        # Разделитель для таблицы и статистики
+        main_splitter = QSplitter(Qt.Vertical)
+
+        # Верхняя панель (таблица и управление)
+        top_widget = QWidget()
+        top_layout = QHBoxLayout(top_widget)
+        top_splitter = QSplitter(Qt.Horizontal)
+
+        # Левая часть: таблица заказов
+        table_widget = QTableWidget(0, 4)
+        table_widget.setHorizontalHeaderLabels(["Дата", "Клиент / Заказ №", "Статус", "Комментарий"])
+        table_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table_widget.setSelectionMode(QAbstractItemView.SingleSelection)
+        table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        table_widget.itemSelectionChanged.connect(lambda: self.on_order_select(is_archive))
+
+        # Правая часть: панель управления
+        management_stack = QStackedWidget()
+        placeholder_label = QLabel("Выберите заказ для управления")
+        placeholder_label.setAlignment(Qt.AlignCenter)
+        management_stack.addWidget(placeholder_label) # Индекс 0
+        
+        # Вкладки для управления
+        management_tabs = QTabWidget()
+        self.order_edit_tab = QWidget()
+        self.order_api_tab = QWidget()
+        self.order_upload_tab = QWidget()
+        management_tabs.addTab(self.order_edit_tab, "Редактирование")
+        management_tabs.addTab(self.order_api_tab, "АПИ")
+        management_tabs.addTab(self.order_upload_tab, "Загрузка кодов")
+        management_stack.addWidget(management_tabs) # Индекс 1
+
+        top_splitter.addWidget(table_widget)
+        top_splitter.addWidget(management_stack)
+        top_splitter.setSizes([700, 300])
+        top_layout.addWidget(top_splitter)
+
+        # Нижняя панель (статистика)
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        bottom_layout.addWidget(QLabel("Раздел статистики в разработке"))
+
+        main_splitter.addWidget(top_widget)
+        main_splitter.addWidget(bottom_widget)
+        main_splitter.setSizes([500, 200])
+        main_layout.addWidget(main_splitter)
+
+        return view_widget, table_widget, management_stack
+
+    def _on_orders_tab_changed(self, index):
+        """Загружает данные при переключении вкладок 'В работе' / 'Архив'."""
+        is_archive = (index == 1)
+        self.load_orders(is_archive)
+
+    def load_orders(self, is_archive):
+        """Загружает заказы в соответствующую таблицу."""
+        table = self.archive_orders_table if is_archive else self.in_progress_orders_table
+        table.setRowCount(0)
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    status_filter = "status LIKE 'Архив%%'" if is_archive else "status NOT LIKE 'Архив%%'"
+                    query = f"SELECT id, client_name, order_date, status, notes, api_status FROM orders WHERE {status_filter} ORDER BY id DESC"
+                    cur.execute(query)
+                    orders = cur.fetchall()
+            
+            for order in orders:
+                row = table.rowCount()
+                table.insertRow(row)
+                table.setItem(row, 0, QTableWidgetItem(str(order['order_date'])))
+                table.setItem(row, 1, QTableWidgetItem(f"{order['client_name']} / Заказ № {order['id']}"))
+                table.setItem(row, 2, QTableWidgetItem(order['status']))
+                table.setItem(row, 3, QTableWidgetItem(order['notes']))
+                # Сохраняем полные данные в пользовательскую роль первой ячейки
+                table.item(row, 0).setData(Qt.UserRole, order)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить заказы: {e}")
 
     def _build_notifications_page(self):
         """Страница управления уведомлениями о поставках - с переключением между списком и деталями."""
@@ -193,7 +310,7 @@ class AdminWindowQt(QMainWindow):
         btn_new.clicked.connect(self.create_new_notification)
         btn_edit = QPushButton("Открыть")
         btn_edit.clicked.connect(self.open_notification_details)
-        btn_delete = QPushButton("Удалить")
+        btn_delete = QPushButton("Удалить уведомление")
         btn_delete.clicked.connect(self.delete_notification)
         
         controls.addWidget(btn_new)
