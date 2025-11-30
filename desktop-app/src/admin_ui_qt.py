@@ -927,6 +927,7 @@ class AdminWindowQt(QMainWindow):
         # Подменю "Администрирование"
         item_admin_config = QTreeWidgetItem(item_admin, ["Конфигурация"])
         item_admin_print = QTreeWidgetItem(item_admin, ["Управление печатью"])
+        item_admin_catalogs = QTreeWidgetItem(item_admin, ["Справочники"])
         item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
 
         # Подменю "Конфигурация"
@@ -941,6 +942,7 @@ class AdminWindowQt(QMainWindow):
             'admin': item_admin,
             'config': item_admin_config,
             'print': item_admin_print,
+            'catalogs': item_admin_catalogs,
             'reports': item_admin_reports,
             'save_ini': item_config_save_ini,
             'workplaces': item_config_workplaces,
