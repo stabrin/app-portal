@@ -10,6 +10,7 @@ from PySide6.QtGui import QColor
 import sys
 import traceback
 import logging
+import json
 
 import pandas as pd
 from .db_connector import get_client_db_connection
