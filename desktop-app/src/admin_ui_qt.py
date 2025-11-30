@@ -444,7 +444,7 @@ class AdminWindowQt(QMainWindow):
         
         management_tabs.addTab(order_edit_tab, "Редактирование")
         management_tabs.addTab(order_api_tab, "АПИ")
-        management_tabs.addTab(self.order_upload_tab, "Загрузка кодов")
+        management_tabs.addTab(order_upload_tab, "Загрузка кодов")
 
         # --- НОВЫЙ БЛОК: Фильтры для заказов ---
         filter_layout = QHBoxLayout()
