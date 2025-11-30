@@ -361,12 +361,14 @@ class AdminWindowQt(QMainWindow):
 
         # Кнопки действий
         actions_layout = QHBoxLayout()
-        btn_save = QPushButton("Сохранить изменения")
-        btn_save.clicked.connect(self.save_notification_changes)
-        btn_create_order = QPushButton("Создать заказ")
-        btn_create_order.clicked.connect(self.create_order_from_notification)
-        actions_layout.addWidget(btn_save)
-        actions_layout.addWidget(btn_create_order)
+        self.btn_save_notification = QPushButton("Сохранить изменения")
+        self.btn_save_notification.clicked.connect(self.save_notification_changes)
+        # --- ИСПРАВЛЕНИЕ: Создаем кнопку, но пока не добавляем в layout.
+        # Она будет добавлена динамически в load_notification_details.
+        self.btn_create_order = QPushButton("Создать/Обновить заказ")
+        self.btn_create_order.clicked.connect(self.create_order_from_notification)
+        
+        actions_layout.addWidget(self.btn_save_notification)
         actions_layout.addStretch()
         general_layout.addLayout(actions_layout)
 
@@ -596,6 +598,22 @@ class AdminWindowQt(QMainWindow):
             # --- ИСПРАВЛЕНИЕ: Сохраняем все данные уведомления для последующего использования ---
             self.current_notification_data = notif_data
             
+            # --- ИСПРАВЛЕНИЕ: Динамически добавляем и настраиваем кнопку "Создать/Обновить заказ" ---
+            # Удаляем кнопку, если она была добавлена ранее, чтобы избежать дублирования
+            if self.btn_create_order.parent() is not None:
+                self.btn_create_order.parent().layout().removeWidget(self.btn_create_order)
+                self.btn_create_order.setParent(None)
+
+            status = notif_data.get('status', '')
+            actions_layout = self.btn_save_notification.parent().layout() # Получаем layout с кнопками
+
+            if status == 'Ожидание':
+                self.btn_create_order.setText("Создать заказ")
+                actions_layout.insertWidget(1, self.btn_create_order) # Добавляем кнопку после "Сохранить"
+            elif status == 'Заказ создан':
+                self.btn_create_order.setText("Обновить заказ")
+                actions_layout.insertWidget(1, self.btn_create_order)
+
             # Заполняем поля
             self.notif_scenario_label.setText(notif_data.get('scenario_name', ''))
             self.notif_client_label.setText(notif_data.get('client_name', ''))
@@ -707,13 +725,23 @@ class AdminWindowQt(QMainWindow):
         
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            # ИСПРАВЛЕНИЕ: Используем правильное имя метода
+            # --- ИСПРАВЛЕНИЕ: Полностью переносим логику из Tkinter ---
             success, message, needs_confirmation = service.create_or_recreate_order_from_notification(self.current_notification_id)
-            if success:
+            
+            if needs_confirmation:
+                # Если требуется подтверждение, показываем диалог Да/Нет
+                reply = QMessageBox.question(self, "Подтверждение", message, QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    # Если пользователь согласен, вызываем сервис повторно с флагом force_recreate
+                    success, message, _ = service.create_or_recreate_order_from_notification(self.current_notification_id, force_recreate=True)
+                else:
+                    return # Пользователь отменил операцию
+            
+            if success: # Показываем сообщение только в случае успеха
                 QMessageBox.information(self, "Успех", message)
-                self.load_notifications()
+                self.load_notifications() # Обновляем список в любом случае
             else:
-                QMessageBox.warning(self, "Внимание", message)
+                QMessageBox.warning(self, "Внимание", message) # Показываем предупреждение, если не success
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось создать заказ: {e}")
