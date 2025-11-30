@@ -110,6 +110,46 @@ class SupplyNotificationService:
                 summary = cur.fetchall()
                 return summary
 
+    def get_order_statistics(self):
+        """
+        Возвращает статистику по активным заказам, сгруппированную по типу постобработки и клиенту.
+        """
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                query = """
+                SELECT
+                    s.scenario_data->>'post_processing' AS post_processing_type,
+                    o.client_name,
+                    CASE
+                        WHEN s.scenario_data->>'dm_source' = 'Заказ в ДМ.Код' AND o.api_status = 'Коды скачаны'
+                            THEN 'Передано во внешнюю обработку'
+                        WHEN s.scenario_data->>'dm_source' = 'Заказ в ДМ.Код' AND o.api_status NOT IN ('Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен')
+                            THEN 'Готово к получению кодов'
+                        WHEN s.scenario_data->>'dm_source' = 'Файлы клиента (csv, txt)'
+                            THEN 'Предоставлено клиентом'
+                        ELSE 'Прочее'
+                    END AS custom_status,
+                    COUNT(DISTINCT d.gtin) AS positions_count,
+                    COALESCE(SUM(d.dm_quantity), 0) AS dm_count
+                FROM
+                    orders o
+                JOIN
+                    ap_marking_scenarios s ON o.scenario_id = s.id
+                LEFT JOIN
+                    dmkod_aggregation_details d ON o.id = d.order_id
+                WHERE
+                    o.status NOT LIKE 'Архив%%'
+                GROUP BY
+                    post_processing_type,
+                    o.client_name,
+                    custom_status
+                ORDER BY
+                    post_processing_type,
+                    o.client_name;
+                """
+                cur.execute(query)
+                return cur.fetchall()
+
     def create_notification(self, data):
         """Создает новое уведомление о поставке."""
         logging.info(f"Создание нового уведомления с данными: {data}")

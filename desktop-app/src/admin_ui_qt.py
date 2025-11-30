@@ -1272,8 +1272,14 @@ class AdminWindowQt(QMainWindow):
 
         # Нижняя панель (статистика)
         bottom_widget = QWidget()
-        bottom_layout = QVBoxLayout(bottom_widget)
-        bottom_layout.addWidget(QLabel("Раздел статистики в разработке"))
+        self.stats_layout = QVBoxLayout(bottom_widget)
+        self.stats_table = QTableWidget(0, 5)
+        self.stats_table.setHorizontalHeaderLabels(["Тип обработки", "Клиент", "Статус", "Кол-во позиций", "Кол-во ДМ"])
+        self.stats_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.stats_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.stats_layout.addWidget(self.stats_table)
 
         main_splitter.addWidget(top_widget) # top_widget теперь содержит корректно настроенный top_splitter
         main_splitter.addWidget(bottom_widget)
@@ -1292,6 +1298,7 @@ class AdminWindowQt(QMainWindow):
     def _on_orders_tab_changed(self, index):
         """Загружает данные при переключении вкладок 'В работе' / 'Архив'."""
         is_archive = (index == 1)
+        self._load_order_statistics()
         self.load_orders(is_archive)
 
     def load_orders(self, is_archive):
@@ -1428,6 +1435,30 @@ class AdminWindowQt(QMainWindow):
 
         # Переключаем QStackedWidget на панель с вкладками
         management_stack.setCurrentIndex(1)
+
+    def _load_order_statistics(self):
+        """Загружает и отображает статистику по активным заказам."""
+        try:
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            stats_data = service.get_order_statistics()
+
+            self.stats_table.setRowCount(0)
+            if not stats_data:
+                return
+
+            for row_data in stats_data:
+                row = self.stats_table.rowCount()
+                self.stats_table.insertRow(row)
+                
+                self.stats_table.setItem(row, 0, QTableWidgetItem(str(row_data.get('post_processing_type', ''))))
+                self.stats_table.setItem(row, 1, QTableWidgetItem(str(row_data.get('client_name', ''))))
+                self.stats_table.setItem(row, 2, QTableWidgetItem(str(row_data.get('custom_status', ''))))
+                self.stats_table.setItem(row, 3, QTableWidgetItem(str(row_data.get('positions_count', 0))))
+                self.stats_table.setItem(row, 4, QTableWidgetItem(str(row_data.get('dm_count', 0))))
+
+        except Exception as e:
+            logging.error(f"Ошибка при загрузке статистики заказов: {e}", exc_info=True)
+            # Можно добавить label с ошибкой в self.stats_layout, если нужно
 
     def apply_order_filters(self, is_archive):
         """Фильтрует и отображает заказы на основе значений в полях фильтра."""
