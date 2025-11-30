@@ -908,13 +908,13 @@ class AdminWindowQt(QMainWindow):
         layout = QVBoxLayout()
         layout.setContentsMargins(20, 20, 20, 20)
 
-        info_label1 = QLabel("<h3>Создание файлов конфигурации для локального подключения к базе данных клиента</h3>")
+        info_label1 = QLabel("<h3>Создание файлов конфигурации для локального подключения к базе данных</h3>")
         info_label1.setWordWrap(True)
         layout.addWidget(info_label1)
 
         info_label2 = QLabel(
-            "Будут созданы файлы <b>config.ini</b> и <b>cert.pem</b> с настройками подключения к базе данных этого клиента. "
-            "Сохраните их в удобное место, чтобы иметь возможность подключаться по локальной сети к базе данных этого клиента."
+            "Будут созданы файлы <b>config.ini</b> и <b>cert.pem</b> с настройками для локального подключения к базе данных. "
+            "Сохраните их в удобное место, чтобы иметь возможность подключаться по локальной сети к базе данных."
         )
         info_label2.setWordWrap(True)
         layout.addWidget(info_label2)
@@ -1035,7 +1035,51 @@ class AdminWindowQt(QMainWindow):
 
     def change_workplace_count(self):
         """Изменяет количество рабочих мест для выбранного склада."""
-        QMessageBox.information(self, "В разработке", "Функция изменения количества рабочих мест находится в разработке.")
+        sel = self.warehouses_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите склад для изменения.")
+            return
+
+        try:
+            warehouse_name = self.warehouses_table.item(sel, 0).text()
+            current_count = int(self.warehouses_table.item(sel, 1).text())
+        except (AttributeError, ValueError):
+            QMessageBox.critical(self, "Ошибка", "Не удалось прочитать данные о складе.")
+            return
+
+        new_count, ok = QInputDialog.getInt(self, "Изменить количество", f"Введите новое общее количество мест для склада '{warehouse_name}':", current_count, 0, 10000)
+
+        if not ok or new_count == current_count:
+            return
+
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    if new_count > current_count:
+                        to_add = new_count - current_count
+                        cur.execute("SELECT COALESCE(MAX(workplace_number), 0) FROM ap_workplaces WHERE warehouse_name = %s", (warehouse_name,))
+                        max_num = cur.fetchone()[0]
+                        for i in range(1, to_add + 1):
+                            cur.execute("INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)", (warehouse_name, max_num + i))
+                        msg = f"Добавлено {to_add} новых рабочих мест."
+                    else: # new_count < current_count
+                        to_delete = current_count - new_count
+                        reply = QMessageBox.question(self, "Подтверждение", f"Удалить {to_delete} рабочих мест со склада '{warehouse_name}'?\nБудут удалены места с наибольшими номерами.", QMessageBox.Yes | QMessageBox.No)
+                        if reply != QMessageBox.Yes:
+                            return
+                        cur.execute("""
+                            DELETE FROM ap_workplaces
+                            WHERE id IN (
+                                SELECT id FROM ap_workplaces WHERE warehouse_name = %s ORDER BY workplace_number DESC LIMIT %s
+                            )
+                        """, (warehouse_name, to_delete))
+                        msg = f"Удалено {to_delete} рабочих мест."
+                conn.commit()
+            QMessageBox.information(self, "Успех", msg)
+            self.load_warehouses()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось изменить количество мест: {e}")
 
     def open_workplace_printing_dialog(self):
         """Открывает диалог печати этикеток для склада."""
