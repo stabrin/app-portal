@@ -209,8 +209,12 @@ class AdminWindowQt(QMainWindow):
         table_widget.setHorizontalHeaderLabels(["Дата", "Клиент / Заказ №", "Статус", "Комментарий"])
         table_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         table_widget.setSelectionMode(QAbstractItemView.SingleSelection)
-        table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # ИСПРАВЛЕНИЕ: Делаем таблицу нередактируемой и добавляем стиль для выделения
+        table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table_widget.setStyleSheet("""
+            QTableWidget::item:selected { background-color: #ADD8E6; }
+        """)
         table_widget.itemSelectionChanged.connect(lambda: self.on_order_select(is_archive))
 
         # Правая часть: панель управления
@@ -266,12 +270,32 @@ class AdminWindowQt(QMainWindow):
             for order in orders:
                 row = table.rowCount()
                 table.insertRow(row)
-                table.setItem(row, 0, QTableWidgetItem(str(order['order_date'])))
-                table.setItem(row, 1, QTableWidgetItem(f"{order['client_name']} / Заказ № {order['id']}"))
-                table.setItem(row, 2, QTableWidgetItem(order['status']))
-                table.setItem(row, 3, QTableWidgetItem(order['notes']))
-                # Сохраняем полные данные в пользовательскую роль первой ячейки
-                table.item(row, 0).setData(Qt.UserRole, order)
+
+                # --- ИСПРАВЛЕНИЕ: Добавляем подсветку строк в зависимости от статуса ---
+                api_status = order.get('api_status', '')
+                status = order.get('status', '')
+                bg_color = QColor("white") # По умолчанию
+
+                if api_status == 'Отчет подготовлен':
+                    bg_color = QColor("#FFB6C6") # lightpink
+                elif api_status == 'Коды скачаны':
+                    bg_color = QColor("#90EE90") # lightgreen
+                elif api_status == 'Запрос создан':
+                    bg_color = QColor("#FFFFE0") # lightyellow
+                elif status == 'completed':
+                    bg_color = QColor("#B0E0E6") # powderblue
+
+                items_to_add = [
+                    str(order['order_date']),
+                    f"{order['client_name']} / Заказ № {order['id']}",
+                    order['status'],
+                    order['notes']
+                ]
+                for col, text in enumerate(items_to_add):
+                    item = QTableWidgetItem(text)
+                    item.setBackground(bg_color)
+                    if col == 0: item.setData(Qt.UserRole, order) # Сохраняем данные в первую ячейку
+                    table.setItem(row, col, item)
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить заказы: {e}")
