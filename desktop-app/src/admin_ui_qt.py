@@ -900,6 +900,9 @@ class AdminWindowQt(QMainWindow):
         self.in_progress_orders_cache = []
         self.archive_orders_cache = []
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+        # --- ИСПРАВЛЕНИЕ: Инициализируем сервис для работы со справочниками ---
+        self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         self._build_ui()
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
         self._setup_api_status_checker() # Настраиваем и запускаем проверку API
