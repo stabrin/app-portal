@@ -889,6 +889,63 @@ class CodeUploadFrameQt(QWidget):
         self.main_app_window.load_orders(is_archive=False) # Обновляем список заказов
 
 
+class ScenarioEditorDialog(QDialog):
+    """Специализированный диалог для редактирования сценария."""
+    def __init__(self, parent, item_data=None):
+        super().__init__(parent)
+        self.setWindowTitle("Редактор сценария")
+        self.setMinimumWidth(500)
+        self.result = None
+        self.item_data = item_data or {}
+        self.scenario_data = self.item_data.get('scenario_data', {})
+        
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.name_edit = QLineEdit(self.item_data.get('name', ''))
+        form_layout.addRow("Название сценария:", self.name_edit)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(['Маркировка', 'Ручная агрегация'])
+        self.type_combo.setCurrentText(self.scenario_data.get('type', 'Маркировка'))
+        form_layout.addRow("Тип сценария:", self.type_combo)
+
+        # Опции для "Маркировка"
+        self.dm_source_combo = QComboBox()
+        self.dm_source_combo.addItems(['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'])
+        self.dm_source_combo.setCurrentText(self.scenario_data.get('dm_source', 'Заказ в ДМ.Код'))
+        form_layout.addRow("Источник кодов ДМ:", self.dm_source_combo)
+
+        self.post_processing_combo = QComboBox()
+        self.post_processing_combo.addItems(['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'])
+        self.post_processing_combo.setCurrentText(self.scenario_data.get('post_processing', 'Печать через Bartender'))
+        form_layout.addRow("Постобработка:", self.post_processing_combo)
+
+        layout.addLayout(form_layout)
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def accept(self):
+        name = self.name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Внимание", "Название сценария не может быть пустым.")
+            return
+
+        scenario_data = {
+            'type': self.type_combo.currentText(),
+            'dm_source': self.dm_source_combo.currentText(),
+            'post_processing': self.post_processing_combo.currentText()
+        }
+        self.result = {
+            'id': self.item_data.get('id'),
+            'name': name,
+            'scenario_data': scenario_data
+        }
+        super().accept()
+
+
 class AdminWindowQt(QMainWindow):
     """Переносная версия tkinter админ-интерфейса на PySide6 с левым меню и правой стеком контента."""
     def __init__(self, user_info: dict):
@@ -2268,7 +2325,7 @@ class AdminWindowQt(QMainWindow):
         # Заглушки для остальных справочников
         self._build_product_groups_tab(notebook)
         self._build_products_tab(notebook) # Реализуем эту вкладку
-        self._build_scenarios_tab(notebook) # Реализуем эту вкладку
+        self._build_scenarios_tab(notebook)
 
         return widget
 
@@ -2943,7 +3000,6 @@ class AdminWindowQt(QMainWindow):
                 self.scenarios_table.setItem(row, 0, QTableWidgetItem(str(s['id'])))
                 self.scenarios_table.setItem(row, 1, QTableWidgetItem(s.get('name', '')))
                 
-                # Отображаем JSON в удобочитаемом виде
                 scenario_data_str = json.dumps(s.get('scenario_data', {}), indent=2, ensure_ascii=False)
                 self.scenarios_table.setItem(row, 2, QTableWidgetItem(scenario_data_str))
         except Exception as e:
@@ -2991,87 +3047,12 @@ class AdminWindowQt(QMainWindow):
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить сценарий: {e}")
 
     def _export_scenarios(self):
-        try:
-            df = self.catalog_service.get_marking_scenarios_template()
-            scenarios = self.catalog_service.get_marking_scenarios()
-            if scenarios:
-                # Конвертируем JSON в строку для Excel
-                for s in scenarios:
-                    s['scenario_data'] = json.dumps(s.get('scenario_data'), ensure_ascii=False)
-                df = pd.DataFrame(scenarios)
-
-            filepath, _ = QFileDialog.getSaveFileName(self, "Выгрузка: Сценарии", "scenarios.xlsx", "Excel Files (*.xlsx)")
-            if filepath:
-                df.to_excel(filepath, index=False)
-                QMessageBox.information(self, "Успех", "Справочник 'Сценарии' выгружен.")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось выгрузить файл: {e}")
+        # Эта функция потребует доработки для корректной выгрузки JSON
+        QMessageBox.information(self, "В разработке", "Экспорт сценариев в разработке.")
 
     def _import_scenarios(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Импорт: Сценарии", "", "Excel Files (*.xlsx *.xls)")
-        if not filepath: return
-        try:
-            df = pd.read_excel(filepath, dtype={'id': str})
-            # Конвертируем JSON-строку обратно в словарь
-            df['scenario_data'] = df['scenario_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
-            self.catalog_service.process_marking_scenarios_import(df)
-            self._refresh_scenarios()
-            QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
-
-
-class ScenarioEditorDialog(QDialog):
-    """Специализированный диалог для редактирования сценария."""
-    def __init__(self, parent, item_data=None):
-        super().__init__(parent)
-        self.setWindowTitle("Редактор сценария")
-        self.setMinimumWidth(500)
-        self.result = None
-        self.item_data = item_data or {}
-        self.scenario_data = self.item_data.get('scenario_data', {})
-        
-        layout = QVBoxLayout(self)
-        form_layout = QFormLayout()
-
-        self.name_edit = QLineEdit(self.item_data.get('name', ''))
-        form_layout.addRow("Название сценария:", self.name_edit)
-
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(['Маркировка', 'Ручная агрегация'])
-        self.type_combo.setCurrentText(self.scenario_data.get('type', 'Маркировка'))
-        form_layout.addRow("Тип сценария:", self.type_combo)
-
-        # Опции для "Маркировка"
-        self.dm_source_combo = QComboBox()
-        self.dm_source_combo.addItems(['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'])
-        self.dm_source_combo.setCurrentText(self.scenario_data.get('dm_source', 'Заказ в ДМ.Код'))
-        form_layout.addRow("Источник кодов ДМ:", self.dm_source_combo)
-
-        self.post_processing_combo = QComboBox()
-        self.post_processing_combo.addItems(['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'])
-        self.post_processing_combo.setCurrentText(self.scenario_data.get('post_processing', 'Печать через Bartender'))
-        form_layout.addRow("Постобработка:", self.post_processing_combo)
-
-        layout.addLayout(form_layout)
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-    def accept(self):
-        scenario_data = {
-            'type': self.type_combo.currentText(),
-            'dm_source': self.dm_source_combo.currentText(),
-            'post_processing': self.post_processing_combo.currentText()
-        }
-        self.result = {
-            'id': self.item_data.get('id'),
-            'name': self.name_edit.text(),
-            'scenario_data': scenario_data
-        }
-        super().accept()
-
+        # Эта функция потребует доработки для корректной загрузки JSON
+        QMessageBox.information(self, "В разработке", "Импорт сценариев в разработке.")
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
