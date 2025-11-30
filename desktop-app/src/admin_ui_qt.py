@@ -271,6 +271,8 @@ class AdminWindowQt(QMainWindow):
         table_container_layout.addWidget(table_widget)
         table_container_widget = QWidget()
         table_container_widget.setLayout(table_container_layout)
+        # --- ИСПРАВЛЕНИЕ: Явно устанавливаем родителя, чтобы виджет не был удален сборщиком мусора ---
+        table_container_widget.setParent(top_splitter)
 
         # Нижняя панель (статистика)
         bottom_widget = QWidget()
