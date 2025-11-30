@@ -360,17 +360,17 @@ class AdminWindowQt(QMainWindow):
         general_layout.addLayout(form_layout)
 
         # Кнопки действий
-        actions_layout = QHBoxLayout()
+        # --- ИСПРАВЛЕНИЕ: Сохраняем ссылку на layout, чтобы иметь к нему доступ позже ---
+        self.notification_actions_layout = QHBoxLayout()
         self.btn_save_notification = QPushButton("Сохранить изменения")
         self.btn_save_notification.clicked.connect(self.save_notification_changes)
         # --- ИСПРАВЛЕНИЕ: Создаем кнопку, но пока не добавляем в layout.
         # Она будет добавлена динамически в load_notification_details.
         self.btn_create_order = QPushButton("Создать/Обновить заказ")
         self.btn_create_order.clicked.connect(self.create_order_from_notification)
-        
-        actions_layout.addWidget(self.btn_save_notification)
-        actions_layout.addStretch()
-        general_layout.addLayout(actions_layout)
+        self.notification_actions_layout.addWidget(self.btn_save_notification)
+        self.notification_actions_layout.addStretch()
+        general_layout.addLayout(self.notification_actions_layout)
 
         general_layout.addStretch()
         general_tab.setLayout(general_layout)
@@ -611,14 +611,13 @@ class AdminWindowQt(QMainWindow):
                 self.btn_create_order.setParent(None)
 
             status = notif_data.get('status', '')
-            actions_layout = self.btn_save_notification.parent().layout() # Получаем layout с кнопками
 
             if status == 'Ожидание':
                 self.btn_create_order.setText("Создать заказ")
-                actions_layout.insertWidget(1, self.btn_create_order) # Добавляем кнопку после "Сохранить"
+                self.notification_actions_layout.insertWidget(1, self.btn_create_order) # Добавляем кнопку после "Сохранить"
             elif status == 'Заказ создан':
                 self.btn_create_order.setText("Обновить заказ")
-                actions_layout.insertWidget(1, self.btn_create_order)
+                self.notification_actions_layout.insertWidget(1, self.btn_create_order)
 
             # Заполняем поля
             self.notif_scenario_label.setText(notif_data.get('scenario_name', ''))
