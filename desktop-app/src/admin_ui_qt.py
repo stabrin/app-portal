@@ -228,13 +228,6 @@ class AdminWindowQt(QMainWindow):
         table_widget.setStyleSheet("""
             QTableWidget::item:selected { background-color: #ADD8E6; }
         """)
-        table_widget.itemSelectionChanged.connect(lambda: self.on_order_select(is_archive))
-
-        # Правая часть: панель управления
-        management_stack = QStackedWidget()
-        placeholder_label = QLabel("Выберите заказ для управления")
-        placeholder_label.setAlignment(Qt.AlignCenter)
-        management_stack.addWidget(placeholder_label) # Индекс 0
         
         # Вкладки для управления
         management_tabs = QTabWidget()
@@ -243,13 +236,6 @@ class AdminWindowQt(QMainWindow):
         self.order_upload_tab = QWidget()
         management_tabs.addTab(self.order_edit_tab, "Редактирование")
         management_tabs.addTab(self.order_api_tab, "АПИ")
-        management_tabs.addTab(self.order_upload_tab, "Загрузка кодов")
-        management_stack.addWidget(management_tabs) # Индекс 1
-
-        top_splitter.addWidget(table_widget)
-        top_splitter.addWidget(management_stack)
-        top_splitter.setSizes([700, 300])
-        top_layout.addWidget(top_splitter)
 
         # --- НОВЫЙ БЛОК: Фильтры для заказов ---
         filter_layout = QHBoxLayout()
@@ -271,24 +257,34 @@ class AdminWindowQt(QMainWindow):
         table_container_layout.addWidget(table_widget)
         table_container_widget = QWidget()
         table_container_widget.setLayout(table_container_layout)
-        # --- ИСПРАВЛЕНИЕ: Явно устанавливаем родителя, чтобы виджет не был удален сборщиком мусора ---
-        table_container_widget.setParent(top_splitter)
+
+        # Правая часть: панель управления
+        management_stack = QStackedWidget()
+        placeholder_label = QLabel("Выберите заказ для управления")
+        placeholder_label.setAlignment(Qt.AlignCenter)
+        management_stack.addWidget(placeholder_label) # Индекс 0
+        management_tabs.addTab(self.order_upload_tab, "Загрузка кодов")
+        management_stack.addWidget(management_tabs) # Индекс 1
+
+        # --- ИСПРАВЛЕНИЕ: Правильно добавляем виджеты в сплиттер и задаем пропорции ---
+        top_splitter.addWidget(table_container_widget) # Слева - контейнер с таблицей и фильтрами
+        top_splitter.addWidget(management_stack)       # Справа - панель управления
+        top_splitter.setSizes([700, 350])              # Устанавливаем пропорции ~2/3 к 1/3
+        top_layout.addWidget(top_splitter)
 
         # Нижняя панель (статистика)
         bottom_widget = QWidget()
         bottom_layout = QVBoxLayout(bottom_widget)
         bottom_layout.addWidget(QLabel("Раздел статистики в разработке"))
 
-        main_splitter.addWidget(top_widget)
+        main_splitter.addWidget(top_widget) # top_widget теперь содержит корректно настроенный top_splitter
         main_splitter.addWidget(bottom_widget)
         main_splitter.setSizes([500, 200])
-        
-        # Заменяем top_splitter на table_container_widget в основном сплиттере
-        top_splitter.replaceWidget(0, table_container_widget)
         
         main_layout.addWidget(top_splitter)
 
         # Привязываем обработчики к фильтрам
+        table_widget.itemSelectionChanged.connect(lambda: self.on_order_select(is_archive))
         client_filter_combo.currentIndexChanged.connect(lambda: self.apply_order_filters(is_archive))
         search_filter_edit.textChanged.connect(lambda: self.apply_order_filters(is_archive))
 
