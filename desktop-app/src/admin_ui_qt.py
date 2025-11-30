@@ -15,6 +15,7 @@ from .db_connector import get_client_db_connection
 from .catalogs_service import CatalogsService
 from .supply_notification_service import SupplyNotificationService
 import psycopg2
+from psycopg2 import sql
 from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добавляем импорт RealDictCursor
 import base64
 import os
@@ -296,13 +297,76 @@ class OrderEditorFrameQt(QWidget):
 
     # --- Заглушки для остального функционала ---
     def _export_products_to_excel(self):
-        QMessageBox.information(self, "В разработке", "Функция 'Экспорт товаров' находится в разработке.")
+        """Выгружает в Excel данные о товарах, связанных с текущим заказом."""
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT DISTINCT gtin FROM dmkod_aggregation_details WHERE order_id = %s AND gtin IS NOT NULL", (self.order_id,))
+                    gtins = [row['gtin'] for row in cur.fetchall()]
+                    if not gtins:
+                        QMessageBox.warning(self, "Внимание", "В заказе нет товаров для экспорта.")
+                        return
+                    cur.execute("SELECT gtin, name, description_1, description_2, description_3 FROM products WHERE gtin = ANY(%s)", (gtins,))
+                    products_data = cur.fetchall()
+
+            if not products_data:
+                QMessageBox.warning(self, "Внимание", "Не найдено записей в справочнике товаров для GTIN из этого заказа.")
+                return
+
+            df = pd.DataFrame(products_data)
+            filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить товары", f"order_{self.order_id}_products.xlsx", "Excel Files (*.xlsx)")
+            if filepath:
+                df.to_excel(filepath, index=False)
+                QMessageBox.information(self, "Успех", f"Товары заказа успешно выгружены в файл:\n{filepath}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать товары: {e}")
 
     def _import_products_from_excel(self):
-        QMessageBox.information(self, "В разработке", "Функция 'Импорт товаров' находится в разработке.")
+        """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
+        if QMessageBox.question(self, "Подтверждение", "Данные из файла обновят записи в общем справочнике товаров. Продолжить?") != QMessageBox.Yes:
+            return
+
+        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите Excel-файл для импорта товаров", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath:
+            return
+
+        try:
+            df = pd.read_excel(filepath, dtype={'gtin': str})
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    from .utils import upsert_data_to_db
+                    upsert_data_to_db(cur, 'products', df, 'gtin')
+                conn.commit()
+            QMessageBox.information(self, "Успех", f"Справочник товаров успешно обновлен. Обработано {len(df)} строк.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать товары: {e}")
 
     def _create_bartender_view(self):
-        QMessageBox.information(self, "В разработке", "Функция 'Создать View' находится в разработке.")
+        """Создает/обновляет представления для Bartender."""
+        from .aggregation_service import run_import_from_dmkod, create_bartender_views
+        
+        progress = QProgressDialog("Выполняется импорт и создание представлений...", "Отмена", 0, 100, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setValue(10)
+        
+        try:
+            # Шаг 1: Импорт кодов
+            progress.setLabelText("Шаг 1/2: Импорт кодов из базы...")
+            run_import_from_dmkod(self.user_info, self.order_id)
+            progress.setValue(50)
+
+            # Шаг 2: Создание представлений
+            progress.setLabelText("Шаг 2/2: Создание представлений для Bartender...")
+            result = create_bartender_views(self.user_info, self.order_id)
+            progress.setValue(100)
+
+            if result.get('success'):
+                QMessageBox.information(self, "Успех", result.get('message', 'Представления успешно созданы/обновлены.'))
+            else:
+                QMessageBox.critical(self, "Ошибка", result.get('message', 'Произошла неизвестная ошибка.'))
+        except Exception as e:
+            progress.setValue(100)
+            QMessageBox.critical(self, "Критическая ошибка", f"Не удалось создать представления: {e}")
 
     def _export_data_for_external_sw(self):
         QMessageBox.information(self, "В разработке", "Функция 'Экспорт (Дельта)' находится в разработке.")
