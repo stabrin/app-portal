@@ -2268,7 +2268,7 @@ class AdminWindowQt(QMainWindow):
         # Заглушки для остальных справочников
         self._build_product_groups_tab(notebook)
         self._build_products_tab(notebook) # Реализуем эту вкладку
-        notebook.addTab(QLabel("Раздел 'Сценарии маркировки' в разработке"), "Сценарии маркировки")
+        self._build_scenarios_tab(notebook) # Реализуем эту вкладку
 
         return widget
 
@@ -2886,6 +2886,192 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
+
+    def _build_scenarios_tab(self, parent_notebook):
+        """Создает вкладку для управления сценариями маркировки."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Панель кнопок
+        controls_layout = QHBoxLayout()
+        btn_add = QPushButton("Добавить")
+        btn_edit = QPushButton("Редактировать")
+        btn_delete = QPushButton("Удалить")
+        btn_export = QPushButton("Выгрузить в Excel")
+        btn_import = QPushButton("Загрузить из Excel")
+        btn_refresh = QPushButton("Обновить")
+        controls_layout.addWidget(btn_add)
+        controls_layout.addWidget(btn_edit)
+        controls_layout.addWidget(btn_delete)
+        controls_layout.addStretch()
+        controls_layout.addWidget(btn_export)
+        controls_layout.addWidget(btn_import)
+        controls_layout.addWidget(btn_refresh)
+        layout.addLayout(controls_layout)
+
+        # Таблица
+        self.scenarios_table = QTableWidget(0, 3)
+        self.scenarios_table.setHorizontalHeaderLabels(["ID", "Название сценария", "Параметры (JSON)"])
+        self.scenarios_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.scenarios_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.scenarios_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.scenarios_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        layout.addWidget(self.scenarios_table)
+        
+        parent_notebook.addTab(tab, "Сценарии маркировки")
+
+        # Привязка обработчиков
+        btn_refresh.clicked.connect(self._refresh_scenarios)
+        btn_add.clicked.connect(self._add_scenario)
+        btn_edit.clicked.connect(self._edit_scenario)
+        self.scenarios_table.doubleClicked.connect(self._edit_scenario)
+        btn_delete.clicked.connect(self._delete_scenario)
+        btn_export.clicked.connect(self._export_scenarios)
+        btn_import.clicked.connect(self._import_scenarios)
+
+        # Загрузка данных при первом открытии
+        self._refresh_scenarios()
+
+    def _refresh_scenarios(self):
+        """Обновляет данные в таблице сценариев."""
+        try:
+            self.scenarios_table.setRowCount(0)
+            scenarios = self.catalog_service.get_marking_scenarios()
+            for s in scenarios:
+                row = self.scenarios_table.rowCount()
+                self.scenarios_table.insertRow(row)
+                self.scenarios_table.setItem(row, 0, QTableWidgetItem(str(s['id'])))
+                self.scenarios_table.setItem(row, 1, QTableWidgetItem(s.get('name', '')))
+                
+                # Отображаем JSON в удобочитаемом виде
+                scenario_data_str = json.dumps(s.get('scenario_data', {}), indent=2, ensure_ascii=False)
+                self.scenarios_table.setItem(row, 2, QTableWidgetItem(scenario_data_str))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить сценарии: {e}")
+
+    def _open_scenario_editor(self, scenario_data=None):
+        """Открывает диалог для редактирования сценария."""
+        dialog = ScenarioEditorDialog(self, scenario_data)
+        if dialog.exec():
+            try:
+                self.catalog_service.upsert_marking_scenario(dialog.result)
+                self._refresh_scenarios()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить сценарий: {e}")
+
+    def _add_scenario(self):
+        self._open_scenario_editor()
+
+    def _edit_scenario(self):
+        sel_row = self.scenarios_table.currentRow()
+        if sel_row < 0: return
+        
+        try:
+            scenario_data = {
+                'id': int(self.scenarios_table.item(sel_row, 0).text()),
+                'name': self.scenarios_table.item(sel_row, 1).text(),
+                'scenario_data': json.loads(self.scenarios_table.item(sel_row, 2).text())
+            }
+            self._open_scenario_editor(scenario_data)
+        except (json.JSONDecodeError, ValueError) as e:
+            QMessageBox.critical(self, "Ошибка данных", f"Не удалось прочитать параметры сценария: {e}")
+
+    def _delete_scenario(self):
+        sel_row = self.scenarios_table.currentRow()
+        if sel_row < 0: return
+
+        scenario_id = int(self.scenarios_table.item(sel_row, 0).text())
+        scenario_name = self.scenarios_table.item(sel_row, 1).text()
+
+        if QMessageBox.question(self, "Подтверждение", f"Удалить сценарий '{scenario_name}'?") == QMessageBox.Yes:
+            try:
+                self.catalog_service.delete_marking_scenario(scenario_id)
+                self._refresh_scenarios()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить сценарий: {e}")
+
+    def _export_scenarios(self):
+        try:
+            df = self.catalog_service.get_marking_scenarios_template()
+            scenarios = self.catalog_service.get_marking_scenarios()
+            if scenarios:
+                # Конвертируем JSON в строку для Excel
+                for s in scenarios:
+                    s['scenario_data'] = json.dumps(s.get('scenario_data'), ensure_ascii=False)
+                df = pd.DataFrame(scenarios)
+
+            filepath, _ = QFileDialog.getSaveFileName(self, "Выгрузка: Сценарии", "scenarios.xlsx", "Excel Files (*.xlsx)")
+            if filepath:
+                df.to_excel(filepath, index=False)
+                QMessageBox.information(self, "Успех", "Справочник 'Сценарии' выгружен.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выгрузить файл: {e}")
+
+    def _import_scenarios(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Импорт: Сценарии", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath: return
+        try:
+            df = pd.read_excel(filepath, dtype={'id': str})
+            # Конвертируем JSON-строку обратно в словарь
+            df['scenario_data'] = df['scenario_data'].apply(lambda x: json.loads(x) if isinstance(x, str) else x)
+            self.catalog_service.process_marking_scenarios_import(df)
+            self._refresh_scenarios()
+            QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
+
+
+class ScenarioEditorDialog(QDialog):
+    """Специализированный диалог для редактирования сценария."""
+    def __init__(self, parent, item_data=None):
+        super().__init__(parent)
+        self.setWindowTitle("Редактор сценария")
+        self.setMinimumWidth(500)
+        self.result = None
+        self.item_data = item_data or {}
+        self.scenario_data = self.item_data.get('scenario_data', {})
+        
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.name_edit = QLineEdit(self.item_data.get('name', ''))
+        form_layout.addRow("Название сценария:", self.name_edit)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(['Маркировка', 'Ручная агрегация'])
+        self.type_combo.setCurrentText(self.scenario_data.get('type', 'Маркировка'))
+        form_layout.addRow("Тип сценария:", self.type_combo)
+
+        # Опции для "Маркировка"
+        self.dm_source_combo = QComboBox()
+        self.dm_source_combo.addItems(['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'])
+        self.dm_source_combo.setCurrentText(self.scenario_data.get('dm_source', 'Заказ в ДМ.Код'))
+        form_layout.addRow("Источник кодов ДМ:", self.dm_source_combo)
+
+        self.post_processing_combo = QComboBox()
+        self.post_processing_combo.addItems(['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'])
+        self.post_processing_combo.setCurrentText(self.scenario_data.get('post_processing', 'Печать через Bartender'))
+        form_layout.addRow("Постобработка:", self.post_processing_combo)
+
+        layout.addLayout(form_layout)
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def accept(self):
+        scenario_data = {
+            'type': self.type_combo.currentText(),
+            'dm_source': self.dm_source_combo.currentText(),
+            'post_processing': self.post_processing_combo.currentText()
+        }
+        self.result = {
+            'id': self.item_data.get('id'),
+            'name': self.name_edit.text(),
+            'scenario_data': scenario_data
+        }
+        super().accept()
+
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
