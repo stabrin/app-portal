@@ -1311,13 +1311,14 @@ class AdminWindowQt(QMainWindow):
                     # --- ИСПРАВЛЕНИЕ: Добавляем JOIN и агрегацию для подсчета позиций и ДМ ---
                     status_filter = "status LIKE 'Архив%%'" if is_archive else "status NOT LIKE 'Архив%%'"
                     query = f"""
-                        SELECT o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status,
+                        SELECT o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status, s.scenario_data,
                                COUNT(DISTINCT d.gtin) as positions_count,
                                COALESCE(SUM(d.dm_quantity), 0) as dm_count
                         FROM orders o
                         LEFT JOIN dmkod_aggregation_details d ON o.id = d.order_id
+                        LEFT JOIN ap_marking_scenarios s ON o.scenario_id = s.id
                         WHERE {status_filter}
-                        GROUP BY o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status
+                        GROUP BY o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status, s.scenario_data
                         ORDER BY o.id DESC
                     """
                     cur.execute(query)
@@ -1467,7 +1468,9 @@ class AdminWindowQt(QMainWindow):
             items_to_add = [
                 str(order['order_date']),
                 f"{order['client_name']} / Заказ № {order['id']}",
-                order['status'],
+                # --- ИСПРАВЛЕНИЕ: Отображаем post_processing вместо статуса ---
+                order.get('scenario_data', {}).get('post_processing', order['status']),
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
                     str(order.get('positions_count', 0)),
                     str(order.get('dm_count', 0)),
                 order['notes']
