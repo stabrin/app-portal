@@ -65,16 +65,229 @@ class DbStatusWorker(QObject):
 
 # --- НОВЫЙ БЛОК: Классы-заглушки для вкладок управления заказом ---
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
-
 class OrderEditorFrameQt(QWidget):
-    """Заглушка для фрейма редактирования заказа."""
-    def __init__(self, user_info, order_id, scenario_data, parent=None):
+    """Полнофункциональный фрейм для редактирования заказа."""
+    def __init__(self, user_info, order_id, scenario_data, main_app_window, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"Редактор Заказа №{order_id}"))
-        layout.addWidget(QPushButton("Сохранить изменения (в разработке)"))
-        layout.addWidget(QPushButton("Выгрузить детали (в разработке)"))
-        layout.addStretch()
+        self.user_info = user_info
+        self.order_id = order_id
+        self.scenario_data = scenario_data
+        self.main_app_window = main_app_window
+
+        self._create_widgets()
+        self._load_details()
+
+    def _get_client_db_connection(self):
+        return get_client_db_connection(self.user_info)
+
+    def _create_widgets(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(5, 5, 5, 5)
+
+        # --- Ряд 1: Основные операции с детализацией ---
+        controls_frame_1 = QHBoxLayout()
+        btn_save = QPushButton("Сохранить")
+        btn_save.clicked.connect(self._save_changes)
+        btn_export = QPushButton("Выгрузить")
+        btn_export.clicked.connect(self._export_details_to_excel)
+        btn_import = QPushButton("Загрузить")
+        btn_import.clicked.connect(self._import_details_from_excel)
+        controls_frame_1.addWidget(btn_save)
+        controls_frame_1.addWidget(btn_export)
+        controls_frame_1.addWidget(btn_import)
+        controls_frame_1.addStretch()
+        main_layout.addLayout(controls_frame_1)
+
+        # --- Ряд 2: Операции с товарами и Bartender ---
+        controls_frame_2 = QHBoxLayout()
+        btn_export_prod = QPushButton("Экспорт товаров")
+        btn_export_prod.clicked.connect(self._export_products_to_excel)
+        btn_import_prod = QPushButton("Импорт товаров")
+        btn_import_prod.clicked.connect(self._import_products_from_excel)
+        btn_create_view = QPushButton("Создать View")
+        btn_create_view.clicked.connect(self._create_bartender_view)
+        controls_frame_2.addWidget(btn_export_prod)
+        controls_frame_2.addWidget(btn_import_prod)
+        controls_frame_2.addWidget(btn_create_view)
+        controls_frame_2.addStretch()
+        main_layout.addLayout(controls_frame_2)
+
+        # --- Ряд 3: Отчеты и интеграции ---
+        controls_frame_3 = QHBoxLayout()
+        btn_export_delta = QPushButton("Экспорт (Дельта)")
+        btn_export_delta.clicked.connect(self._export_data_for_external_sw)
+        btn_import_delta = QPushButton("Импорт (Дельта)")
+        btn_import_delta.clicked.connect(self._import_data_for_external_sw)
+        btn_download_report = QPushButton("Отчет декларанта")
+        btn_download_report.clicked.connect(self._download_declarator_report)
+        controls_frame_3.addWidget(btn_export_delta)
+        controls_frame_3.addWidget(btn_import_delta)
+        controls_frame_3.addWidget(btn_download_report)
+        controls_frame_3.addStretch()
+        main_layout.addLayout(controls_frame_3)
+
+        # --- Таблица детализации ---
+        self.details_table = QTableWidget()
+        self.details_cols = ["id", "gtin", "dm_quantity", "aggregation_level", "production_date", "expiry_date"]
+        self.details_table.setColumnCount(len(self.details_cols))
+        self.details_table.setHorizontalHeaderLabels(["ID", "GTIN", "Кол-во", "Агрегация", "Дата произв.", "Годен до"])
+        self.details_table.setColumnHidden(0, True) # Скрываем ID
+        main_layout.addWidget(self.details_table)
+
+        # --- Кнопка архивации ---
+        archive_layout = QHBoxLayout()
+        archive_layout.addStretch()
+        btn_archive = QPushButton("Перенести в архив")
+        btn_archive.setStyleSheet("background-color: #FFB6C1;") # Light Pink
+        btn_archive.clicked.connect(self._move_to_archive)
+        archive_layout.addWidget(btn_archive)
+        main_layout.addLayout(archive_layout)
+
+    def _load_details(self):
+        self.details_table.setRowCount(0)
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM dmkod_aggregation_details WHERE order_id = %s ORDER BY id", (self.order_id,))
+                    details = cur.fetchall()
+            
+            for item in details:
+                row = self.details_table.rowCount()
+                self.details_table.insertRow(row)
+                for col_idx, col_name in enumerate(self.details_cols):
+                    value = item.get(col_name, '')
+                    self.details_table.setItem(row, col_idx, QTableWidgetItem(str(value)))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить детали заказа: {e}")
+
+    def _save_changes(self):
+        updates = []
+        for row in range(self.details_table.rowCount()):
+            row_data = {}
+            for col, key in enumerate(self.details_cols):
+                item = self.details_table.item(row, col)
+                row_data[key] = item.text() if item else None
+            updates.append(row_data)
+        
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    for item in updates:
+                        cur.execute("""
+                            UPDATE dmkod_aggregation_details SET
+                                gtin = %s, dm_quantity = %s, aggregation_level = %s,
+                                production_date = %s, expiry_date = %s
+                            WHERE id = %s
+                        """, (
+                            item['gtin'], item['dm_quantity'], item['aggregation_level'],
+                            item['production_date'] or None, item['expiry_date'] or None,
+                            item['id']
+                        ))
+                conn.commit()
+            QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
+
+    def _export_details_to_excel(self):
+        items_to_export = []
+        for row in range(self.details_table.rowCount()):
+            row_data = {}
+            for col, key in enumerate(self.details_cols):
+                item = self.details_table.item(row, col)
+                row_data[key] = item.text() if item else ''
+            items_to_export.append(row_data)
+        
+        if not items_to_export:
+            QMessageBox.warning(self, "Внимание", "Нет данных для экспорта.")
+            return
+
+        df = pd.DataFrame(items_to_export)
+        filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить детализацию", f"order_{self.order_id}_details.xlsx", "Excel Files (*.xlsx)")
+        if filepath:
+            df.to_excel(filepath, index=False)
+            QMessageBox.information(self, "Успех", f"Детализация выгружена в файл:\n{filepath}")
+
+    def _import_details_from_excel(self):
+        if QMessageBox.question(self, "Подтверждение", "Импорт из файла полностью заменит текущую детализацию. Продолжить?") != QMessageBox.Yes:
+            return
+
+        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите Excel-файл", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath:
+            return
+
+        try:
+            df = pd.read_excel(filepath, dtype={'gtin': str})
+            df = df.where(pd.notna(df), None)
+            df['order_id'] = self.order_id
+
+            with self._get_client_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                    from .utils import upsert_data_to_db
+                    upsert_data_to_db(cur, 'dmkod_aggregation_details', df, ['order_id', 'gtin'])
+                conn.commit()
+            QMessageBox.information(self, "Успех", f"Детализация импортирована. Загружено {len(df)} строк.")
+            self._load_details()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать данные: {e}")
+
+    def _move_to_archive(self):
+        if QMessageBox.question(self, "Подтверждение", f"Переместить заказ №{self.order_id} в архив?") != QMessageBox.Yes:
+            return
+
+        try:
+            with self._get_client_db_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT client_name, status FROM orders WHERE id = %s", (self.order_id,))
+                    order_info = cur.fetchone()
+                    if order_info:
+                        client_name = order_info['client_name']
+                        current_status = order_info['status']
+                        
+                        base_view_name_str = f"{client_name}_{self.order_id}"
+                        sanitized_name = re.sub(r'[^\w]', '_', base_view_name_str)
+                        sanitized_name = re.sub(r'_+', '_', sanitized_name).strip('_')
+                        
+                        base_view_name = psycopg2.sql.Identifier(sanitized_name)
+                        sscc_view_name = psycopg2.sql.Identifier(f"{sanitized_name}_sscc")
+
+                        cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(sscc_view_name))
+                        cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(base_view_name))
+
+                        new_status = f"Архив_{current_status}"
+                        cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, self.order_id))
+                        result = cur.fetchone()
+                        notification_id = result['notification_id'] if result else None
+                        if notification_id:
+                            cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
+                conn.commit()
+            
+            if self.main_app_window:
+                self.main_app_window.load_orders(is_archive=False)
+                self.main_app_window.load_orders(is_archive=True)
+
+            QMessageBox.information(self, "Успех", "Заказ успешно перемещен в архив.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось архивировать заказ: {e}")
+
+    # --- Заглушки для остального функционала ---
+    def _export_products_to_excel(self):
+        QMessageBox.information(self, "В разработке", "Функция 'Экспорт товаров' находится в разработке.")
+
+    def _import_products_from_excel(self):
+        QMessageBox.information(self, "В разработке", "Функция 'Импорт товаров' находится в разработке.")
+
+    def _create_bartender_view(self):
+        QMessageBox.information(self, "В разработке", "Функция 'Создать View' находится в разработке.")
+
+    def _export_data_for_external_sw(self):
+        QMessageBox.information(self, "В разработке", "Функция 'Экспорт (Дельта)' находится в разработке.")
+
+    def _import_data_for_external_sw(self):
+        QMessageBox.information(self, "В разработке", "Функция 'Импорт (Дельта)' находится в разработке.")
+
+    def _download_declarator_report(self):
+        QMessageBox.information(self, "В разработке", "Функция 'Отчет декларанта' находится в разработке.")
 
 
 class ApiIntegrationFrameQt(QWidget):
@@ -542,13 +755,13 @@ class AdminWindowQt(QMainWindow):
 
     def on_order_select(self, is_archive):
         """Обработчик выбора заказа в таблице. Отображает панель управления."""
-        logging.debug(f"on_order_select: Сработал обработчик выбора заказа. is_archive={is_archive}")
+        # logging.debug(f"on_order_select: Сработал обработчик выбора заказа. is_archive={is_archive}")
         table = self.archive_orders_table if is_archive else self.in_progress_orders_table
         management_stack = self.archive_management_stack if is_archive else self.in_progress_management_stack
 
         selected_items = table.selectedItems()
         if not selected_items:
-            logging.debug("on_order_select: Заказ не выбран (selectedItems пуст). Показываем заглушку.")
+            # logging.debug("on_order_select: Заказ не выбран (selectedItems пуст). Показываем заглушку.")
             management_stack.setCurrentIndex(0) # Показываем заглушку
             return
 
@@ -556,7 +769,7 @@ class AdminWindowQt(QMainWindow):
         order_data = selected_items[0].data(Qt.UserRole)
         if not order_data:
             management_stack.setCurrentIndex(0)
-            logging.debug("on_order_select: Данные заказа (UserRole) не найдены. Показываем заглушку.")
+            # logging.debug("on_order_select: Данные заказа (UserRole) не найдены. Показываем заглушку.")
             return
 
         # --- НОВАЯ ЛОГИКА: Переносим логику из Tkinter-версии ---
@@ -564,7 +777,7 @@ class AdminWindowQt(QMainWindow):
             order_id = order_data['id']
             order_status = order_data['status']
 
-            logging.debug(f"on_order_select: Выбран заказ ID: {order_id}, Статус: {order_status}")
+            # logging.debug(f"on_order_select: Выбран заказ ID: {order_id}, Статус: {order_status}")
 
             # 1. Получаем данные сценария для этого заказа
             with get_client_db_connection(self.user_info) as conn:
@@ -574,10 +787,10 @@ class AdminWindowQt(QMainWindow):
             scenario_data = result['scenario_data'] if result else {}
             dm_source = scenario_data.get('dm_source')
             post_processing_mode = scenario_data.get('post_processing')
-            logging.debug(f"on_order_select: Данные сценария получены. dm_source: '{dm_source}', post_processing: '{post_processing_mode}'.")
+            # logging.debug(f"on_order_select: Данные сценария получены. dm_source: '{dm_source}', post_processing: '{post_processing_mode}'.")
 
             # 2. Очищаем вкладки от старых виджетов
-            logging.debug("on_order_select: Начало очистки вкладок панели управления.")
+            # logging.debug("on_order_select: Начало очистки вкладок панели управления.")
             management_tabs = management_stack.widget(1) # Получаем QTabWidget
             for i in range(management_tabs.count()):
                 tab = management_tabs.widget(i)
@@ -587,7 +800,7 @@ class AdminWindowQt(QMainWindow):
                         widget = item.widget()
                         if widget:
                             widget.deleteLater()
-            logging.debug("on_order_select: Очистка вкладок завершена.")
+            # logging.debug("on_order_select: Очистка вкладок завершена.")
 
             # --- ИСПРАВЛЕНИЕ: Получаем правильные виджеты вкладок для текущей панели ---
             edit_tab = self.archive_edit_tab if is_archive else self.in_progress_edit_tab
@@ -596,29 +809,29 @@ class AdminWindowQt(QMainWindow):
 
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
-            logging.debug(f"on_order_select: Создание OrderEditorFrameQt для заказа ID {order_id}...")
-            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data)
+            # logging.debug(f"on_order_select: Создание OrderEditorFrameQt для заказа ID {order_id}...")
+            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data, self)
             edit_tab.layout().addWidget(editor_frame)
 
             # Вкладки "АПИ" и "Загрузка кодов"
             if dm_source == "Файлы клиента (csv, txt)":
-                logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
+                # logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
                 upload_frame = CodeUploadFrameQt(self.user_info, order_id)
                 upload_tab.layout().addWidget(upload_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(api_tab), False)
                 management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), True)
-                logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
+                # logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
             else: # По умолчанию или "Заказ в ДМ.Код"
-                logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
+                # logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
                 api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode)
                 api_tab.layout().addWidget(api_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(api_tab), True)
                 management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), False)
-                logging.debug("on_order_select: Вкладка 'АПИ' показана, 'Загрузка кодов' скрыта.")
+                # logging.debug("on_order_select: Вкладка 'АПИ' показана, 'Загрузка кодов' скрыта.")
                 # Активируем вкладку АПИ только для нужных статусов
                 is_api_enabled = order_status in ('delta', 'dmkod')
                 management_tabs.setTabEnabled(management_tabs.indexOf(api_tab), is_api_enabled)
-                logging.debug(f"on_order_select: Вкладка 'АПИ' {'включена' if is_api_enabled else 'отключена'} для статуса '{order_status}'.")
+                # logging.debug(f"on_order_select: Вкладка 'АПИ' {'включена' if is_api_enabled else 'отключена'} для статуса '{order_status}'.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось отобразить панель управления: {e}")
