@@ -195,13 +195,10 @@ class AdminWindowQt(QMainWindow):
         btn_edit.clicked.connect(self.open_notification_details)
         btn_delete = QPushButton("Удалить")
         btn_delete.clicked.connect(self.delete_notification)
-        btn_archive = QPushButton("В архив")
-        btn_archive.clicked.connect(self.archive_notification)
         
         controls.addWidget(btn_new)
         controls.addWidget(btn_edit)
         controls.addWidget(btn_delete)
-        controls.addWidget(btn_archive)
         controls.addStretch()
         layout.addLayout(controls)
 
@@ -916,22 +913,6 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить уведомление: {e}")
-
-    def archive_notification(self):
-        """Архивирует выбранное уведомление."""
-        sel = self.notifications_table.currentRow()
-        if sel < 0:
-            QMessageBox.warning(self, "Внимание", "Выберите уведомление для архивирования")
-            return
-        notif_id = int(self.notifications_table.item(sel, 0).text())
-        try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            service.archive_notification(notif_id)
-            QMessageBox.information(self, "Успех", "Уведомление архивировано")
-            self.load_notifications()
-        except Exception as e:
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Не удалось архивировать уведомление: {e}")
 
     # --- ИСПРАВЛЕНИЕ: Перемещаем все недостающие методы внутрь класса AdminWindowQt ---
 
