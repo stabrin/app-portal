@@ -15,9 +15,10 @@ from .db_connector import get_client_db_connection
 from .catalogs_service import CatalogsService
 from .supply_notification_service import SupplyNotificationService
 import psycopg2
-import psycopg2.extras
+from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добавляем импорт RealDictCursor
 import base64
 import os
+import re # ИСПРАВЛЕНИЕ: Добавляем импорт модуля re
 
 # --- НОВЫЙ КЛАСС: Рабочий для проверки API в фоновом потоке ---
 class ApiStatusWorker(QObject):
