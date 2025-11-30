@@ -75,19 +75,11 @@ logging.basicConfig(
     ]
 )
 
-# Выбор режима UI: 'tk' (по умолчанию) или 'qt'
-ui_mode = os.getenv('DESKTOP_UI', 'tk').lower()
-
 def _get_main_callable():
-    """Возвращает функцию main() для выбранного UI без немедленного импорта тяжёлых модулей."""
-    if ui_mode == 'qt':
-        logging.info('DESKTOP_UI=qt — запуск PySide6 варианта интерфейса')
-        from src.auth_qt import main as qt_main
-        return qt_main
-    else:
-        logging.info('DESKTOP_UI=tk (по умолчанию) — запуск Tkinter варианта интерфейса')
-        from src.auth import main as tk_main
-        return tk_main
+    """Возвращает функцию main() для UI на Qt."""
+    logging.info('Запуск PySide6 варианта интерфейса')
+    from src.auth_qt import main as qt_main
+    return qt_main
 
 
 if __name__ == "__main__":
