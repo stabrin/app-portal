@@ -387,18 +387,18 @@ class AdminWindowQt(QMainWindow):
         # Вкладка "В работе"
         # --- ИСПРАВЛЕНИЕ: Распаковываем все 5 возвращаемых значений ---
         (in_progress_widget, 
-         self.in_progress_orders_table, 
-         self.in_progress_management_stack, 
-         self.in_progress_client_filter, 
-         self.in_progress_search_filter) = self._create_orders_view(is_archive=False)
+         self.in_progress_orders_table, self.in_progress_management_stack, 
+         self.in_progress_client_filter, self.in_progress_search_filter,
+         self.in_progress_edit_tab, self.in_progress_api_tab, self.in_progress_upload_tab
+        ) = self._create_orders_view(is_archive=False)
         self.orders_tab_widget.addTab(in_progress_widget, "В работе")
 
         # Вкладка "Архив"
         (archive_widget, 
-         self.archive_orders_table, 
-         self.archive_management_stack, 
-         self.archive_client_filter, 
-         self.archive_search_filter) = self._create_orders_view(is_archive=True)
+         self.archive_orders_table, self.archive_management_stack, 
+         self.archive_client_filter, self.archive_search_filter,
+         self.archive_edit_tab, self.archive_api_tab, self.archive_upload_tab
+        ) = self._create_orders_view(is_archive=True)
         self.orders_tab_widget.addTab(archive_widget, "Архив")
 
         self.orders_tab_widget.currentChanged.connect(self._on_orders_tab_changed)
@@ -434,16 +434,16 @@ class AdminWindowQt(QMainWindow):
         
         # Вкладки для управления
         management_tabs = QTabWidget()
-        self.order_edit_tab = QWidget()
-        # --- ИСПРАВЛЕНИЕ: Устанавливаем layout для каждой вкладки сразу при создании ---
-        self.order_edit_tab.setLayout(QVBoxLayout())
-        self.order_api_tab = QWidget()
-        self.order_api_tab.setLayout(QVBoxLayout())
-        self.order_upload_tab = QWidget()
-        self.order_upload_tab.setLayout(QVBoxLayout())
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-        management_tabs.addTab(self.order_edit_tab, "Редактирование")
-        management_tabs.addTab(self.order_api_tab, "АПИ")
+        # --- ИСПРАВЛЕНИЕ: Создаем локальные виджеты для вкладок, а не атрибуты класса ---
+        order_edit_tab = QWidget()
+        order_edit_tab.setLayout(QVBoxLayout())
+        order_api_tab = QWidget()
+        order_api_tab.setLayout(QVBoxLayout())
+        order_upload_tab = QWidget()
+        order_upload_tab.setLayout(QVBoxLayout())
+        
+        management_tabs.addTab(order_edit_tab, "Редактирование")
+        management_tabs.addTab(order_api_tab, "АПИ")
         management_tabs.addTab(self.order_upload_tab, "Загрузка кодов")
 
         # --- НОВЫЙ БЛОК: Фильтры для заказов ---
@@ -496,8 +496,8 @@ class AdminWindowQt(QMainWindow):
         client_filter_combo.currentIndexChanged.connect(lambda: self.apply_order_filters(is_archive))
         search_filter_edit.textChanged.connect(lambda: self.apply_order_filters(is_archive))
 
-        # Возвращаем также и виджеты фильтров, чтобы сохранить их
-        return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit
+        # --- ИСПРАВЛЕНИЕ: Возвращаем все созданные виджеты ---
+        return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit, order_edit_tab, order_api_tab, order_upload_tab
 
     def _on_orders_tab_changed(self, index):
         """Загружает данные при переключении вкладок 'В работе' / 'Архив'."""
@@ -589,30 +589,35 @@ class AdminWindowQt(QMainWindow):
                             widget.deleteLater()
             logging.debug("on_order_select: Очистка вкладок завершена.")
 
+            # --- ИСПРАВЛЕНИЕ: Получаем правильные виджеты вкладок для текущей панели ---
+            edit_tab = self.archive_edit_tab if is_archive else self.in_progress_edit_tab
+            api_tab = self.archive_api_tab if is_archive else self.in_progress_api_tab
+            upload_tab = self.archive_upload_tab if is_archive else self.in_progress_upload_tab
+
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
             logging.debug(f"on_order_select: Создание OrderEditorFrameQt для заказа ID {order_id}...")
             editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data)
-            self.order_edit_tab.layout().addWidget(editor_frame)
+            edit_tab.layout().addWidget(editor_frame)
 
             # Вкладки "АПИ" и "Загрузка кодов"
             if dm_source == "Файлы клиента (csv, txt)":
                 logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
                 upload_frame = CodeUploadFrameQt(self.user_info, order_id)
-                self.order_upload_tab.layout().addWidget(upload_frame)
-                management_tabs.setTabVisible(management_tabs.indexOf(self.order_api_tab), False)
-                management_tabs.setTabVisible(management_tabs.indexOf(self.order_upload_tab), True)
+                upload_tab.layout().addWidget(upload_frame)
+                management_tabs.setTabVisible(management_tabs.indexOf(api_tab), False)
+                management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), True)
                 logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
             else: # По умолчанию или "Заказ в ДМ.Код"
                 logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
                 api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode)
-                self.order_api_tab.layout().addWidget(api_frame)
-                management_tabs.setTabVisible(management_tabs.indexOf(self.order_api_tab), True)
-                management_tabs.setTabVisible(management_tabs.indexOf(self.order_upload_tab), False)
+                api_tab.layout().addWidget(api_frame)
+                management_tabs.setTabVisible(management_tabs.indexOf(api_tab), True)
+                management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), False)
                 logging.debug("on_order_select: Вкладка 'АПИ' показана, 'Загрузка кодов' скрыта.")
                 # Активируем вкладку АПИ только для нужных статусов
                 is_api_enabled = order_status in ('delta', 'dmkod')
-                management_tabs.setTabEnabled(management_tabs.indexOf(self.order_api_tab), is_api_enabled)
+                management_tabs.setTabEnabled(management_tabs.indexOf(api_tab), is_api_enabled)
                 logging.debug(f"on_order_select: Вкладка 'АПИ' {'включена' if is_api_enabled else 'отключена'} для статуса '{order_status}'.")
 
         except Exception as e:
