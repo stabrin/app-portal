@@ -14,6 +14,7 @@ import pandas as pd
 from .db_connector import get_client_db_connection
 from .catalogs_service import CatalogsService
 from .supply_notification_service import SupplyNotificationService
+from .api_service import ApiService # ИСПРАВЛЕНИЕ: Добавляем импорт ApiService
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добавляем импорт RealDictCursor
