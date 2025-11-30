@@ -63,6 +63,42 @@ class DbStatusWorker(QObject):
             logging.error(f"Ошибка при фоновой проверке соединения с БД: {e}")
         self.finished.emit(is_connected)
 
+# --- НОВЫЙ БЛОК: Классы-заглушки для вкладок управления заказом ---
+# Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
+
+class OrderEditorFrameQt(QWidget):
+    """Заглушка для фрейма редактирования заказа."""
+    def __init__(self, user_info, order_id, scenario_data, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Редактор Заказа №{order_id}"))
+        layout.addWidget(QPushButton("Сохранить изменения (в разработке)"))
+        layout.addWidget(QPushButton("Выгрузить детали (в разработке)"))
+        layout.addStretch()
+
+
+class ApiIntegrationFrameQt(QWidget):
+    """Заглушка для фрейма интеграции с API."""
+    def __init__(self, user_info, order_id, post_processing_mode, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Интеграция с API для Заказа №{order_id}"))
+        layout.addWidget(QPushButton("Запросить коды (в разработке)"))
+        layout.addWidget(QPushButton("Получить коды (в разработке)"))
+        layout.addStretch()
+
+
+class CodeUploadFrameQt(QWidget):
+    """Заглушка для фрейма загрузки кодов из файла."""
+    def __init__(self, user_info, order_id, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Загрузка кодов для Заказа №{order_id}"))
+        layout.addWidget(QPushButton("Выбрать файлы... (в разработке)"))
+        layout.addWidget(QPushButton("Запустить обработку (в разработке)"))
+        layout.addStretch()
+
+
 class AdminWindowQt(QMainWindow):
     """Переносная версия tkinter админ-интерфейса на PySide6 с левым меню и правой стеком контента."""
     def __init__(self, user_info: dict):
@@ -515,23 +551,55 @@ class AdminWindowQt(QMainWindow):
             management_stack.setCurrentIndex(0)
             return
 
-        # --- Логика отображения вкладок (пока без наполнения) ---
-        # TODO: В будущем здесь будет создание OrderEditorFrame, ApiIntegrationFrame и т.д.
-        
-        # Очищаем вкладки от старых виджетов
-        for tab in [self.order_edit_tab, self.order_api_tab, self.order_upload_tab]:
-            # Простое решение: создаем новый layout каждый раз
-            new_layout = QVBoxLayout()
-            # Удаляем старый layout, если он есть
-            old_layout = tab.layout()
-            if old_layout is not None:
-                # Удаляем все виджеты из старого layout
-                while old_layout.count():
-                    item = old_layout.takeAt(0)
-                    widget = item.widget()
-                    if widget is not None:
-                        widget.deleteLater()
-            tab.setLayout(new_layout)
+        # --- НОВАЯ ЛОГИКА: Переносим логику из Tkinter-версии ---
+        try:
+            order_id = order_data['id']
+            order_status = order_data['status']
+
+            # 1. Получаем данные сценария для этого заказа
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
+                    result = cur.fetchone()
+            scenario_data = result['scenario_data'] if result else {}
+            dm_source = scenario_data.get('dm_source')
+            post_processing_mode = scenario_data.get('post_processing')
+
+            # 2. Очищаем вкладки от старых виджетов
+            management_tabs = management_stack.widget(1) # Получаем QTabWidget
+            for i in range(management_tabs.count()):
+                tab = management_tabs.widget(i)
+                if tab.layout() is not None:
+                    while tab.layout().count():
+                        item = tab.layout().takeAt(0)
+                        widget = item.widget()
+                        if widget:
+                            widget.deleteLater()
+
+            # 3. Создаем и размещаем новые виджеты
+            # Вкладка "Редактирование" всегда есть
+            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data)
+            self.order_edit_tab.layout().addWidget(editor_frame)
+
+            # Вкладки "АПИ" и "Загрузка кодов"
+            if dm_source == "Файлы клиента (csv, txt)":
+                upload_frame = CodeUploadFrameQt(self.user_info, order_id)
+                self.order_upload_tab.layout().addWidget(upload_frame)
+                management_tabs.setTabVisible(management_tabs.indexOf(self.order_api_tab), False)
+                management_tabs.setTabVisible(management_tabs.indexOf(self.order_upload_tab), True)
+            else: # По умолчанию или "Заказ в ДМ.Код"
+                api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode)
+                self.order_api_tab.layout().addWidget(api_frame)
+                management_tabs.setTabVisible(management_tabs.indexOf(self.order_api_tab), True)
+                management_tabs.setTabVisible(management_tabs.indexOf(self.order_upload_tab), False)
+                # Активируем вкладку АПИ только для нужных статусов
+                is_api_enabled = order_status in ('delta', 'dmkod')
+                management_tabs.setTabEnabled(management_tabs.indexOf(self.order_api_tab), is_api_enabled)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось отобразить панель управления: {e}")
+            management_stack.setCurrentIndex(0)
+            return
 
         # Переключаем QStackedWidget на панель с вкладками
         management_stack.setCurrentIndex(1)
