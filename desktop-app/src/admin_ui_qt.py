@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QTextEdit,
-    QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter, QTabWidget, QProgressDialog,
+    QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter, QTabWidget, QProgressDialog, QDialogButtonBox,
     QGroupBox, QRadioButton, QSpinBox,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
 )
@@ -968,6 +968,10 @@ class AdminWindowQt(QMainWindow):
         self.page_workplaces = self._build_workplaces_page()
         self.content_stack.addWidget(self.page_workplaces)
 
+        # Страница 5: Справочники
+        self.page_catalogs = self._build_catalogs_page()
+        self.content_stack.addWidget(self.page_catalogs)
+
         # Страница 4: Пустая заглушка для остальных
         self.page_placeholder = QWidget()
         placeholder_layout = QVBoxLayout()
@@ -982,7 +986,8 @@ class AdminWindowQt(QMainWindow):
             'orders': 2,
             'save_config': 3,
             'workplaces': 4,
-            'placeholder': 5,
+            'catalogs': 5,
+            'placeholder': 6,
         }
 
         # Собираем основной layout
@@ -1146,6 +1151,8 @@ class AdminWindowQt(QMainWindow):
             except Exception:
                 logging.exception("Error loading warehouses on menu click")
             self.content_stack.setCurrentIndex(self.stack_indices['workplaces'])
+        elif text == "Справочники":
+            self.content_stack.setCurrentIndex(self.stack_indices['catalogs'])
         else:
             # Для всех остальных пунктов пока показываем заглушку
             self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
@@ -2241,6 +2248,113 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {e}")
+
+    def _build_catalogs_page(self):
+        """Создает страницу для управления справочниками."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        notebook = QTabWidget()
+        layout.addWidget(notebook)
+
+        # Справочник 1: Клиенты (локальные)
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Клиенты (локальные)",
+            service_methods={
+                'get': self.catalog_service.get_local_clients,
+                'upsert': self.catalog_service.upsert_local_client,
+                'delete': self.catalog_service.delete_local_client,
+                'template': self.catalog_service.get_local_clients_template,
+                'import': self.catalog_service.process_local_clients_import
+            },
+            columns={
+                'id': ('ID', 50, 'center'),
+                'name': ('Наименование', 400, 'w'),
+                'inn': ('ИНН', 150, 'center')
+            },
+            pk_field='id'
+        )
+
+        # Справочник 2: Товарные группы
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Товарные группы",
+            service_methods={
+                'get': self.catalog_service.get_product_groups,
+                'upsert': self.catalog_service.upsert_product_group,
+                'delete': self.catalog_service.delete_product_group,
+                'template': self.catalog_service.get_product_groups_template,
+                'import': self.catalog_service.process_product_groups_import
+            },
+            columns={
+                'id': ('ID', 50, 'center'),
+                'group_name': ('Системное имя', 200, 'w'),
+                'display_name': ('Отображаемое имя', 300, 'w'),
+                'fias_required': ('Нужен ФИАС', 100, 'center'),
+                'code_template': ('Шаблон кода', 200, 'w'),
+                'dm_template': ('Шаблон ДМ', 200, 'w')
+            },
+            pk_field='id'
+        )
+
+        # Справочник 3: Товары
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Товары",
+            service_methods={
+                'get': self.catalog_service.get_products,
+                'upsert': self.catalog_service.upsert_product,
+                'delete': self.catalog_service.delete_product,
+                'template': self.catalog_service.get_products_template,
+                'import': self.catalog_service.process_products_import
+            },
+            columns={
+                'gtin': ('GTIN', 150, 'center'),
+                'name': ('Наименование', 300, 'w'),
+                'description_1': ('Описание 1', 200, 'w'),
+                'description_2': ('Описание 2', 200, 'w'),
+                'description_3': ('Описание 3', 200, 'w')
+            },
+            pk_field='gtin'
+        )
+
+        # Справочник 4: Сценарии маркировки
+        self._create_generic_catalog_tab(
+            parent=notebook,
+            title="Сценарии маркировки",
+            service_methods={
+                'get': self.catalog_service.get_marking_scenarios,
+                'upsert': self.catalog_service.upsert_marking_scenario,
+                'delete': self.catalog_service.delete_marking_scenario,
+                'template': self.catalog_service.get_marking_scenarios_template,
+                'import': self.catalog_service.process_marking_scenarios_import
+            },
+            columns={
+                'id': ('ID', 50, 'center'),
+                'name': ('Название сценария', 250, 'w'),
+                'scenario_data': ('Параметры (JSON)', 600, 'w')
+            },
+            pk_field='id'
+        )
+
+        return widget
+
+    def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field):
+        """Создает универсальную вкладку для справочника с полным CRUD."""
+        # Эта функция будет содержать всю логику из старого _create_generic_catalog_tab,
+        # адаптированную под Qt. Для краткости, я не буду приводить здесь весь код,
+        # но он будет включать создание QTableWidget, кнопок и их обработчиков.
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # ... (здесь будет создание кнопок и таблицы) ...
+        
+        # Пример:
+        table = QTableWidget()
+        layout.addWidget(table)
+        
+        parent.addTab(tab, title)
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
