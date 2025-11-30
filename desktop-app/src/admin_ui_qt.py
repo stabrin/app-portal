@@ -2254,21 +2254,23 @@ class AdminWindowQt(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {e}")
 
-    def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field):
-        """Создает универсальную вкладку для справочника с полным CRUD."""
-        # Эта функция будет содержать всю логику из старого _create_generic_catalog_tab,
-        # адаптированную под Qt. Для краткости, я не буду приводить здесь весь код,
-        # но он будет включать создание QTableWidget, кнопок и их обработчиков.
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
+    def _build_catalogs_page(self):
+        """Создает страницу для управления справочниками."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
         
-        # ... (здесь будет создание кнопок и таблицы) ...
-        
-        # Пример:
-        table = QTableWidget()
-        layout.addWidget(table)
-        
-        parent.addTab(tab, title)
+        notebook = QTabWidget()
+        layout.addWidget(notebook)
+
+        # Справочник 1: Клиенты (локальные)
+        self._build_local_clients_tab(notebook)
+
+        # Заглушки для остальных справочников
+        notebook.addTab(QLabel("Раздел 'Товарные группы' в разработке"), "Товарные группы")
+        notebook.addTab(QLabel("Раздел 'Товары' в разработке"), "Товары")
+        notebook.addTab(QLabel("Раздел 'Сценарии маркировки' в разработке"), "Сценарии маркировки")
+
+        return widget
 
     def _build_local_clients_tab(self, parent_notebook):
         """Создает вкладку для управления локальными клиентами."""
