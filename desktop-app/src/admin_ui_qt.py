@@ -1282,7 +1282,7 @@ class AdminWindowQt(QMainWindow):
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
             # logging.debug(f"on_order_select: Создание OrderEditorFrameQt для заказа ID {order_id}...")
-            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data, self.main_app_window)
+            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data, self)
             edit_tab.layout().addWidget(editor_frame)
 
             # Вкладки "АПИ" и "Загрузка кодов"
@@ -1295,7 +1295,7 @@ class AdminWindowQt(QMainWindow):
                 # logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
             else: # По умолчанию или "Заказ в ДМ.Код"
                 # logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
-                api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode, self.main_app_window)
+                api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode, self)
                 api_tab.layout().addWidget(api_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(api_tab), True)
                 management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), False)
