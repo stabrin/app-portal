@@ -435,8 +435,13 @@ class AdminWindowQt(QMainWindow):
         # Вкладки для управления
         management_tabs = QTabWidget()
         self.order_edit_tab = QWidget()
+        # --- ИСПРАВЛЕНИЕ: Устанавливаем layout для каждой вкладки сразу при создании ---
+        self.order_edit_tab.setLayout(QVBoxLayout())
         self.order_api_tab = QWidget()
+        self.order_api_tab.setLayout(QVBoxLayout())
         self.order_upload_tab = QWidget()
+        self.order_upload_tab.setLayout(QVBoxLayout())
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         management_tabs.addTab(self.order_edit_tab, "Редактирование")
         management_tabs.addTab(self.order_api_tab, "АПИ")
 
