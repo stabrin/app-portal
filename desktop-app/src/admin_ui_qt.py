@@ -209,27 +209,38 @@ class OrderEditorFrameQt(QWidget):
             QMessageBox.information(self, "Успех", f"Детализация выгружена в файл:\n{filepath}")
 
     def _import_details_from_excel(self):
+        logging.debug(f"Запуск импорта детализации для заказа ID: {self.order_id}")
         if QMessageBox.question(self, "Подтверждение", "Импорт из файла полностью заменит текущую детализацию. Продолжить?") != QMessageBox.Yes:
+            logging.debug("Импорт отменен пользователем.")
             return
 
         filepath, _ = QFileDialog.getOpenFileName(self, "Выберите Excel-файл", "", "Excel Files (*.xlsx *.xls)")
         if not filepath:
+            logging.debug("Файл для импорта не выбран.")
             return
+        
+        logging.debug(f"Выбран файл для импорта: {filepath}")
 
         try:
+            logging.debug("Чтение Excel файла с помощью pandas...")
             df = pd.read_excel(filepath, dtype={'gtin': str})
             df = df.where(pd.notna(df), None)
             df['order_id'] = self.order_id
+            logging.debug(f"Файл успешно прочитан. Обнаружено {len(df)} строк. Колонки: {list(df.columns)}")
 
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
+                    logging.debug(f"Удаление старой детализации для заказа ID: {self.order_id}...")
                     cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
+                    logging.debug("Старая детализация удалена. Запуск upsert_data_to_db...")
                     from .utils import upsert_data_to_db
                     upsert_data_to_db(cur, 'dmkod_aggregation_details', df, ['order_id', 'gtin'])
+                    logging.debug("upsert_data_to_db завершен.")
                 conn.commit()
             QMessageBox.information(self, "Успех", f"Детализация импортирована. Загружено {len(df)} строк.")
             self._load_details()
         except Exception as e:
+            logging.error(f"Критическая ошибка при импорте детализации: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать данные: {e}")
 
     def _move_to_archive(self):
