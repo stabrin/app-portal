@@ -14,6 +14,7 @@ import pandas as pd
 from .db_connector import get_client_db_connection
 from .catalogs_service import CatalogsService
 from .supply_notification_service import SupplyNotificationService
+from .aggregation_service import run_aggregation_process_desktop
 from .api_service import ApiService # ИСПРАВЛЕНИЕ: Добавляем импорт ApiService
 import psycopg2
 from psycopg2 import sql
@@ -775,14 +776,116 @@ class ApiIntegrationFrameQt(QWidget):
 
 
 class CodeUploadFrameQt(QWidget):
-    """Заглушка для фрейма загрузки кодов из файла."""
-    def __init__(self, user_info, order_id, parent=None):
+    """Полнофункциональный фрейм для загрузки кодов из файла."""
+    def __init__(self, user_info, order_id, main_app_window, parent=None):
         super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"Загрузка кодов для Заказа №{order_id}"))
-        layout.addWidget(QPushButton("Выбрать файлы... (в разработке)"))
-        layout.addWidget(QPushButton("Запустить обработку (в разработке)"))
-        layout.addStretch()
+        self.user_info = user_info
+        self.order_id = order_id
+        self.main_app_window = main_app_window
+        self._create_widgets()
+
+    def _create_widgets(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(15, 15, 15, 15)
+
+        main_layout.addWidget(QLabel("Загрузите файлы с кодами маркировки (csv, txt):"))
+
+        # Поле для выбора файлов
+        file_layout = QHBoxLayout()
+        self.file_path_edit = QLineEdit()
+        self.file_path_edit.setReadOnly(True)
+        btn_browse = QPushButton("Обзор...")
+        btn_browse.clicked.connect(self._select_files)
+        file_layout.addWidget(self.file_path_edit)
+        file_layout.addWidget(btn_browse)
+        main_layout.addLayout(file_layout)
+
+        # Тип кодов
+        dm_type_layout = QHBoxLayout()
+        dm_type_layout.addWidget(QLabel("Тип кодов DataMatrix:"))
+        self.dm_type_combo = QComboBox()
+        self.dm_type_combo.addItems(["standard", "tobacco"])
+        dm_type_layout.addWidget(self.dm_type_combo)
+        dm_type_layout.addStretch()
+        main_layout.addLayout(dm_type_layout)
+
+        # Настройки агрегации
+        agg_group = QGroupBox("Настройки агрегации")
+        agg_layout = QVBoxLayout()
+        self.agg_none_radio = QRadioButton("Без агрегации")
+        self.agg_none_radio.setChecked(True)
+        self.agg_level1_radio = QRadioButton("Агрегация в короба:")
+        self.level1_qty_spinbox = QSpinBox()
+        self.level1_qty_spinbox.setRange(1, 10000)
+        self.level1_qty_spinbox.setValue(10)
+        
+        level1_layout = QHBoxLayout()
+        level1_layout.addWidget(self.agg_level1_radio)
+        level1_layout.addWidget(self.level1_qty_spinbox)
+        level1_layout.addStretch()
+
+        agg_layout.addWidget(self.agg_none_radio)
+        agg_layout.addLayout(level1_layout)
+        agg_group.setLayout(agg_layout)
+        main_layout.addWidget(agg_group)
+
+        # Кнопка запуска
+        btn_run = QPushButton("Запустить обработку")
+        btn_run.clicked.connect(self._run_processing)
+        main_layout.addWidget(btn_run)
+        main_layout.addStretch()
+
+    def _select_files(self):
+        filepaths, _ = QFileDialog.getOpenFileNames(self, "Выберите файлы с кодами", "", "Текстовые файлы (*.txt *.csv);;Все файлы (*.*)")
+        if filepaths:
+            self.file_path_edit.setText(";".join(filepaths))
+
+    def _run_processing(self):
+        filepaths = self.file_path_edit.text().split(";")
+        if not all(filepaths):
+            QMessageBox.warning(self, "Внимание", "Не выбраны файлы для загрузки.")
+            return
+
+        dm_type = self.dm_type_combo.currentText()
+        aggregation_mode = "level1" if self.agg_level1_radio.isChecked() else "none"
+        level1_qty = self.level1_qty_spinbox.value()
+
+        # Создаем диалог для логов
+        log_dialog = QDialog(self)
+        log_dialog.setWindowTitle(f"Лог обработки заказа №{self.order_id}")
+        log_dialog.setMinimumSize(600, 400)
+        log_layout = QVBoxLayout()
+        log_text = QTextEdit()
+        log_text.setReadOnly(True)
+        log_layout.addWidget(log_text)
+        log_dialog.setLayout(log_layout)
+
+        # Worker для выполнения задачи в фоне
+        class Worker(QObject):
+            finished = Signal()
+            log_message = Signal(str)
+
+            def run(self):
+                logs = run_aggregation_process_desktop(
+                    user_info=self.user_info, order_id=self.order_id, filepaths=filepaths,
+                    dm_type=dm_type, aggregation_mode=aggregation_mode, level1_qty=level1_qty
+                )
+                for line in logs:
+                    self.log_message.emit(line)
+                self.finished.emit()
+
+        self.thread = QThread()
+        self.worker = Worker()
+        self.worker.moveToThread(self.thread)
+        self.worker.log_message.connect(log_text.append)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.started.connect(self.worker.run)
+        
+        self.thread.start()
+        log_dialog.exec() # Показываем модальное окно с логами
+        self.main_app_window.load_orders(is_archive=False) # Обновляем список заказов
 
 
 class AdminWindowQt(QMainWindow):
@@ -1289,7 +1392,7 @@ class AdminWindowQt(QMainWindow):
             # Вкладки "АПИ" и "Загрузка кодов"
             if dm_source == "Файлы клиента (csv, txt)":
                 # logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
-                upload_frame = CodeUploadFrameQt(self.user_info, order_id)
+                upload_frame = CodeUploadFrameQt(self.user_info, order_id, self)
                 upload_tab.layout().addWidget(upload_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(api_tab), False)
                 management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), True)
