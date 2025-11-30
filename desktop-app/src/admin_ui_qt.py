@@ -444,6 +444,7 @@ class AdminWindowQt(QMainWindow):
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         management_tabs.addTab(self.order_edit_tab, "Редактирование")
         management_tabs.addTab(self.order_api_tab, "АПИ")
+        management_tabs.addTab(self.order_upload_tab, "Загрузка кодов")
 
         # --- НОВЫЙ БЛОК: Фильтры для заказов ---
         filter_layout = QHBoxLayout()
@@ -471,7 +472,6 @@ class AdminWindowQt(QMainWindow):
         placeholder_label = QLabel("Выберите заказ для управления")
         placeholder_label.setAlignment(Qt.AlignCenter)
         management_stack.addWidget(placeholder_label) # Индекс 0
-        management_tabs.addTab(self.order_upload_tab, "Загрузка кодов")
         management_stack.addWidget(management_tabs) # Индекс 1
 
         # --- ИСПРАВЛЕНИЕ: Правильно добавляем виджеты в сплиттер и задаем пропорции ---
