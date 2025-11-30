@@ -254,12 +254,14 @@ class AdminWindowQt(QMainWindow):
         # --- НОВЫЙ БЛОК: Фильтры для заказов ---
         filter_layout = QHBoxLayout()
         filter_layout.addWidget(QLabel("Клиент:"))
-        client_filter_combo = QComboBox()
+        # --- ИСПРАВЛЕНИЕ: Явно указываем родительский виджет, чтобы избежать преждевременного удаления ---
+        client_filter_combo = QComboBox(view_widget)
         client_filter_combo.addItem("Все клиенты")
         filter_layout.addWidget(client_filter_combo)
 
         filter_layout.addWidget(QLabel("Поиск:"))
-        search_filter_edit = QLineEdit()
+        # --- ИСПРАВЛЕНИЕ: Явно указываем родительский виджет ---
+        search_filter_edit = QLineEdit(view_widget)
         search_filter_edit.setPlaceholderText("Поиск по клиенту, комментарию, статусу...")
         filter_layout.addWidget(search_filter_edit)
         
