@@ -1211,8 +1211,8 @@ class AdminWindowQt(QMainWindow):
         top_splitter = QSplitter(Qt.Horizontal)
 
         # Левая часть: таблица заказов
-        table_widget = QTableWidget(0, 4)
-        table_widget.setHorizontalHeaderLabels(["Дата", "Клиент / Заказ №", "Статус", "Комментарий"])
+        table_widget = QTableWidget(0, 6)
+        table_widget.setHorizontalHeaderLabels(["Дата", "Клиент / Заказ №", "Статус", "Кол-во позиций", "Кол-во ДМ", "Комментарий"])
         table_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         table_widget.setSelectionMode(QAbstractItemView.SingleSelection)
         table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
@@ -1308,8 +1308,18 @@ class AdminWindowQt(QMainWindow):
         try:
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    # --- ИСПРАВЛЕНИЕ: Добавляем JOIN и агрегацию для подсчета позиций и ДМ ---
                     status_filter = "status LIKE 'Архив%%'" if is_archive else "status NOT LIKE 'Архив%%'"
-                    query = f"SELECT id, client_name, order_date, status, notes, api_status FROM orders WHERE {status_filter} ORDER BY id DESC"
+                    query = f"""
+                        SELECT o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status,
+                               COUNT(DISTINCT d.gtin) as positions_count,
+                               COALESCE(SUM(d.dm_quantity), 0) as dm_count
+                        FROM orders o
+                        LEFT JOIN dmkod_aggregation_details d ON o.id = d.order_id
+                        WHERE {status_filter}
+                        GROUP BY o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status
+                        ORDER BY o.id DESC
+                    """
                     cur.execute(query)
                     orders = cur.fetchall()
 
@@ -1458,6 +1468,8 @@ class AdminWindowQt(QMainWindow):
                 str(order['order_date']),
                 f"{order['client_name']} / Заказ № {order['id']}",
                 order['status'],
+                    str(order.get('positions_count', 0)),
+                    str(order.get('dm_count', 0)),
                 order['notes']
             ]
             for col, text in enumerate(items_to_add):
