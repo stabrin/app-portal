@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter, QTabWidget,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
 )
-from PySide6.QtCore import Qt, Slot, QDate
+from PySide6.QtCore import Qt, Slot, QDate, QTimer, QThread, Signal, QObject
 from PySide6.QtGui import QColor
 import sys
 import traceback
@@ -19,6 +19,31 @@ import psycopg2.extras
 import base64
 import os
 
+# --- НОВЫЙ КЛАСС: Рабочий для проверки API в фоновом потоке ---
+class ApiStatusWorker(QObject):
+    finished = Signal(bool)
+
+    def __init__(self, user_info):
+        super().__init__()
+        self.user_info = user_info
+
+    def run(self):
+        """Выполняет проверку токена API."""
+        is_valid = False
+        try:
+            # Проверяем, есть ли вообще конфиг для API
+            if not self.user_info.get('client_api_config', {}).get('api_base_url'):
+                self.finished.emit(False)
+                return
+            
+            from .api_service import ApiService
+            api_service = ApiService(self.user_info)
+            api_service.get_participants() # Этот вызов проверит и при необходимости обновит токен
+            is_valid = True
+        except Exception as e:
+            logging.error(f"Ошибка при фоновой проверке токена API: {e}")
+        
+        self.finished.emit(is_valid)
 
 class AdminWindowQt(QMainWindow):
     """Переносная версия tkinter админ-интерфейса на PySide6 с левым меню и правой стеком контента."""
@@ -32,6 +57,7 @@ class AdminWindowQt(QMainWindow):
         self.archive_orders_cache = []
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         self._build_ui()
+        self._setup_api_status_checker() # Настраиваем и запускаем проверку API
 
     def _build_ui(self):
         main_widget = QWidget()
@@ -120,8 +146,69 @@ class AdminWindowQt(QMainWindow):
         main_widget.setLayout(main_layout)
         self.setCentralWidget(main_widget)
 
+        # --- НОВЫЙ БЛОК: Создание строки состояния и индикатора API ---
+        status_bar = self.statusBar()
+        self.api_status_indicator = QLabel()
+        self.api_status_indicator.setFixedSize(16, 16)
+        self.api_status_indicator.setToolTip("Статус подключения к API ДМ.Код\nДвойной клик для принудительного обновления токена.")
+        # Устанавливаем начальный (серый) цвет
+        self._set_api_status_color(None) 
+        status_bar.addPermanentWidget(self.api_status_indicator)
+
         # Показываем приветственную страницу по умолчанию
         self.content_stack.setCurrentIndex(self.stack_indices['welcome'])
+
+    def _setup_api_status_checker(self):
+        """Настраивает и запускает периодическую проверку статуса API."""
+        # Запускаем первую проверку сразу
+        self._update_api_status()
+
+        # Создаем таймер для периодических проверок (каждые 10 минут)
+        self.api_check_timer = QTimer(self)
+        self.api_check_timer.setInterval(600 * 1000) # 600 секунд = 10 минут
+        self.api_check_timer.timeout.connect(self._update_api_status)
+        self.api_check_timer.start()
+
+    @Slot()
+    def _update_api_status(self):
+        """Запускает проверку API в фоновом потоке."""
+        self.thread = QThread()
+        self.worker = ApiStatusWorker(self.user_info)
+        self.worker.moveToThread(self.thread)
+
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self._set_api_status_color)
+        
+        # Очистка после завершения
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+
+        self.thread.start()
+
+    @Slot(bool)
+    def _set_api_status_color(self, is_valid):
+        """Устанавливает цвет индикатора в зависимости от статуса."""
+        if is_valid is None:
+            color = "grey" # Начальный статус
+        else:
+            color = "green" if is_valid else "red"
+        
+        self.api_status_indicator.setStyleSheet(f"""
+            QLabel {{
+                background-color: {color};
+                border-radius: 8px;
+                border: 1px solid black;
+            }}
+        """)
+
+    def mouseDoubleClickEvent(self, event):
+        """Обрабатывает двойной клик по окну (для индикатора)."""
+        if self.api_status_indicator.underMouse():
+            logging.info("Принудительное обновление токена API по двойному клику...")
+            QMessageBox.information(self, "Обновление токена", "Запущено принудительное обновление токена API...")
+            self._update_api_status() # Просто запускаем обычную проверку
+        super().mouseDoubleClickEvent(event)
 
     @Slot(QTreeWidgetItem, int)
     def _on_menu_clicked(self, item: QTreeWidgetItem, column: int):
