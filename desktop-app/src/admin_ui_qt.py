@@ -2254,97 +2254,6 @@ class AdminWindowQt(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {e}")
 
-    def _build_catalogs_page(self):
-        """Создает страницу для управления справочниками."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        notebook = QTabWidget()
-        layout.addWidget(notebook)
-
-        # Справочник 1: Клиенты (локальные)
-        self._create_generic_catalog_tab(
-            parent=notebook,
-            title="Клиенты (локальные)",
-            service_methods={
-                'get': self.catalog_service.get_local_clients,
-                'upsert': self.catalog_service.upsert_local_client,
-                'delete': self.catalog_service.delete_local_client,
-                'template': self.catalog_service.get_local_clients_template,
-                'import': self.catalog_service.process_local_clients_import
-            },
-            columns={
-                'id': ('ID', 50, 'center'),
-                'name': ('Наименование', 400, 'w'),
-                'inn': ('ИНН', 150, 'center')
-            },
-            pk_field='id'
-        )
-
-        # Справочник 2: Товарные группы
-        self._create_generic_catalog_tab(
-            parent=notebook,
-            title="Товарные группы",
-            service_methods={
-                'get': self.catalog_service.get_product_groups,
-                'upsert': self.catalog_service.upsert_product_group,
-                'delete': self.catalog_service.delete_product_group,
-                'template': self.catalog_service.get_product_groups_template,
-                'import': self.catalog_service.process_product_groups_import
-            },
-            columns={
-                'id': ('ID', 50, 'center'),
-                'group_name': ('Системное имя', 200, 'w'),
-                'display_name': ('Отображаемое имя', 300, 'w'),
-                'fias_required': ('Нужен ФИАС', 100, 'center'),
-                'code_template': ('Шаблон кода', 200, 'w'),
-                'dm_template': ('Шаблон ДМ', 200, 'w')
-            },
-            pk_field='id'
-        )
-
-        # Справочник 3: Товары
-        self._create_generic_catalog_tab(
-            parent=notebook,
-            title="Товары",
-            service_methods={
-                'get': self.catalog_service.get_products,
-                'upsert': self.catalog_service.upsert_product,
-                'delete': self.catalog_service.delete_product,
-                'template': self.catalog_service.get_products_template,
-                'import': self.catalog_service.process_products_import
-            },
-            columns={
-                'gtin': ('GTIN', 150, 'center'),
-                'name': ('Наименование', 300, 'w'),
-                'description_1': ('Описание 1', 200, 'w'),
-                'description_2': ('Описание 2', 200, 'w'),
-                'description_3': ('Описание 3', 200, 'w')
-            },
-            pk_field='gtin'
-        )
-
-        # Справочник 4: Сценарии маркировки
-        self._create_generic_catalog_tab(
-            parent=notebook,
-            title="Сценарии маркировки",
-            service_methods={
-                'get': self.catalog_service.get_marking_scenarios,
-                'upsert': self.catalog_service.upsert_marking_scenario,
-                'delete': self.catalog_service.delete_marking_scenario,
-                'template': self.catalog_service.get_marking_scenarios_template,
-                'import': self.catalog_service.process_marking_scenarios_import
-            },
-            columns={
-                'id': ('ID', 50, 'center'),
-                'name': ('Название сценария', 250, 'w'),
-                'scenario_data': ('Параметры (JSON)', 600, 'w')
-            },
-            pk_field='id'
-        )
-
-        return widget
-
     def _create_generic_catalog_tab(self, parent, title, service_methods, columns, pk_field):
         """Создает универсальную вкладку для справочника с полным CRUD."""
         # Эта функция будет содержать всю логику из старого _create_generic_catalog_tab,
@@ -2360,6 +2269,139 @@ class AdminWindowQt(QMainWindow):
         layout.addWidget(table)
         
         parent.addTab(tab, title)
+
+    def _build_local_clients_tab(self, parent_notebook):
+        """Создает вкладку для управления локальными клиентами."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Панель с кнопками
+        controls_layout = QHBoxLayout()
+        btn_add = QPushButton("Добавить")
+        btn_edit = QPushButton("Редактировать")
+        btn_delete = QPushButton("Удалить")
+        btn_export = QPushButton("Выгрузить в Excel")
+        btn_import = QPushButton("Загрузить из Excel")
+        btn_refresh = QPushButton("Обновить")
+        controls_layout.addWidget(btn_add)
+        controls_layout.addWidget(btn_edit)
+        controls_layout.addWidget(btn_delete)
+        controls_layout.addStretch()
+        controls_layout.addWidget(btn_export)
+        controls_layout.addWidget(btn_import)
+        controls_layout.addWidget(btn_refresh)
+        layout.addLayout(controls_layout)
+
+        # Таблица
+        self.local_clients_table = QTableWidget(0, 3)
+        self.local_clients_table.setHorizontalHeaderLabels(["ID", "Наименование", "ИНН"])
+        self.local_clients_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.local_clients_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.local_clients_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        layout.addWidget(self.local_clients_table)
+        
+        parent_notebook.addTab(tab, "Клиенты (локальные)")
+
+        # Привязка обработчиков
+        btn_refresh.clicked.connect(self._refresh_local_clients)
+        btn_add.clicked.connect(self._add_local_client)
+        btn_edit.clicked.connect(self._edit_local_client)
+        self.local_clients_table.doubleClicked.connect(self._edit_local_client)
+        btn_delete.clicked.connect(self._delete_local_client)
+        btn_export.clicked.connect(self._export_local_clients)
+        btn_import.clicked.connect(self._import_local_clients)
+
+        # Загрузка данных при первом открытии
+        self._refresh_local_clients()
+
+    def _refresh_local_clients(self):
+        """Обновляет данные в таблице локальных клиентов."""
+        try:
+            self.local_clients_table.setRowCount(0)
+            clients = self.catalog_service.get_local_clients()
+            for client in clients:
+                row = self.local_clients_table.rowCount()
+                self.local_clients_table.insertRow(row)
+                self.local_clients_table.setItem(row, 0, QTableWidgetItem(str(client['id'])))
+                self.local_clients_table.setItem(row, 1, QTableWidgetItem(client['name']))
+                self.local_clients_table.setItem(row, 2, QTableWidgetItem(client.get('inn', '')))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить локальных клиентов: {e}")
+
+    def _add_local_client(self):
+        """Открывает диалог для добавления нового клиента."""
+        name, ok1 = QInputDialog.getText(self, "Новый клиент", "Наименование:")
+        if not ok1 or not name: return
+        inn, ok2 = QInputDialog.getText(self, "Новый клиент", "ИНН (опционально):")
+        if not ok2: return
+
+        try:
+            self.catalog_service.upsert_local_client({'name': name, 'inn': inn})
+            self._refresh_local_clients()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось добавить клиента: {e}")
+
+    def _edit_local_client(self):
+        """Открывает диалог для редактирования выбранного клиента."""
+        sel_row = self.local_clients_table.currentRow()
+        if sel_row < 0: return
+
+        client_id = self.local_clients_table.item(sel_row, 0).text()
+        current_name = self.local_clients_table.item(sel_row, 1).text()
+        current_inn = self.local_clients_table.item(sel_row, 2).text()
+
+        name, ok1 = QInputDialog.getText(self, "Редактировать клиента", "Наименование:", text=current_name)
+        if not ok1 or not name: return
+        inn, ok2 = QInputDialog.getText(self, "Редактировать клиента", "ИНН (опционально):", text=current_inn)
+        if not ok2: return
+
+        try:
+            self.catalog_service.upsert_local_client({'id': client_id, 'name': name, 'inn': inn})
+            self._refresh_local_clients()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось обновить клиента: {e}")
+
+    def _delete_local_client(self):
+        """Удаляет выбранного клиента."""
+        sel_row = self.local_clients_table.currentRow()
+        if sel_row < 0: return
+
+        client_id = self.local_clients_table.item(sel_row, 0).text()
+        client_name = self.local_clients_table.item(sel_row, 1).text()
+
+        if QMessageBox.question(self, "Подтверждение", f"Удалить клиента '{client_name}'?") == QMessageBox.Yes:
+            try:
+                self.catalog_service.delete_local_client(int(client_id))
+                self._refresh_local_clients()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить клиента: {e}")
+
+    def _export_local_clients(self):
+        """Выгружает справочник локальных клиентов в Excel."""
+        try:
+            df = self.catalog_service.get_local_clients_template()
+            clients = self.catalog_service.get_local_clients()
+            if clients:
+                df = pd.DataFrame(clients)
+
+            filepath, _ = QFileDialog.getSaveFileName(self, "Выгрузка: Клиенты (локальные)", "local_clients.xlsx", "Excel Files (*.xlsx)")
+            if filepath:
+                df.to_excel(filepath, index=False)
+                QMessageBox.information(self, "Успех", "Справочник выгружен.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выгрузить файл: {e}")
+
+    def _import_local_clients(self):
+        """Импортирует локальных клиентов из Excel."""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Импорт: Клиенты (локальные)", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath: return
+        try:
+            df = pd.read_excel(filepath, dtype={'id': str, 'inn': str})
+            self.catalog_service.process_local_clients_import(df)
+            self._refresh_local_clients()
+            QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
