@@ -238,6 +238,25 @@ class AdminWindowQt(QMainWindow):
         top_splitter.setSizes([700, 300])
         top_layout.addWidget(top_splitter)
 
+        # --- НОВЫЙ БЛОК: Фильтры для заказов ---
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Клиент:"))
+        client_filter_combo = QComboBox()
+        client_filter_combo.addItem("Все клиенты")
+        filter_layout.addWidget(client_filter_combo)
+
+        filter_layout.addWidget(QLabel("Поиск:"))
+        search_filter_edit = QLineEdit()
+        search_filter_edit.setPlaceholderText("Поиск по клиенту, комментарию, статусу...")
+        filter_layout.addWidget(search_filter_edit)
+        
+        # Добавляем фильтры над таблицей
+        table_container_layout = QVBoxLayout()
+        table_container_layout.addLayout(filter_layout)
+        table_container_layout.addWidget(table_widget)
+        table_container_widget = QWidget()
+        table_container_widget.setLayout(table_container_layout)
+
         # Нижняя панель (статистика)
         bottom_widget = QWidget()
         bottom_layout = QVBoxLayout(bottom_widget)
@@ -246,9 +265,18 @@ class AdminWindowQt(QMainWindow):
         main_splitter.addWidget(top_widget)
         main_splitter.addWidget(bottom_widget)
         main_splitter.setSizes([500, 200])
-        main_layout.addWidget(main_splitter)
+        
+        # Заменяем top_splitter на table_container_widget в основном сплиттере
+        top_splitter.replaceWidget(0, table_container_widget)
+        
+        main_layout.addWidget(top_splitter)
 
-        return view_widget, table_widget, management_stack
+        # Привязываем обработчики к фильтрам
+        client_filter_combo.currentIndexChanged.connect(lambda: self.apply_order_filters(is_archive))
+        search_filter_edit.textChanged.connect(lambda: self.apply_order_filters(is_archive))
+
+        # Возвращаем также и виджеты фильтров, чтобы сохранить их
+        return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit
 
     def _on_orders_tab_changed(self, index):
         """Загружает данные при переключении вкладок 'В работе' / 'Архив'."""
@@ -258,6 +286,13 @@ class AdminWindowQt(QMainWindow):
     def load_orders(self, is_archive):
         """Загружает заказы в соответствующую таблицу."""
         table = self.archive_orders_table if is_archive else self.in_progress_orders_table
+        # --- НОВЫЙ БЛОК: Получаем нужные виджеты фильтров ---
+        client_filter = self.archive_client_filter if is_archive else self.in_progress_client_filter
+        search_filter = self.archive_search_filter if is_archive else self.in_progress_search_filter
+        cache = self.archive_orders_cache if is_archive else self.in_progress_orders_cache
+
+        # Блокируем сигналы, чтобы избежать лишних вызовов apply_filters при очистке
+        client_filter.blockSignals(True)
         table.setRowCount(0)
         try:
             with get_client_db_connection(self.user_info) as conn:
@@ -266,39 +301,23 @@ class AdminWindowQt(QMainWindow):
                     query = f"SELECT id, client_name, order_date, status, notes, api_status FROM orders WHERE {status_filter} ORDER BY id DESC"
                     cur.execute(query)
                     orders = cur.fetchall()
-            
-            for order in orders:
-                row = table.rowCount()
-                table.insertRow(row)
 
-                # --- ИСПРАВЛЕНИЕ: Добавляем подсветку строк в зависимости от статуса ---
-                api_status = order.get('api_status', '')
-                status = order.get('status', '')
-                bg_color = QColor("white") # По умолчанию
+            # Сохраняем данные в кэш
+            cache.clear()
+            cache.extend(orders)
 
-                if api_status == 'Отчет подготовлен':
-                    bg_color = QColor("#FFB6C6") # lightpink
-                elif api_status == 'Коды скачаны':
-                    bg_color = QColor("#90EE90") # lightgreen
-                elif api_status == 'Запрос создан':
-                    bg_color = QColor("#FFFFE0") # lightyellow
-                elif status == 'completed':
-                    bg_color = QColor("#B0E0E6") # powderblue
-
-                items_to_add = [
-                    str(order['order_date']),
-                    f"{order['client_name']} / Заказ № {order['id']}",
-                    order['status'],
-                    order['notes']
-                ]
-                for col, text in enumerate(items_to_add):
-                    item = QTableWidgetItem(text)
-                    item.setBackground(bg_color)
-                    if col == 0: item.setData(Qt.UserRole, order) # Сохраняем данные в первую ячейку
-                    table.setItem(row, col, item)
+            # Заполняем комбобокс клиентов
+            client_filter.clear()
+            client_filter.addItem("Все клиенты")
+            client_names = sorted(list(set(o['client_name'] for o in orders)))
+            client_filter.addItems(client_names)
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить заказы: {e}")
+        finally:
+            client_filter.blockSignals(False)
+            # После загрузки применяем фильтры
+            self.apply_order_filters(is_archive)
 
     def on_order_select(self, is_archive):
         """Обработчик выбора заказа в таблице. Отображает панель управления."""
@@ -336,6 +355,54 @@ class AdminWindowQt(QMainWindow):
 
         # Переключаем QStackedWidget на панель с вкладками
         management_stack.setCurrentIndex(1)
+
+    def apply_order_filters(self, is_archive):
+        """Фильтрует и отображает заказы на основе значений в полях фильтра."""
+        table = self.archive_orders_table if is_archive else self.in_progress_orders_table
+        cache = self.archive_orders_cache if is_archive else self.in_progress_orders_cache
+        client_filter = self.archive_client_filter if is_archive else self.in_progress_client_filter
+        search_filter = self.archive_search_filter if is_archive else self.in_progress_search_filter
+
+        client_query = client_filter.currentText()
+        search_query = search_filter.text().lower()
+
+        table.setRowCount(0)
+        
+        filtered_data = cache
+        if client_query and client_query != "Все клиенты":
+            filtered_data = [o for o in filtered_data if o.get('client_name') == client_query]
+
+        if search_query:
+            filtered_data = [
+                o for o in filtered_data
+                if search_query in str(o.get('client_name', '')).lower() or
+                   search_query in str(o.get('notes', '')).lower() or
+                   search_query in str(o.get('status', '')).lower()
+            ]
+
+        for order in filtered_data:
+            row = table.rowCount()
+            table.insertRow(row)
+
+            api_status = order.get('api_status', '')
+            status = order.get('status', '')
+            bg_color = QColor("white")
+            if api_status == 'Отчет подготовлен': bg_color = QColor("#FFB6C6")
+            elif api_status == 'Коды скачаны': bg_color = QColor("#90EE90")
+            elif api_status == 'Запрос создан': bg_color = QColor("#FFFFE0")
+            elif status == 'completed': bg_color = QColor("#B0E0E6")
+
+            items_to_add = [
+                str(order['order_date']),
+                f"{order['client_name']} / Заказ № {order['id']}",
+                order['status'],
+                order['notes']
+            ]
+            for col, text in enumerate(items_to_add):
+                item = QTableWidgetItem(text)
+                item.setBackground(bg_color)
+                if col == 0: item.setData(Qt.UserRole, order)
+                table.setItem(row, col, item)
 
     def _build_notifications_page(self):
         """Страница управления уведомлениями о поставках - с переключением между списком и деталями."""
@@ -379,6 +446,25 @@ class AdminWindowQt(QMainWindow):
         controls.addWidget(btn_delete)
         controls.addStretch()
         layout.addLayout(controls)
+
+        # --- НОВЫЙ БЛОК: Фильтры для уведомлений ---
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Клиент:"))
+        self.notif_client_filter_combo = QComboBox()
+        self.notif_client_filter_combo.addItem("Все клиенты")
+        self.notif_client_filter_combo.currentIndexChanged.connect(self.apply_notification_filters)
+        filter_layout.addWidget(self.notif_client_filter_combo)
+
+        filter_layout.addWidget(QLabel("Поиск:"))
+        self.notif_search_filter_edit = QLineEdit()
+        self.notif_search_filter_edit.setPlaceholderText("Поиск по сценарию, клиенту, ТС, статусу...")
+        self.notif_search_filter_edit.textChanged.connect(self.apply_notification_filters)
+        filter_layout.addWidget(self.notif_search_filter_edit)
+        
+        layout.addLayout(filter_layout)
+
+        # Кэш для хранения всех загруженных уведомлений
+        self.all_notifications_cache = []
 
         # Таблица уведомлений (9 видимых колонок + ID скрытый)
         self.notifications_table = QTableWidget(0, 9)
@@ -614,59 +700,73 @@ class AdminWindowQt(QMainWindow):
     def load_notifications(self):
         """Загружает список уведомлений из БД клиента."""
         try:
-            self.notifications_table.setRowCount(0)
+            # Блокируем сигналы, чтобы не вызывать фильтрацию при каждой смене
+            self.notif_client_filter_combo.blockSignals(True)
+            self.notif_search_filter_edit.blockSignals(True)
+
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             notifications = service.get_notifications_with_counts()
+            
+            # Сохраняем данные в кэш
+            self.all_notifications_cache = notifications
 
-            for notif in notifications:
-                row = self.notifications_table.rowCount()
-                self.notifications_table.insertRow(row)
-                
-                # Обработка product_groups (может быть список, строка или None)
-                product_groups = notif.get('product_groups', '')
-                if isinstance(product_groups, list):
-                    # Если это список словарей, извлекаем значения
-                    if product_groups and isinstance(product_groups[0], dict):
-                        product_groups = ', '.join([str(pg.get('name', '')) if isinstance(pg, dict) else str(pg) for pg in product_groups])
-                    else:
-                        product_groups = ', '.join([str(pg) for pg in product_groups])
-                elif product_groups is None:
-                    product_groups = ''
-                
-                items = [
-                    str(notif.get('id', '')),  # Скрытая колонка ID
-                    notif.get('scenario_name', ''),
-                    notif.get('client_name', ''),
-                    str(product_groups),
-                    str(notif.get('planned_arrival_date', '')),
-                    notif.get('vehicle_number', ''),
-                    notif.get('status', ''),
-                    str(notif.get('positions_count', 0)),  # Новая колонка: позиции
-                    str(notif.get('dm_count', 0))  # Новая колонка: коды ДМ
-                ]
-                
-                # Определяем цвет фона в зависимости от статуса
-                status = notif.get('status', '')
-                bg_color = QColor("white")  # По умолчанию белый
-                
-                if status == 'Проект':
-                    bg_color = QColor("#FFB6C6")  # Светло-розовый (lightpink)
-                elif status == 'Ожидание':
-                    bg_color = QColor("#FFFFE0")  # Светло-жёлтый (light yellow)
-                elif status == 'Заказ создан':
-                    bg_color = QColor("#90EE90")  # Светло-зелёный (light green)
-                
-                for col, text in enumerate(items):
-                    it = QTableWidgetItem(str(text))
-                    it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-                    it.setBackground(bg_color)
-                    self.notifications_table.setItem(row, col, it)
+            # Заполняем комбобокс клиентов
+            self.notif_client_filter_combo.clear()
+            self.notif_client_filter_combo.addItem("Все клиенты")
+            client_names = sorted(list(set(n['client_name'] for n in notifications)))
+            self.notif_client_filter_combo.addItems(client_names)
             
             # Загружаем сводку
             self.load_summary_data()
         except (Exception, psycopg2.Error) as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить уведомления: {e}")
+        finally:
+            # Разблокируем сигналы и применяем фильтры
+            self.notif_client_filter_combo.blockSignals(False)
+            self.notif_search_filter_edit.blockSignals(False)
+            self.apply_notification_filters()
+
+    def apply_notification_filters(self):
+        """Фильтрует и отображает уведомления на основе значений в полях фильтра."""
+        client_query = self.notif_client_filter_combo.currentText()
+        search_query = self.notif_search_filter_edit.text().lower()
+
+        self.notifications_table.setRowCount(0)
+
+        filtered_data = self.all_notifications_cache
+        if client_query and client_query != "Все клиенты":
+            filtered_data = [n for n in filtered_data if n.get('client_name') == client_query]
+
+        if search_query:
+            filtered_data = [
+                n for n in filtered_data
+                if search_query in str(n.get('scenario_name', '')).lower() or
+                   search_query in str(n.get('client_name', '')).lower() or
+                   search_query in str(n.get('vehicle_number', '')).lower() or
+                   search_query in str(n.get('status', '')).lower()
+            ]
+
+        for notif in filtered_data:
+            row = self.notifications_table.rowCount()
+            self.notifications_table.insertRow(row)
+            
+            product_groups = notif.get('product_groups', '')
+            if isinstance(product_groups, list): product_groups = ', '.join([str(pg.get('name', '')) if isinstance(pg, dict) else str(pg) for pg in product_groups])
+            
+            items = [str(notif.get('id', '')), notif.get('scenario_name', ''), notif.get('client_name', ''), str(product_groups), str(notif.get('planned_arrival_date', '')), notif.get('vehicle_number', ''), notif.get('status', ''), str(notif.get('positions_count', 0)), str(notif.get('dm_count', 0))]
+            
+            status = notif.get('status', '')
+            bg_color = QColor("white")
+            if status == 'Проект': bg_color = QColor("#FFB6C6")
+            elif status == 'Ожидание': bg_color = QColor("#FFFFE0")
+            elif status == 'Заказ создан': bg_color = QColor("#90EE90")
+            
+            for col, text in enumerate(items):
+                it = QTableWidgetItem(str(text))
+                it.setFlags(it.flags() & ~Qt.ItemIsEditable)
+                it.setBackground(bg_color)
+                self.notifications_table.setItem(row, col, it)
 
     def load_summary_data(self):
         """Загружает и отображает сводку по дням."""
