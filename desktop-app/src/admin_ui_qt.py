@@ -2320,12 +2320,13 @@ class AdminWindowQt(QMainWindow):
         notebook = QTabWidget()
         layout.addWidget(notebook)
 
-        # Справочник 1: Клиенты (локальные)
-        self._build_local_clients_tab(notebook)
+        # --- ИСПРАВЛЕНИЕ: Первым добавляем справочник участников из АПИ ---
+        self._build_participants_tab(notebook)
 
-        # Заглушки для остальных справочников
+        # Остальные справочники
+        self._build_local_clients_tab(notebook)
         self._build_product_groups_tab(notebook)
-        self._build_products_tab(notebook) # Реализуем эту вкладку
+        self._build_products_tab(notebook)
         self._build_scenarios_tab(notebook)
 
         return widget
@@ -2462,6 +2463,50 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
+
+    def _build_participants_tab(self, parent_notebook):
+        """Создает вкладку для справочника участников из API (только чтение)."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Панель с кнопками
+        controls_layout = QHBoxLayout()
+        btn_refresh = QPushButton("Обновить")
+        controls_layout.addWidget(btn_refresh)
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+
+        # Таблица
+        self.participants_table = QTableWidget(0, 3)
+        self.participants_table.setHorizontalHeaderLabels(["Наименование", "ИНН", "Окончание доверенности"])
+        self.participants_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.participants_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.participants_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.participants_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        layout.addWidget(self.participants_table)
+        
+        parent_notebook.addTab(tab, "Участники (из АПИ)")
+
+        def refresh_data():
+            try:
+                self.participants_table.setRowCount(0)
+                participants = self.catalog_service.get_participants_catalog()
+                for p in participants:
+                    row = self.participants_table.rowCount()
+                    self.participants_table.insertRow(row)
+                    
+                    poa_end_date = p.get('poa_validity_end', '')
+                    if poa_end_date and 'T' in poa_end_date:
+                        poa_end_date = poa_end_date.split('T')[0]
+
+                    self.participants_table.setItem(row, 0, QTableWidgetItem(p.get('name', '')))
+                    self.participants_table.setItem(row, 1, QTableWidgetItem(p.get('inn', '')))
+                    self.participants_table.setItem(row, 2, QTableWidgetItem(poa_end_date))
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить участников из АПИ: {e}")
+
+        btn_refresh.clicked.connect(refresh_data)
+        refresh_data()
 
     def _build_product_groups_tab(self, parent_notebook):
         """Создает вкладку для управления товарными группами."""
