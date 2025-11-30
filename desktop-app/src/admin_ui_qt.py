@@ -1177,17 +1177,19 @@ class AdminWindowQt(QMainWindow):
         # Вкладка "В работе"
         # --- ИСПРАВЛЕНИЕ: Распаковываем все 5 возвращаемых значений ---
         (in_progress_widget, 
-         self.in_progress_orders_table, self.in_progress_management_stack, 
+         self.in_progress_orders_table, self.in_progress_management_stack,
          self.in_progress_client_filter, self.in_progress_search_filter,
          self.in_progress_edit_tab, self.in_progress_api_tab, self.in_progress_upload_tab
+        , self.in_progress_stats_table
         ) = self._create_orders_view(is_archive=False)
         self.orders_tab_widget.addTab(in_progress_widget, "В работе")
 
         # Вкладка "Архив"
         (archive_widget, 
-         self.archive_orders_table, self.archive_management_stack, 
+         self.archive_orders_table, self.archive_management_stack,
          self.archive_client_filter, self.archive_search_filter,
          self.archive_edit_tab, self.archive_api_tab, self.archive_upload_tab
+        , self.archive_stats_table
         ) = self._create_orders_view(is_archive=True)
         self.orders_tab_widget.addTab(archive_widget, "Архив")
 
@@ -1272,14 +1274,14 @@ class AdminWindowQt(QMainWindow):
 
         # Нижняя панель (статистика)
         bottom_widget = QWidget()
-        self.stats_layout = QVBoxLayout(bottom_widget)
-        self.stats_table = QTableWidget(0, 5)
-        self.stats_table.setHorizontalHeaderLabels(["Тип обработки", "Клиент", "Статус", "Кол-во позиций", "Кол-во ДМ"])
-        self.stats_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.stats_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
-        self.stats_layout.addWidget(self.stats_table)
+        stats_layout = QVBoxLayout(bottom_widget)
+        stats_table = QTableWidget(0, 5)
+        stats_table.setHorizontalHeaderLabels(["Тип обработки", "Клиент", "Статус", "Кол-во позиций", "Кол-во ДМ"])
+        stats_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        stats_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        stats_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        stats_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        stats_layout.addWidget(stats_table)
 
         main_splitter.addWidget(top_widget) # top_widget теперь содержит корректно настроенный top_splitter
         main_splitter.addWidget(bottom_widget)
@@ -1292,8 +1294,8 @@ class AdminWindowQt(QMainWindow):
         client_filter_combo.currentIndexChanged.connect(lambda: self.apply_order_filters(is_archive))
         search_filter_edit.textChanged.connect(lambda: self.apply_order_filters(is_archive))
 
-        # --- ИСПРАВЛЕНИЕ: Возвращаем все созданные виджеты ---
-        return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit, order_edit_tab, order_api_tab, order_upload_tab
+        # --- ИСПРАВЛЕНИЕ: Возвращаем все созданные виджеты, включая таблицу статистики ---
+        return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit, order_edit_tab, order_api_tab, order_upload_tab, stats_table
 
     def _on_orders_tab_changed(self, index):
         """Загружает данные при переключении вкладок 'В работе' / 'Архив'."""
@@ -1441,20 +1443,49 @@ class AdminWindowQt(QMainWindow):
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             stats_data = service.get_order_statistics()
-
-            self.stats_table.setRowCount(0)
+            
+            # --- ИСПРАВЛЕНИЕ: Определяем, какую таблицу обновлять ---
+            current_tab_index = self.orders_tab_widget.currentIndex()
+            target_table = self.in_progress_stats_table if current_tab_index == 0 else self.archive_stats_table
+            
+            target_table.setRowCount(0)
             if not stats_data:
                 return
 
+            # --- НОВЫЙ БЛОК: Подсчет итогов ---
+            total_positions = 0
+            total_dm = 0
+
             for row_data in stats_data:
-                row = self.stats_table.rowCount()
-                self.stats_table.insertRow(row)
+                row = target_table.rowCount()
+                target_table.insertRow(row)
                 
-                self.stats_table.setItem(row, 0, QTableWidgetItem(str(row_data.get('post_processing_type', ''))))
-                self.stats_table.setItem(row, 1, QTableWidgetItem(str(row_data.get('client_name', ''))))
-                self.stats_table.setItem(row, 2, QTableWidgetItem(str(row_data.get('custom_status', ''))))
-                self.stats_table.setItem(row, 3, QTableWidgetItem(str(row_data.get('positions_count', 0))))
-                self.stats_table.setItem(row, 4, QTableWidgetItem(str(row_data.get('dm_count', 0))))
+                positions = int(row_data.get('positions_count', 0))
+                dm = int(row_data.get('dm_count', 0))
+                total_positions += positions
+                total_dm += dm
+
+                target_table.setItem(row, 0, QTableWidgetItem(str(row_data.get('post_processing_type', ''))))
+                target_table.setItem(row, 1, QTableWidgetItem(str(row_data.get('client_name', ''))))
+                target_table.setItem(row, 2, QTableWidgetItem(str(row_data.get('custom_status', ''))))
+                target_table.setItem(row, 3, QTableWidgetItem(str(positions)))
+                target_table.setItem(row, 4, QTableWidgetItem(str(dm)))
+
+            # Добавляем итоговую строку, если были данные
+            if stats_data:
+                total_row = target_table.rowCount()
+                target_table.insertRow(total_row)
+                bold_font = target_table.font(); bold_font.setBold(True)
+                
+                total_label = QTableWidgetItem("ИТОГО")
+                total_label.setFont(bold_font)
+                target_table.setItem(total_row, 2, total_label)
+                
+                total_pos_item = QTableWidgetItem(str(total_positions)); total_pos_item.setFont(bold_font)
+                target_table.setItem(total_row, 3, total_pos_item)
+                
+                total_dm_item = QTableWidgetItem(str(total_dm)); total_dm_item.setFont(bold_font)
+                target_table.setItem(total_row, 4, total_dm_item)
 
         except Exception as e:
             logging.error(f"Ошибка при загрузке статистики заказов: {e}", exc_info=True)
