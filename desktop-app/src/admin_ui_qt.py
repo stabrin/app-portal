@@ -537,11 +537,13 @@ class AdminWindowQt(QMainWindow):
 
     def on_order_select(self, is_archive):
         """Обработчик выбора заказа в таблице. Отображает панель управления."""
+        logging.debug(f"on_order_select: Сработал обработчик выбора заказа. is_archive={is_archive}")
         table = self.archive_orders_table if is_archive else self.in_progress_orders_table
         management_stack = self.archive_management_stack if is_archive else self.in_progress_management_stack
 
         selected_items = table.selectedItems()
         if not selected_items:
+            logging.debug("on_order_select: Заказ не выбран (selectedItems пуст). Показываем заглушку.")
             management_stack.setCurrentIndex(0) # Показываем заглушку
             return
 
@@ -549,12 +551,15 @@ class AdminWindowQt(QMainWindow):
         order_data = selected_items[0].data(Qt.UserRole)
         if not order_data:
             management_stack.setCurrentIndex(0)
+            logging.debug("on_order_select: Данные заказа (UserRole) не найдены. Показываем заглушку.")
             return
 
         # --- НОВАЯ ЛОГИКА: Переносим логику из Tkinter-версии ---
         try:
             order_id = order_data['id']
             order_status = order_data['status']
+
+            logging.debug(f"on_order_select: Выбран заказ ID: {order_id}, Статус: {order_status}")
 
             # 1. Получаем данные сценария для этого заказа
             with get_client_db_connection(self.user_info) as conn:
@@ -564,8 +569,10 @@ class AdminWindowQt(QMainWindow):
             scenario_data = result['scenario_data'] if result else {}
             dm_source = scenario_data.get('dm_source')
             post_processing_mode = scenario_data.get('post_processing')
+            logging.debug(f"on_order_select: Данные сценария получены. dm_source: '{dm_source}', post_processing: '{post_processing_mode}'.")
 
             # 2. Очищаем вкладки от старых виджетов
+            logging.debug("on_order_select: Начало очистки вкладок панели управления.")
             management_tabs = management_stack.widget(1) # Получаем QTabWidget
             for i in range(management_tabs.count()):
                 tab = management_tabs.widget(i)
@@ -575,26 +582,33 @@ class AdminWindowQt(QMainWindow):
                         widget = item.widget()
                         if widget:
                             widget.deleteLater()
+            logging.debug("on_order_select: Очистка вкладок завершена.")
 
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
+            logging.debug(f"on_order_select: Создание OrderEditorFrameQt для заказа ID {order_id}...")
             editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data)
             self.order_edit_tab.layout().addWidget(editor_frame)
 
             # Вкладки "АПИ" и "Загрузка кодов"
             if dm_source == "Файлы клиента (csv, txt)":
+                logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
                 upload_frame = CodeUploadFrameQt(self.user_info, order_id)
                 self.order_upload_tab.layout().addWidget(upload_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(self.order_api_tab), False)
                 management_tabs.setTabVisible(management_tabs.indexOf(self.order_upload_tab), True)
+                logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
             else: # По умолчанию или "Заказ в ДМ.Код"
+                logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
                 api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode)
                 self.order_api_tab.layout().addWidget(api_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(self.order_api_tab), True)
                 management_tabs.setTabVisible(management_tabs.indexOf(self.order_upload_tab), False)
+                logging.debug("on_order_select: Вкладка 'АПИ' показана, 'Загрузка кодов' скрыта.")
                 # Активируем вкладку АПИ только для нужных статусов
                 is_api_enabled = order_status in ('delta', 'dmkod')
                 management_tabs.setTabEnabled(management_tabs.indexOf(self.order_api_tab), is_api_enabled)
+                logging.debug(f"on_order_select: Вкладка 'АПИ' {'включена' if is_api_enabled else 'отключена'} для статуса '{order_status}'.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось отобразить панель управления: {e}")
