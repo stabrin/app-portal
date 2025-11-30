@@ -276,6 +276,43 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить заказы: {e}")
 
+    def on_order_select(self, is_archive):
+        """Обработчик выбора заказа в таблице. Отображает панель управления."""
+        table = self.archive_orders_table if is_archive else self.in_progress_orders_table
+        management_stack = self.archive_management_stack if is_archive else self.in_progress_management_stack
+
+        selected_items = table.selectedItems()
+        if not selected_items:
+            management_stack.setCurrentIndex(0) # Показываем заглушку
+            return
+
+        # Получаем данные заказа, сохраненные ранее
+        order_data = selected_items[0].data(Qt.UserRole)
+        if not order_data:
+            management_stack.setCurrentIndex(0)
+            return
+
+        # --- Логика отображения вкладок (пока без наполнения) ---
+        # TODO: В будущем здесь будет создание OrderEditorFrame, ApiIntegrationFrame и т.д.
+        
+        # Очищаем вкладки от старых виджетов
+        for tab in [self.order_edit_tab, self.order_api_tab, self.order_upload_tab]:
+            # Простое решение: создаем новый layout каждый раз
+            new_layout = QVBoxLayout()
+            # Удаляем старый layout, если он есть
+            old_layout = tab.layout()
+            if old_layout is not None:
+                # Удаляем все виджеты из старого layout
+                while old_layout.count():
+                    item = old_layout.takeAt(0)
+                    widget = item.widget()
+                    if widget is not None:
+                        widget.deleteLater()
+            tab.setLayout(new_layout)
+
+        # Переключаем QStackedWidget на панель с вкладками
+        management_stack.setCurrentIndex(1)
+
     def _build_notifications_page(self):
         """Страница управления уведомлениями о поставках - с переключением между списком и деталями."""
         widget = QWidget()
