@@ -45,6 +45,24 @@ class ApiStatusWorker(QObject):
         
         self.finished.emit(is_valid)
 
+# --- НОВЫЙ КЛАСС: Рабочий для проверки статуса БД в фоновом потоке ---
+class DbStatusWorker(QObject):
+    finished = Signal(bool)
+
+    def __init__(self, user_info):
+        super().__init__()
+        self.user_info = user_info
+
+    def run(self):
+        """Пытается получить соединение с БД клиента."""
+        is_connected = False
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                is_connected = (conn is not None)
+        except Exception as e:
+            logging.error(f"Ошибка при фоновой проверке соединения с БД: {e}")
+        self.finished.emit(is_connected)
+
 class AdminWindowQt(QMainWindow):
     """Переносная версия tkinter админ-интерфейса на PySide6 с левым меню и правой стеком контента."""
     def __init__(self, user_info: dict):
