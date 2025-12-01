@@ -1056,6 +1056,11 @@ class CodeUploadFrameQt(QWidget):
             finished = Signal()
             log_message = Signal(str)
 
+            def __init__(self, user_info, order_id):
+                super().__init__()
+                self.user_info = user_info
+                self.order_id = order_id
+
             def run(self):
                 logs = run_aggregation_process_desktop(
                     user_info=self.user_info, order_id=self.order_id, filepaths=filepaths,
@@ -1066,7 +1071,7 @@ class CodeUploadFrameQt(QWidget):
                 self.finished.emit()
 
         self.thread = QThread()
-        self.worker = Worker()
+        self.worker = Worker(self.user_info, self.order_id)
         self.worker.moveToThread(self.thread)
         self.worker.log_message.connect(log_text.append)
         self.worker.finished.connect(self.thread.quit)
