@@ -803,6 +803,13 @@ class ApiIntegrationFrameQt(QWidget):
                     error_details = traceback.format_exc()
                     self.error.emit(f"ОШИБКА: {e}\n\n{error_details}")
 
+        def _create_progress_dialog(self):
+            """Создает и настраивает диалог прогресса."""
+            self.progress_dialog = QProgressDialog("Выполняется...", "Отмена", 0, 100, self)
+            self.progress_dialog.setWindowModality(Qt.WindowModal)
+            self.progress_dialog.setAutoClose(True)
+            self.progress_dialog.show()
+
         self.thread = QThread()
         self.worker = Worker(target_func)
         self.worker.moveToThread(self.thread)
@@ -820,6 +827,9 @@ class ApiIntegrationFrameQt(QWidget):
 
     def _request_codes_flow(self):
         """Полный цикл запроса кодов."""
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
+        self._create_progress_dialog()
+
         def task(log_signal):
             log_signal.emit("Шаг 1/7: Проверка токена API...")
             self.api_service.get_participants()
@@ -851,6 +861,9 @@ class ApiIntegrationFrameQt(QWidget):
 
     def _get_codes_flow(self):
         """Полный цикл получения кодов."""
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
+        self._create_progress_dialog()
+
         def task(log_signal):
             if self._split_runs_task(log_signal, show_final_message=False):
                 if self._prepare_json_task(log_signal, show_final_message=False):
@@ -859,9 +872,13 @@ class ApiIntegrationFrameQt(QWidget):
 
     def _split_runs(self):
         self._run_in_thread(lambda log_signal: self._split_runs_task(log_signal))
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
+        self._create_progress_dialog()
 
     def _split_runs_task(self, log_signal, show_final_message=True):
         log_signal.emit("Начинаю создание тиражей...")
+        # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
+        self.progress_dialog.setValue(10)
         try:
             # ... (полная логика из _split_runs_task в admin_ui.py) ...
             with self._get_client_db_connection() as conn:
@@ -870,16 +887,24 @@ class ApiIntegrationFrameQt(QWidget):
                 conn.commit()
             if show_final_message:
                 log_signal.emit("Все тиражи успешно созданы!")
+            # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
+            self.progress_dialog.setValue(100)
             return True
         except Exception as e:
             log_signal.emit(f"\nОШИБКА: {e}\n{traceback.format_exc()}")
+            # --- ИСПРАВЛЕНИЕ: Скрываем диалог при ошибке ---
+            self.progress_dialog.cancel()
             return False
 
     def _prepare_json(self):
         self._run_in_thread(lambda log_signal: self._prepare_json_task(log_signal))
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
+        self._create_progress_dialog()
 
     def _prepare_json_task(self, log_signal, show_final_message=True):
         log_signal.emit("Начинаю подготовку JSON...")
+        # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
+        self.progress_dialog.setValue(10)
         try:
             # ... (полная логика из _prepare_json_task в admin_ui.py) ...
             with self._get_client_db_connection() as conn:
@@ -888,16 +913,24 @@ class ApiIntegrationFrameQt(QWidget):
                 conn.commit()
             if show_final_message:
                 log_signal.emit("Все запросы на подготовку JSON успешно отправлены!")
+            # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
+            self.progress_dialog.setValue(100)
             return True
         except Exception as e:
             log_signal.emit(f"\nОШИБКА: {e}\n{traceback.format_exc()}")
+            # --- ИСПРАВЛЕНИЕ: Скрываем диалог при ошибке ---
+            self.progress_dialog.cancel()
             return False
 
     def _download_codes(self):
         self._run_in_thread(lambda log_signal: self._download_codes_task(log_signal))
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
+        self._create_progress_dialog()
 
     def _download_codes_task(self, log_signal):
         log_signal.emit("Начинаю скачивание кодов...")
+        # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
+        self.progress_dialog.setValue(10)
         try:
             # ... (полная логика из _download_codes_task в admin_ui.py) ...
             with self._get_client_db_connection() as conn:
@@ -905,16 +938,26 @@ class ApiIntegrationFrameQt(QWidget):
                     cur.execute("UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s", (self.order_id,))
                 conn.commit()
             log_signal.emit("Все коды успешно сохранены в базу данных.")
+            # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
+            self.progress_dialog.setValue(100)
         except Exception as e:
             log_signal.emit(f"\nОШИБКА: {e}\n{traceback.format_exc()}")
+            # --- ИСПРАВЛЕНИЕ: Скрываем диалог при ошибке ---
+            self.progress_dialog.cancel()
 
     def _prepare_report_data(self):
         # ... (аналогично, с использованием _run_in_thread) ...
-        pass
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
+        self._create_progress_dialog()
+        QMessageBox.information(self, "В разработке", "Подготовка сведений для отчета находится в разработке.")
+        self.progress_dialog.cancel()
 
     def _prepare_report(self):
         # ... (аналогично, с использованием _run_in_thread) ...
-        pass
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
+        self._create_progress_dialog()
+        QMessageBox.information(self, "В разработке", "Подготовка отчета находится в разработке.")
+        self.progress_dialog.cancel()
 
 
 class CodeUploadFrameQt(QWidget):
