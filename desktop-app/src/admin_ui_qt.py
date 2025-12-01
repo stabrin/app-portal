@@ -531,8 +531,8 @@ class OrderEditorFrameQt(QWidget):
                     cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
                     logging.info("[Delta Import] Связи 'короб-паллета' обновлены.")
 
-                self.progress_bar['value'] = 30
-                self.update_idletasks()
+                self.progress_dialog.setValue(30)
+                QApplication.processEvents()
 
                 # 4. Создание товаров (items)
                 from .aggregation_service import parse_datamatrix
