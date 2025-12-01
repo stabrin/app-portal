@@ -3616,7 +3616,86 @@ class AdminWindowQt(QMainWindow):
             return
         warehouse_name = self.warehouses_table.item(sel, 0).text()
         QMessageBox.information(self, "Печать", f"Вызов печати этикеток для склада: {warehouse_name} (в разработке)")
+    def _open_generate_sscc_dialog(self):
+        """Открывает диалог для запроса количества SSCC и запускает генерацию."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Генерация SSCC кодов")
+        dialog.setMinimumWidth(350)
+        layout = QVBoxLayout(dialog)
 
+        form_layout = QFormLayout()
+        quantity_label = QLabel("Количество SSCC (макс. 1 000 000):")
+        quantity_spinbox = QSpinBox()
+        quantity_spinbox.setRange(1, 1_000_000)
+        quantity_spinbox.setValue(100) # Значение по умолчанию
+        form_layout.addRow(quantity_label, quantity_spinbox)
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec() == QDialog.Accepted:
+            quantity = quantity_spinbox.value()
+            self._generate_and_save_sscc(quantity)
+
+    def _generate_and_save_sscc(self, quantity: int):
+        """Запускает генерацию SSCC в фоновом потоке и сохраняет результат."""
+        progress_dialog = QProgressDialog("Генерация SSCC кодов...", "Отмена", 0, 100, self)
+        progress_dialog.setWindowTitle("Генерация SSCC")
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.setAutoClose(False)
+        progress_dialog.setAutoReset(False)
+        progress_dialog.show()
+
+        self.sscc_thread = QThread()
+        self.sscc_worker = SsccGeneratorWorker(self.user_info, quantity)
+        self.sscc_worker.moveToThread(self.sscc_thread)
+
+        self.sscc_thread.started.connect(self.sscc_worker.run)
+        
+        self.sscc_worker.progress.connect(lambda val, msg: (
+            progress_dialog.setLabelText(msg),
+            progress_dialog.setValue(val) if val > 0 else None,
+            QApplication.processEvents()
+        ))
+        self.sscc_worker.error.connect(lambda err: (
+            QMessageBox.critical(self, "Ошибка генерации", err),
+            progress_dialog.cancel()
+        ))
+        self.sscc_worker.finished.connect(lambda ssccs: self._save_sscc_to_file(ssccs, progress_dialog))
+        self.sscc_worker.finished.connect(self.sscc_thread.quit)
+        self.sscc_worker.finished.connect(self.sscc_worker.deleteLater)
+        self.sscc_thread.finished.connect(self.sscc_thread.deleteLater)
+
+        self.sscc_thread.start()
+
+    def _save_sscc_to_file(self, ssccs: list, progress_dialog: QProgressDialog):
+        """Предлагает сохранить сгенерированные SSCC в CSV файл."""
+        progress_dialog.setValue(100)
+        progress_dialog.setLabelText("Генерация завершена. Сохранение в файл...")
+        QApplication.processEvents()
+
+        if not ssccs:
+            QMessageBox.warning(self, "Внимание", "Не удалось сгенерировать SSCC коды.")
+            progress_dialog.close()
+            return
+
+        filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить SSCC коды", "sscc_codes.csv", "CSV Files (*.csv)")
+        if filepath:
+            try:
+                with open(filepath, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    for sscc in ssccs:
+                        writer.writerow([sscc])
+                QMessageBox.information(self, "Успех", f"SSCC коды успешно сохранены в файл:\n{filepath}")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить SSCC коды в файл: {e}")
+        else:
+            QMessageBox.information(self, "Отмена", "Сохранение файла отменено.")
+        
+        progress_dialog.close()
 
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
 class NotificationEditorDialog(QDialog):
