@@ -153,6 +153,7 @@ class OrderEditorFrameQt(QWidget):
         self.progress_dialog = QProgressDialog("Выполняется импорт данных...", "Отмена", 0, 100, self)
         self.progress_dialog.setWindowModality(Qt.WindowModal)
         self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.hide() # ИСПРАВЛЕНИЕ: Скрываем диалог по умолчанию
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
