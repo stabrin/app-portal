@@ -448,10 +448,10 @@ class OrderEditorFrameQt(QWidget):
         """
         logging.info(f"[Delta Import] Запуск импорта данных из CSV для заказа ID: {self.order_id}")
 
-        filepath, _ = QFileDialog.getOpenFileName(
-            title="Выберите CSV-файл от 'Дельта'",
-            filetypes=[("CSV files", "*.csv")],
-            parent=self
+        filepath, _ = QFileDialog.getOpenFileName( # ИСПРАВЛЕНИЕ: Используем правильные аргументы для PySide6
+            self,
+            "Выберите CSV-файл от 'Дельта'", # caption (заголовок)
+            filter="CSV files (*.csv)"      # filter (фильтр файлов)
         )
         if not filepath:
             logging.info("[Delta Import] Импорт отменен пользователем.")
