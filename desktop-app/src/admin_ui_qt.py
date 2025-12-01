@@ -21,6 +21,7 @@ from .api_service import ApiService # ИСПРАВЛЕНИЕ: Добавляем
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добавляем импорт RealDictCursor
+from .sscc_service import generate_sscc, read_and_increment_counter # НОВОЕ: Импорт для генерации SSCC
 import base64
 import os
 import re # ИСПРАВЛЕНИЕ: Добавляем импорт модуля re
@@ -68,6 +69,36 @@ class DbStatusWorker(QObject):
         except Exception as e:
             logging.error(f"Ошибка при фоновой проверке соединения с БД: {e}")
         self.finished.emit(is_connected)
+
+
+# НОВЫЙ КЛАСС: Рабочий для генерации SSCC в фоновом потоке
+class SsccGeneratorWorker(QObject):
+    finished = Signal(list)
+    progress = Signal(int, str)
+    error = Signal(str)
+
+    def __init__(self, user_info, quantity):
+        super().__init__()
+        self.user_info = user_info
+        self.quantity = quantity
+
+    def run(self):
+        generated_ssccs = []
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    for i in range(self.quantity):
+                        if i % 1000 == 0: # Обновляем прогресс каждые 1000 кодов
+                            self.progress.emit(int((i / self.quantity) * 100), f"Генерация SSCC: {i}/{self.quantity}")
+                        box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
+                        if warning:
+                            self.progress.emit(0, warning) # Отправляем предупреждение, не меняя основной прогресс
+                        _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
+                        generated_ssccs.append(full_sscc)
+                    conn.commit() # Фиксируем изменения счетчика в БД
+            self.finished.emit(generated_ssccs)
+        except Exception as e:
+            self.error.emit(f"Ошибка генерации SSCC: {e}\n{traceback.format_exc()}")
 
 # --- НОВЫЙ БЛОК: Классы-заглушки для вкладок управления заказом ---
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
@@ -1179,6 +1210,8 @@ class AdminWindowQt(QMainWindow):
         # Подменю "Администрирование"
         item_admin_config = QTreeWidgetItem(item_admin, ["Конфигурация"])
         item_admin_print = QTreeWidgetItem(item_admin, ["Управление печатью"])
+        item_admin_utilities = QTreeWidgetItem(item_admin, ["Служебные"]) # НОВЫЙ ПОДРАЗДЕЛ
+        item_generate_sscc = QTreeWidgetItem(item_admin_utilities, ["Сгенерировать SSCC"]) # НОВЫЙ ПУНКТ
         item_admin_catalogs = QTreeWidgetItem(item_admin, ["Справочники"])
         item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
 
@@ -1196,6 +1229,8 @@ class AdminWindowQt(QMainWindow):
             'print': item_admin_print,
             'catalogs': item_admin_catalogs,
             'reports': item_admin_reports,
+            'utilities': item_admin_utilities, # Добавляем в словарь
+            'generate_sscc': item_generate_sscc, # Добавляем в словарь
             'save_ini': item_config_save_ini,
             'workplaces': item_config_workplaces,
         }
