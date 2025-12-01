@@ -24,7 +24,7 @@ from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добав�
 import base64
 import os
 import re # ИСПРАВЛЕНИЕ: Добавляем импорт модуля re
-
+import csv # Для работы с CSV
 # --- НОВЫЙ КЛАСС: Рабочий для проверки API в фоновом потоке ---
 class ApiStatusWorker(QObject):
     finished = Signal(bool)
@@ -149,6 +149,10 @@ class OrderEditorFrameQt(QWidget):
         archive_layout.addWidget(btn_archive)
         main_layout.addLayout(archive_layout)
 
+        # Инициализация прогресс-диалога (скрыт по умолчанию)
+        self.progress_dialog = QProgressDialog("Выполняется импорт данных...", "Отмена", 0, 100, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(True)
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
@@ -444,7 +448,7 @@ class OrderEditorFrameQt(QWidget):
         """
         logging.info(f"[Delta Import] Запуск импорта данных из CSV для заказа ID: {self.order_id}")
 
-        filepath = filedialog.askopenfilename(
+        filepath, _ = QFileDialog.getOpenFileName(
             title="Выберите CSV-файл от 'Дельта'",
             filetypes=[("CSV files", "*.csv")],
             parent=self
@@ -452,20 +456,16 @@ class OrderEditorFrameQt(QWidget):
         if not filepath:
             logging.info("[Delta Import] Импорт отменен пользователем.")
             return
-
-        # --- НОВОВВЕДЕНИЕ: Показываем и настраиваем прогресс-бар ---
-        self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
-        self.progress_bar['value'] = 0
-        self.progress_bar['maximum'] = 100
-        self.update_idletasks()
-
         # 1. Валидация имени файла
         expected_filename_part = f"order_{self.order_id}.csv"
         if expected_filename_part not in os.path.basename(filepath):
-            messagebox.showerror("Ошибка", f'Имя файла должно содержать "{expected_filename_part}".', parent=self)
+            QMessageBox.critical(self, "Ошибка", f'Имя файла должно содержать "{expected_filename_part}".')
             return
 
-        conn = None
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setLabelText("Чтение и валидация CSV...")
+        self.progress_dialog.show()
+
         try:
             # 2. Чтение и валидация CSV
             df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str})
@@ -484,8 +484,8 @@ class OrderEditorFrameQt(QWidget):
             df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
             df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
 
-            self.progress_bar['value'] = 10
-            self.update_idletasks()
+            self.progress_dialog.setValue(10)
+            QApplication.processEvents() # Обновляем UI
 
             # --- ИСПРАВЛЕНИЕ: Используем новый метод подключения к БД через пул ---
             # Это решает проблему с созданием лишних подключений.
@@ -556,8 +556,8 @@ class OrderEditorFrameQt(QWidget):
                 upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
                 logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
 
-                self.progress_bar['value'] = 80
-                self.update_idletasks()
+                self.progress_dialog.setValue(80)
+                QApplication.processEvents()
 
                 # 5. Подготовка данных для delta_result
                 df_for_json = df.copy()
