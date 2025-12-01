@@ -2287,7 +2287,7 @@ class OrderEditorFrame(ttk.Frame):
         # --- НОВОВВЕДЕНИЕ: Добавляем прогресс-бар для длительных операций ---
         self.progress_bar = ttk.Progressbar(self, orient='horizontal', mode='determinate')
         # Он будет показан только во время выполнения импорта.
-        # self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
+        # self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM) # ИСПРАВЛЕНО: Эта строка вызывала преждевременное отображение
 
     def _sign_with_eds(self):
         """Заглушка для функции подписания ЭЦП."""
