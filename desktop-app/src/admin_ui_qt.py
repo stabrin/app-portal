@@ -438,47 +438,188 @@ class OrderEditorFrameQt(QWidget):
             QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать данные: {e}")
 
     def _import_data_for_external_sw(self):
-        """Обрабатывает CSV-файл от внешнего ПО."""
-        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите CSV-файл от Внешнего ПО", "", "CSV Files (*.csv)")
-        if not filepath: return
+        """
+        Обрабатывает CSV-файл от 'Дельта', создает упаковки, товары и готовит данные для API.
+        Адаптировано из dmkod-integration-app/app/routes.py, action 'upload_delta_csv'.
+        """
+        logging.info(f"[Delta Import] Запуск импорта данных из CSV для заказа ID: {self.order_id}")
 
-        expected_part = f"order_{self.order_id}.csv"
-        if expected_part not in os.path.basename(filepath):
-            QMessageBox.critical(self, "Ошибка", f"Имя файла должно содержать '{expected_part}'.")
+        filepath = filedialog.askopenfilename(
+            title="Выберите CSV-файл от 'Дельта'",
+            filetypes=[("CSV files", "*.csv")],
+            parent=self
+        )
+        if not filepath:
+            logging.info("[Delta Import] Импорт отменен пользователем.")
             return
 
-        progress = QProgressDialog("Импорт данных от Внешнего ПО...", "Отмена", 0, 100, self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setValue(5)
+        # --- НОВОВВЕДЕНИЕ: Показываем и настраиваем прогресс-бар ---
+        self.progress_bar.pack(fill=tk.X, padx=10, pady=(0, 5), side=tk.BOTTOM)
+        self.progress_bar['value'] = 0
+        self.progress_bar['maximum'] = 100
+        self.update_idletasks()
 
+        # 1. Валидация имени файла
+        expected_filename_part = f"order_{self.order_id}.csv"
+        if expected_filename_part not in os.path.basename(filepath):
+            messagebox.showerror("Ошибка", f'Имя файла должно содержать "{expected_filename_part}".', parent=self)
+            return
+
+        conn = None
         try:
+            # 2. Чтение и валидация CSV
             df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str})
             df.columns = df.columns.str.strip()
-            required = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
-            if not all(col in df.columns for col in required):
-                raise ValueError(f'В файле отсутствуют необходимые колонки: {", ".join(required)}.')
+            required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
+            if not all(col in df.columns for col in required_columns):
+                raise ValueError(f'В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.')
 
+            # --- ИСПРАВЛЕНИЕ: Добавляем ведущий ноль к 13-значным GTIN ---
+            # Это решает проблему, когда в файле от "Дельты" GTIN представлен
+            # в формате EAN-13 (13 символов) вместо GTIN-14.
             df['Barcode'] = df['Barcode'].apply(lambda x: '0' + str(x) if isinstance(x, str) and len(x) == 13 else x)
+
             df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
             df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
             df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
             df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-            progress.setValue(20)
 
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    from .utils import upsert_data_to_db
-                    from .aggregation_service import parse_datamatrix
+            self.progress_bar['value'] = 10
+            self.update_idletasks()
+
+            # --- ИСПРАВЛЕНИЕ: Используем новый метод подключения к БД через пул ---
+            # Это решает проблему с созданием лишних подключений.
+            with get_client_db_connection(self.user_info) as conn:
+              with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                from .utils import upsert_data_to_db
+                
+                # 3. Создание упаковок (короба и паллеты)
+                unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
+                unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
+                
+                packages_to_insert = []
+                if not unique_boxes.empty:
+                    unique_boxes['level'] = 1
+                    packages_to_insert.append(unique_boxes)
+                if not unique_pallets.empty:
+                    unique_pallets['level'] = 2
+                    packages_to_insert.append(unique_pallets)
+
+                if packages_to_insert:
+                    all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
+                    all_packages_df['owner'] = 'delta'
                     
-                    # Логика создания упаковок, товаров и подготовки данных для delta_result
-                    # ... (здесь будет полный перенос логики из admin_ui.py) ...
+                    # Устанавливаем связи "короб-паллета"
+                    box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
+                    box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
                     
-                conn.commit()
-            progress.setValue(100)
-            QMessageBox.information(self, "Успех", "Данные из CSV-файла успешно импортированы.")
+                    def find_parent_sscc(row):
+                        if row['level'] == 1: return box_to_pallet_sscc_map.get(row['sscc'])
+                        return None
+                    all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
+
+                    # Используем UPSERT для безопасной вставки
+                    upsert_data_to_db(cur, 'packages', all_packages_df, 'sscc')
+                    logging.info(f"[Delta Import] Загружено/обновлено {len(all_packages_df)} упаковок.")
+
+                    # Обновляем parent_id после вставки
+                    cur.execute("""
+                        UPDATE packages p_child SET parent_id = p_parent.id
+                        FROM packages AS p_parent
+                        WHERE p_child.parent_sscc = p_parent.sscc AND p_child.parent_sscc IS NOT NULL;
+                    """)
+                    cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
+                    logging.info("[Delta Import] Связи 'короб-паллета' обновлены.")
+
+                self.progress_bar['value'] = 30
+                self.update_idletasks()
+
+                # 4. Создание товаров (items)
+                from .aggregation_service import parse_datamatrix
+                parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
+                items_df = pd.DataFrame(parsed_dm_data)
+                items_df['order_id'] = self.order_id
+                items_df['BoxSSCC'] = df['BoxSSCC']
+
+                # Получаем ID коробов для привязки
+                box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
+                sscc_to_id_map = {}
+                if box_ssccs_tuple:
+                    cur.execute("SELECT sscc, id FROM packages WHERE sscc IN %s", (box_ssccs_tuple,))
+                    sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+                
+                items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
+                
+                columns_to_save = ['datamatrix', 'gtin', 'serial', 'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 'order_id', 'package_id']
+                items_to_upload = items_df[columns_to_save]
+                upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
+                logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
+
+                self.progress_bar['value'] = 80
+                self.update_idletasks()
+
+                # 5. Подготовка данных для delta_result
+                df_for_json = df.copy()
+                df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
+                
+                cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
+                # --- ИСПРАВЛЕНИЕ: Гарантируем, что ключ (GTIN) является строкой ---
+                # Это решает проблему, когда GTIN с ведущим нулем обрабатывался как число.
+                gtin_to_printrun_map = {str(row['gtin']): row['api_id'] for row in cur.fetchall()}
+
+                # --- ИСПРАВЛЕНИЕ №2: Принудительно приводим GTIN к строковому типу СРАЗУ ПОСЛЕ ПЕРЕИМЕНОВАНИЯ ---
+                # Это гарантирует, что pandas будет работать с GTIN как с текстом на всех последующих этапах,
+                # предотвращая потерю ведущих нулей и ошибки сопоставления.
+                df_for_json['gtin'] = df_for_json['gtin'].astype(str)
+
+                if not gtin_to_printrun_map:
+                    raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
+
+                df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
+                # --- ИСПРАВЛЕНИЕ: Проверяем, что все GTIN были сопоставлены ---
+                # Это предотвращает молчаливую потерю данных, если для GTIN из файла нет тиража.
+                if df_for_json['printrun_id'].isnull().any():
+                    unmapped_gtins = df_for_json[df_for_json['printrun_id'].isnull()]['gtin'].unique()
+                    raise ValueError(f"Ошибка: Для GTIN(ов) {list(unmapped_gtins)} из файла не найден соответствующий ID тиража в заказе.")
+
+                grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
+
+                # --- ИСПРАВЛЕНИЕ: Полностью переписанная логика для устранения SyntaxError ---
+                # Используем list comprehension для надежного и быстрого создания JSON.
+                # Это решает ошибку с несоответствием скобок.
+                grouped_for_api['codes_json'] = [
+                    json.dumps({
+                        "include": [{"code": code.replace('\x1d', '')} for code in row.DataMatrix],
+                        "attributes": {
+                            "production_date": str(row.production_date),
+                            "expiration_date": str(row.expiration_date)
+                        }
+                    })
+                    for row in grouped_for_api.itertuples()
+                ]
+                grouped_for_api['order_id'] = self.order_id
+                grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
+                grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
+
+                delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
+                upsert_data_to_db(cur, 'delta_result', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
+                logging.info(f"[Delta Import] Сохранено {len(delta_result_df)} сгруппированных записей в 'delta_result'.")
+
+                # # 6. Обновление статуса заказа
+                # cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
+            
+              # 6. Фиксируем все изменения в одной транзакции
+              conn.commit() # теперь управляется контекстным менеджером 'with conn'
+              messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
+
         except Exception as e:
-            progress.setValue(100)
-            QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать данные: {e}")
+            logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
+            messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
+        finally:
+            # --- НОВОВВЕДЕНИЕ: Прячем прогресс-бар после завершения ---
+            self.progress_bar.pack_forget()
+            self.update_idletasks()
 
     def _download_declarator_report(self):
         """Формирует и выгружает отчет для декларанта."""
