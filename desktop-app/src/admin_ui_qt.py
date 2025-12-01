@@ -148,12 +148,6 @@ class OrderEditorFrameQt(QWidget):
         btn_archive.clicked.connect(self._move_to_archive)
         archive_layout.addWidget(btn_archive)
         main_layout.addLayout(archive_layout)
-
-        # Инициализация прогресс-диалога (скрыт по умолчанию)
-        self.progress_dialog = QProgressDialog("Выполняется импорт данных...", "Отмена", 0, 100, self)
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.hide() # ИСПРАВЛЕНИЕ: Скрываем диалог по умолчанию
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
@@ -463,10 +457,6 @@ class OrderEditorFrameQt(QWidget):
             QMessageBox.critical(self, "Ошибка", f'Имя файла должно содержать "{expected_filename_part}".')
             return
 
-        self.progress_dialog.setValue(0)
-        self.progress_dialog.setLabelText("Чтение и валидация CSV...")
-        self.progress_dialog.show()
-
         try:
             # 2. Чтение и валидация CSV
             df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str})
@@ -484,9 +474,6 @@ class OrderEditorFrameQt(QWidget):
             df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
             df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
             df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-
-            self.progress_dialog.setValue(10)
-            QApplication.processEvents() # Обновляем UI
 
             # --- ИСПРАВЛЕНИЕ: Используем новый метод подключения к БД через пул ---
             # Это решает проблему с созданием лишних подключений.
@@ -532,9 +519,6 @@ class OrderEditorFrameQt(QWidget):
                     cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
                     logging.info("[Delta Import] Связи 'короб-паллета' обновлены.")
 
-                self.progress_dialog.setValue(30)
-                QApplication.processEvents()
-
                 # 4. Создание товаров (items)
                 from .aggregation_service import parse_datamatrix
                 parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
@@ -556,9 +540,6 @@ class OrderEditorFrameQt(QWidget):
                 items_to_upload = items_df[columns_to_save]
                 upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
                 logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
-
-                self.progress_dialog.setValue(80)
-                QApplication.processEvents()
 
                 # 5. Подготовка данных для delta_result
                 df_for_json = df.copy()
@@ -616,10 +597,6 @@ class OrderEditorFrameQt(QWidget):
         except Exception as e:
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать данные: {e}")
-        finally:
-            # --- НОВОВВЕДЕНИЕ: Прячем прогресс-бар после завершения ---
-            self.progress_dialog.setValue(100)
-            self.progress_dialog.hide()
 
     def _download_declarator_report(self):
         """Формирует и выгружает отчет для декларанта."""
