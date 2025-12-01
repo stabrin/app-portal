@@ -608,18 +608,17 @@ class OrderEditorFrameQt(QWidget):
 
                 # # 6. Обновление статуса заказа
                 # cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
-            
               # 6. Фиксируем все изменения в одной транзакции
-              conn.commit() # теперь управляется контекстным менеджером 'with conn'
-              messagebox.showinfo("Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.", parent=self)
+              conn.commit()
+              QMessageBox.information(self, "Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.")
 
         except Exception as e:
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
-            messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}", parent=self)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать данные: {e}")
         finally:
             # --- НОВОВВЕДЕНИЕ: Прячем прогресс-бар после завершения ---
-            self.progress_bar.pack_forget()
-            self.update_idletasks()
+            self.progress_dialog.setValue(100)
+            self.progress_dialog.hide()
 
     def _download_declarator_report(self):
         """Формирует и выгружает отчет для декларанта."""
