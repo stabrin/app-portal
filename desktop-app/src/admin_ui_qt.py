@@ -83,6 +83,12 @@ class OrderEditorFrameQt(QWidget):
         self._create_widgets()
         self._load_details()
 
+        # --- НОВОВВЕДЕНИЕ: Инициализируем прогресс-бар, но держим его скрытым ---
+        self.progress_dialog = QProgressDialog("Выполняется импорт данных...", "Отмена", 0, 100, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(False) # Управляем закрытием вручную
+        self.progress_dialog.setAutoReset(True)
+
     def _get_client_db_connection(self):
         return get_client_db_connection(self.user_info)
 
@@ -451,10 +457,18 @@ class OrderEditorFrameQt(QWidget):
         if not filepath:
             logging.info("[Delta Import] Импорт отменен пользователем.")
             return
+
+        # --- НОВОВВЕДЕНИЕ: Показываем и настраиваем прогресс-бар ---
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.setLabelText("Чтение и валидация CSV...")
+        self.progress_dialog.show()
+        QApplication.processEvents() # Обновляем UI, чтобы диалог появился
+
         # 1. Валидация имени файла
         expected_filename_part = f"order_{self.order_id}.csv"
         if expected_filename_part not in os.path.basename(filepath):
             QMessageBox.critical(self, "Ошибка", f'Имя файла должно содержать "{expected_filename_part}".')
+            self.progress_dialog.hide() # Скрываем при ошибке
             return
 
         try:
@@ -474,6 +488,10 @@ class OrderEditorFrameQt(QWidget):
             df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
             df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
             df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+
+            self.progress_dialog.setValue(10)
+            self.progress_dialog.setLabelText("Создание упаковок...")
+            QApplication.processEvents()
 
             # --- ИСПРАВЛЕНИЕ: Используем новый метод подключения к БД через пул ---
             # Это решает проблему с созданием лишних подключений.
@@ -519,6 +537,10 @@ class OrderEditorFrameQt(QWidget):
                     cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
                     logging.info("[Delta Import] Связи 'короб-паллета' обновлены.")
 
+                self.progress_dialog.setValue(30)
+                self.progress_dialog.setLabelText("Создание товаров (items)...")
+                QApplication.processEvents()
+
                 # 4. Создание товаров (items)
                 from .aggregation_service import parse_datamatrix
                 parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
@@ -540,6 +562,10 @@ class OrderEditorFrameQt(QWidget):
                 items_to_upload = items_df[columns_to_save]
                 upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
                 logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
+
+                self.progress_dialog.setValue(80)
+                self.progress_dialog.setLabelText("Подготовка данных для API...")
+                QApplication.processEvents()
 
                 # 5. Подготовка данных для delta_result
                 df_for_json = df.copy()
@@ -597,6 +623,9 @@ class OrderEditorFrameQt(QWidget):
         except Exception as e:
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать данные: {e}")
+        finally:
+            # --- НОВОВВЕДЕНИЕ: Гарантированно скрываем прогресс-бар в конце ---
+            self.progress_dialog.hide()
 
     def _download_declarator_report(self):
         """Формирует и выгружает отчет для декларанта."""
