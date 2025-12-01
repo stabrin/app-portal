@@ -1443,8 +1443,9 @@ class AdminWindowQt(QMainWindow):
             except Exception:
                 logging.exception("Error loading warehouses on menu click")
             self.content_stack.setCurrentIndex(self.stack_indices['workplaces'])
-        elif text == "Справочники":
-            self.content_stack.setCurrentIndex(self.stack_indices['catalogs'])
+        elif text == "Сгенерировать SSCC":
+            self._open_generate_sscc_dialog() # Вызываем диалог, не меняя основное окно
+        elif text == "Справочники":            self.content_stack.setCurrentIndex(self.stack_indices['catalogs'])
         else:
             # Для всех остальных пунктов пока показываем заглушку
             self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
