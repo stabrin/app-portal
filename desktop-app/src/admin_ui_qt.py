@@ -808,13 +808,6 @@ class ApiIntegrationFrameQt(QWidget):
                     error_details = traceback.format_exc()
                     self.error.emit(f"ОШИБКА: {e}\n\n{error_details}")
 
-        def _create_progress_dialog(self):
-            """Создает и настраивает диалог прогресса."""
-            self.progress_dialog = QProgressDialog("Выполняется...", "Отмена", 0, 100, self)
-            self.progress_dialog.setWindowModality(Qt.WindowModal)
-            self.progress_dialog.setAutoClose(True)
-            self.progress_dialog.show()
-
         self.thread = QThread()
         self.worker = Worker(target_func)
         self.worker.moveToThread(self.thread)
@@ -829,6 +822,14 @@ class ApiIntegrationFrameQt(QWidget):
 
         self.thread.started.connect(self.worker.run)
         self.thread.start()
+
+    def _create_progress_dialog(self):
+        """Создает и настраивает диалог прогресса."""
+        # --- ИСПРАВЛЕНИЕ: Метод вынесен на уровень класса ---
+        self.progress_dialog = QProgressDialog("Выполняется...", "Отмена", 0, 100, self)
+        self.progress_dialog.setWindowModality(Qt.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.show()
 
     def _request_codes_flow(self):
         """Полный цикл запроса кодов."""
