@@ -3985,11 +3985,12 @@ class LentaUploadDialog(QDialog):
             # Шаг 3: Создание заказа на основе уведомления
             # ИСПРАВЛЕНИЕ: Корректно обрабатываем кортеж из 3-х значений, возвращаемый сервисом
             result = self.service.create_or_recreate_order_from_notification(new_notif_id)
-            if len(result) == 3:
-                success, message, new_order_id = result
-            else: # Для обратной совместимости, если метод вернет 2 значения
-                success, message = result
-                new_order_id = message if success else None
+            success, message, third_param = result
+
+            # ID заказа возвращается во втором параметре (message) в случае успеха
+            new_order_id = None
+            if success:
+                new_order_id = message
 
             if not success:
                 raise Exception(f"Не удалось создать заказ: {message}")
