@@ -3967,7 +3967,7 @@ class LentaUploadDialog(QDialog):
                             new_notif_id,
                             row['gtin'],
                             row['total_quantity'],
-                            'Короб', # aggregation
+                            1, # aggregation (1 - Короб)
                             today.toString("yyyy-MM-dd"), # production_date
                             36, # shelf_life_months
                             expiry_date.toString("yyyy-MM-dd") # expiry_date
