@@ -3990,7 +3990,12 @@ class LentaUploadDialog(QDialog):
             # ID заказа возвращается во втором параметре (message) в случае успеха
             new_order_id = None
             if success:
-                new_order_id = message
+                # ИСПРАВЛЕНИЕ: Извлекаем только числовой ID из ответного сообщения
+                match = re.search(r'№(\d+)', message)
+                if match:
+                    new_order_id = int(match.group(1))
+                else:
+                    raise ValueError(f"Не удалось извлечь ID заказа из сообщения: '{message}'")
 
             if not success:
                 raise Exception(f"Не удалось создать заказ: {message}")
