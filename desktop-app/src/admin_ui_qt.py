@@ -1213,11 +1213,11 @@ class AdminWindowQt(QMainWindow):
         item_admin_print = QTreeWidgetItem(item_admin, ["Управление печатью"])
         item_admin_utilities = QTreeWidgetItem(item_admin, ["Служебные"]) # НОВЫЙ ПОДРАЗДЕЛ
         item_generate_sscc = QTreeWidgetItem(item_admin_utilities, ["Сгенерировать SSCC"]) # НОВЫЙ ПУНКТ
+        item_config_save_ini = QTreeWidgetItem(item_admin_utilities, ["Сохранить INI"]) # ПЕРЕМЕЩЕНО
         item_admin_catalogs = QTreeWidgetItem(item_admin, ["Справочники"])
         item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
 
         # Подменю "Конфигурация"
-        item_config_save_ini = QTreeWidgetItem(item_admin_config, ["Сохранить INI"])
         item_config_workplaces = QTreeWidgetItem(item_admin_config, ["Конфигурация складов"])
 
         # Сохраняем ссылки для быстрого доступа
@@ -1253,10 +1253,6 @@ class AdminWindowQt(QMainWindow):
         self.page_orders = self._build_orders_page()
         self.content_stack.addWidget(self.page_orders)
 
-        # Страница 2: Сохранение конфигурации
-        self.page_save_config = self._build_save_config_page()
-        self.content_stack.addWidget(self.page_save_config)
-
         # Страница 3: Конфигурация складов
         self.page_workplaces = self._build_workplaces_page()
         self.content_stack.addWidget(self.page_workplaces)
@@ -1277,10 +1273,9 @@ class AdminWindowQt(QMainWindow):
             'welcome': 0,
             'notifications': 1,
             'orders': 2,
-            'save_config': 3,
-            'workplaces': 4,
-            'catalogs': 5,
-            'placeholder': 6,
+            'workplaces': 3,
+            'catalogs': 4,
+            'placeholder': 5,
         }
 
         # Собираем основной layout
@@ -1436,7 +1431,7 @@ class AdminWindowQt(QMainWindow):
                 logging.exception("Error loading orders on menu click")
             self.content_stack.setCurrentIndex(self.stack_indices['orders'])
         elif text == "Сохранить INI":
-            self.content_stack.setCurrentIndex(self.stack_indices['save_config'])
+            self._save_config_files() # Сразу вызываем сохранение
         elif text == "Конфигурация складов":
             try:
                 # При переключении на склады, загружаем их
@@ -3429,32 +3424,6 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить уведомление: {e}")
 
     # --- ИСПРАВЛЕНИЕ: Перемещаем все недостающие методы внутрь класса AdminWindowQt ---
-
-    def _build_save_config_page(self):
-        """Создает страницу для сохранения файлов конфигурации (config.ini, cert.pem)."""
-        widget = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-
-        info_label1 = QLabel("<h3>Создание файлов конфигурации для локального подключения к базе данных</h3>")
-        info_label1.setWordWrap(True)
-        layout.addWidget(info_label1)
-
-        info_label2 = QLabel(
-            "Будут созданы файлы <b>config.ini</b> и <b>cert.pem</b> с настройками для локального подключения к базе данных. "
-            "Сохраните их в удобное место, чтобы иметь возможность подключаться по локальной сети к базе данных."
-        )
-        info_label2.setWordWrap(True)
-        layout.addWidget(info_label2)
-
-        btn_save = QPushButton("Сохранить файлы конфигурации")
-        btn_save.setFixedSize(250, 40)
-        btn_save.clicked.connect(self._save_config_files)
-        layout.addWidget(btn_save, 0, Qt.AlignLeft)
-
-        layout.addStretch()
-        widget.setLayout(layout)
-        return widget
 
     def _save_config_files(self):
         """Сохраняет файлы config.ini и cert.pem в выбранную пользователем папку."""
