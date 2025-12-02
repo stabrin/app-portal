@@ -3921,13 +3921,14 @@ class LentaUploadDialog(QDialog):
             # Создаем уведомление. Этот метод, похоже, сам управляет своей транзакцией.
             new_notif_id = self.service.create_notification(notif_data)
 
+            # Загружаем файл. Этот метод, видимо, тоже управляет своей транзакцией.
+            with open(self.filepath, 'rb') as f:
+                file_data = f.read()
+            self.service.add_notification_file(new_notif_id, os.path.basename(self.filepath), file_data, 'lenta_upload')
+
             # Остальные операции выполняем в одной большой транзакции
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    with open(self.filepath, 'rb') as f:
-                        file_data = f.read()
-                    self.service.add_notification_file(new_notif_id, os.path.basename(self.filepath), file_data, 'lenta_upload', cur)
-
                     # 2. Чтение файла и создание DataFrame
                     df = pd.read_excel(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
                     df['gtin'] = df['gtin'].apply(lambda x: x.zfill(14) if len(x) < 14 else x)
