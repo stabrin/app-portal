@@ -3672,29 +3672,42 @@ class AdminWindowQt(QMainWindow):
 
         self.sscc_thread.start()
 
-    def _save_sscc_to_file(self, ssccs: list, progress_dialog: QProgressDialog):
+        # Сохраняем ссылку на диалог, чтобы иметь к нему доступ в других слотах
+        self.sscc_progress_dialog = progress_dialog
+
+    @Slot(str)
+    def on_sscc_generation_error(self, error_message: str):
+        """Слот для обработки ошибки генерации SSCC."""
+        if hasattr(self, 'sscc_progress_dialog') and self.sscc_progress_dialog:
+            self.sscc_progress_dialog.cancel()
+        QMessageBox.critical(self, "Ошибка генерации", error_message)
+
+    @Slot(list)
+    def on_sscc_generation_finished(self, ssccs: list):
+        """Слот, который вызывается после успешной генерации SSCC."""
+        if hasattr(self, 'sscc_progress_dialog') and self.sscc_progress_dialog:
+            self.sscc_progress_dialog.close()
+        self._save_sscc_to_file(ssccs)
+
+    def _save_sscc_to_file(self, ssccs: list):
         """Предлагает сохранить сгенерированные SSCC в CSV файл."""
         logging.debug(f"[_save_sscc_to_file] Слот запущен. Получено {len(ssccs)} SSCC кодов.")
-        progress_dialog.setValue(100)
-        progress_dialog.setLabelText("Генерация завершена. Сохранение в файл...")
-        QApplication.processEvents()
 
         if not ssccs:
             logging.warning("[_save_sscc_to_file] Список SSCC пуст. Сохранение отменено.")
             QMessageBox.warning(self, "Внимание", "Не удалось сгенерировать SSCC коды.")
-            progress_dialog.close()
             return
 
         logging.debug("[_save_sscc_to_file] Открытие диалога сохранения файла...")
         filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить SSCC коды", "sscc_codes.csv", "CSV Files (*.csv)")
+
         if filepath:
             logging.debug(f"[_save_sscc_to_file] Файл для сохранения выбран: {filepath}")
             try:
                 logging.debug("[_save_sscc_to_file] Начало записи в файл...")
                 with open(filepath, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    for sscc in ssccs:
-                        writer.writerow([sscc])
+                    writer.writerows([[sscc] for sscc in ssccs])
                 logging.debug("[_save_sscc_to_file] Запись в файл завершена успешно.")
                 QMessageBox.information(self, "Успех", f"SSCC коды успешно сохранены в файл:\n{filepath}")
             except Exception as e:
