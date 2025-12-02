@@ -3983,7 +3983,14 @@ class LentaUploadDialog(QDialog):
                 logging.debug("[LentaUpload] Transaction for notification_details committed.")
 
             # Шаг 3: Создание заказа на основе уведомления
-            success, message, new_order_id = self.service.create_or_recreate_order_from_notification(new_notif_id)
+            # ИСПРАВЛЕНИЕ: Корректно обрабатываем кортеж из 3-х значений, возвращаемый сервисом
+            result = self.service.create_or_recreate_order_from_notification(new_notif_id)
+            if len(result) == 3:
+                success, message, new_order_id = result
+            else: # Для обратной совместимости, если метод вернет 2 значения
+                success, message = result
+                new_order_id = message if success else None
+
             if not success:
                 raise Exception(f"Не удалось создать заказ: {message}")
             logging.debug(f"[LentaUpload] Order created/updated with ID: {new_order_id}")
