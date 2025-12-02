@@ -3940,6 +3940,10 @@ class LentaUploadDialog(QDialog):
                     # Pandas автоматически использует ее для имен колонок и начинает чтение данных со второй строки.
                     logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}, using first row as header.")
                     df = pd.read_excel(self.filepath, header=0, dtype=str)
+                    # ИСПРАВЛЕНИЕ: Очищаем имена колонок от лишних пробелов
+                    df.columns = df.columns.str.strip()
+                    logging.debug(f"[LentaUpload] Cleaned column names: {list(df.columns)}")
+
                     logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}. First 5 rows:\n{df.head().to_string()}")
 
                     # Добавляем логирование длины SSCC для первых 5 строк
