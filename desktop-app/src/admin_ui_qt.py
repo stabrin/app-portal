@@ -3950,9 +3950,9 @@ class LentaUploadDialog(QDialog):
                 raise ValueError("В файле не найдено корректных уникальных строк для обработки.")
 
             # Шаг 2: Вставка в ap_supply_notification_details
-            df_unique['quantity'] = pd.to_numeric(df_unique['quantity'], errors='coerce').fillna(0)
-            df_grouped = df_unique.groupby('gtin').agg(total_quantity=('quantity', 'sum')).reset_index()
-            logging.debug(f"[LentaUpload] Data grouped by GTIN. Resulting groups: {len(df_grouped)}")
+            # ИСПРАВЛЕНИЕ: Считаем количество SSCC для каждого GTIN, а не суммируем Quantity.
+            df_grouped = df_unique.groupby('gtin').agg(sscc_count=('sscc', 'count')).reset_index()
+            logging.debug(f"[LentaUpload] Data grouped by GTIN for details. Resulting groups: {len(df_grouped)}")
 
             # ИСПРАВЛЕНИЕ: Реализуем вставку в ap_supply_notification_details напрямую,
             # так как метод save_grouped_details_from_df отсутствует в сервисе.
@@ -3966,7 +3966,7 @@ class LentaUploadDialog(QDialog):
                         details_to_insert.append((
                             new_notif_id,
                             row['gtin'],
-                            row['total_quantity'],
+                            row['sscc_count'],
                             1, # aggregation (1 - Короб)
                             today.toString("yyyy-MM-dd"), # production_date
                             36, # shelf_life_months
