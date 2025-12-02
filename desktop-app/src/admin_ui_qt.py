@@ -3877,7 +3877,7 @@ class LentaUploadDialog(QDialog):
         layout.addLayout(button_box)
 
     def _select_file(self):
-        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", "CSV Files (*.csv);;Text files (*.txt)")
+        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", "Excel Files (*.xlsx *.xls)")
         if filepath:
             self.filepath = filepath
             self.file_path_label.setText(os.path.basename(filepath))
@@ -3927,7 +3927,7 @@ class LentaUploadDialog(QDialog):
                     self.service.add_notification_file(new_notif_id, os.path.basename(self.filepath), file_data, 'lenta_upload', cur)
 
                     # 2. Чтение файла и создание DataFrame
-                    df = pd.read_csv(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
+                    df = pd.read_excel(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
                     df['gtin'] = df['gtin'].apply(lambda x: x.zfill(14) if len(x) < 14 else x)
                     df['sscc'] = df['sscc'].apply(lambda x: x if len(x) == 18 else None)
                     df.dropna(subset=['sscc'], inplace=True) # Игнорируем строки с неверной длиной SSCC
