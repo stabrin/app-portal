@@ -86,7 +86,7 @@ class SsccGeneratorWorker(QObject):
         generated_ssccs = []
         try:
             with get_client_db_connection(self.user_info) as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     for i in range(self.quantity):
                         if i % 1000 == 0: # Обновляем прогресс каждые 1000 кодов
                             self.progress.emit(int((i / self.quantity) * 100), f"Генерация SSCC: {i}/{self.quantity}")
