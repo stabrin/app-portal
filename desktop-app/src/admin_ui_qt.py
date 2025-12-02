@@ -3661,11 +3661,11 @@ class AdminWindowQt(QMainWindow):
             progress_dialog.setValue(val) if val > 0 else None,
             QApplication.processEvents()
         ))
-        self.sscc_worker.error.connect(lambda err: (
-            QMessageBox.critical(self, "Ошибка генерации", str(err)),
-            progress_dialog.cancel()
-        ))
-        self.sscc_worker.finished.connect(lambda ssccs: self._save_sscc_to_file(ssccs, progress_dialog))
+        # --- ИСПРАВЛЕНИЕ: Передаем только текст ошибки, а диалог закрываем в основном потоке ---
+        self.sscc_worker.error.connect(self.on_sscc_generation_error)
+        # --- ИСПРАВЛЕНИЕ: Передаем только список кодов, а диалог закрываем в основном потоке ---
+        self.sscc_worker.finished.connect(self.on_sscc_generation_finished)
+
         self.sscc_worker.finished.connect(self.sscc_thread.quit)
         self.sscc_worker.finished.connect(self.sscc_worker.deleteLater)
         self.sscc_thread.finished.connect(self.sscc_thread.deleteLater)
@@ -3703,9 +3703,6 @@ class AdminWindowQt(QMainWindow):
         else:
             logging.debug("[_save_sscc_to_file] Диалог сохранения файла отменен пользователем.")
             QMessageBox.information(self, "Отмена", "Сохранение файла отменено.")
-        
-        logging.debug("[_save_sscc_to_file] Закрытие диалога прогресса.")
-        progress_dialog.close()
 
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
 class NotificationEditorDialog(QDialog):
