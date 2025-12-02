@@ -3953,9 +3953,34 @@ class LentaUploadDialog(QDialog):
             df_unique['quantity'] = pd.to_numeric(df_unique['quantity'], errors='coerce').fillna(0)
             df_grouped = df_unique.groupby('gtin').agg(total_quantity=('quantity', 'sum')).reset_index()
             logging.debug(f"[LentaUpload] Data grouped by GTIN. Resulting groups: {len(df_grouped)}")
-            
-            self.service.save_grouped_details_from_df(new_notif_id, df_grouped)
-            logging.debug(f"[LentaUpload] Data inserted into ap_supply_notification_details.")
+
+            # ИСПРАВЛЕНИЕ: Реализуем вставку в ap_supply_notification_details напрямую,
+            # так как метод save_grouped_details_from_df отсутствует в сервисе.
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    today = QDate.currentDate()
+                    expiry_date = today.addMonths(36)
+                    
+                    details_to_insert = []
+                    for _, row in df_grouped.iterrows():
+                        details_to_insert.append((
+                            new_notif_id,
+                            row['gtin'],
+                            row['total_quantity'],
+                            'Короб', # aggregation
+                            today.toString("yyyy-MM-dd"), # production_date
+                            36, # shelf_life_months
+                            expiry_date.toString("yyyy-MM-dd") # expiry_date
+                        ))
+                    
+                    cols_details = ['notification_id', 'gtin', 'quantity', 'aggregation', 'production_date', 'shelf_life_months', 'expiry_date']
+                    insert_query_details = f"INSERT INTO ap_supply_notification_details ({', '.join(cols_details)}) VALUES %s"
+                    logging.debug(f"[LentaUpload] Preparing to insert {len(details_to_insert)} rows into ap_supply_notification_details.")
+                    from psycopg2.extras import execute_values
+                    execute_values(cur, insert_query_details, details_to_insert)
+                    logging.debug(f"[LentaUpload] Insertion into ap_supply_notification_details finished.")
+                conn.commit()
+                logging.debug("[LentaUpload] Transaction for notification_details committed.")
 
             # Шаг 3: Создание заказа на основе уведомления
             success, message, new_order_id = self.service.create_or_recreate_order_from_notification(new_notif_id)
