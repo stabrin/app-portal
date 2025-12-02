@@ -98,7 +98,8 @@ class SsccGeneratorWorker(QObject):
                     conn.commit() # Фиксируем изменения счетчика в БД
             self.finished.emit(generated_ssccs)
         except Exception as e:
-            self.error.emit(f"Ошибка генерации SSCC: {e}\n{traceback.format_exc()}")
+            logging.error(f"Ошибка генерации SSCC: {e}\n{traceback.format_exc()}")
+            self.error.emit(f"Ошибка генерации SSCC: {e}. Подробности в лог-файле.")
 
 # --- НОВЫЙ БЛОК: Классы-заглушки для вкладок управления заказом ---
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
@@ -3661,7 +3662,7 @@ class AdminWindowQt(QMainWindow):
             QApplication.processEvents()
         ))
         self.sscc_worker.error.connect(lambda err: (
-            QMessageBox.critical(self, "Ошибка генерации", err),
+            QMessageBox.critical(self, "Ошибка генерации", str(err)),
             progress_dialog.cancel()
         ))
         self.sscc_worker.finished.connect(lambda ssccs: self._save_sscc_to_file(ssccs, progress_dialog))
