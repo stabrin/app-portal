@@ -3931,43 +3931,42 @@ class LentaUploadDialog(QDialog):
             self.service.add_notification_file(new_notif_id, os.path.basename(self.filepath), file_data, 'lenta_upload')
             logging.debug(f"[LentaUpload] File '{os.path.basename(self.filepath)}' attached to notification ID: {new_notif_id}")
 
-            # Оборачиваем ВСЕ операции с БД в одну транзакцию для атомарности
+            # --- НОВАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ ---
+            # Сначала обрабатываем файл и готовим данные
+            logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}, using columns by index [1, 2, 3].")
+            df = pd.read_excel(self.filepath, header=0, usecols=[1, 2, 3], names=['gtin', 'sscc', 'quantity'], dtype=str)
+            logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}. First 5 rows:\n{df.head().to_string()}")
+
+            df['gtin'] = df['gtin'].apply(lambda x: str(x).strip().zfill(14) if pd.notna(x) and len(str(x).strip()) < 14 else (str(x).strip() if pd.notna(x) else None))
+            df['sscc'] = df['sscc'].apply(lambda x: str(x).strip() if pd.notna(x) and len(str(x).strip()) == 18 else None)
+            df.dropna(subset=['sscc', 'gtin'], inplace=True)
+            logging.debug(f"[LentaUpload] Rows after dropping invalid SSCC/GTIN: {len(df)}")
+
+            df_unique = df.drop_duplicates().copy()
+            logging.debug(f"[LentaUpload] Unique rows count: {len(df_unique)}")
+
+            if df_unique.empty:
+                logging.warning("[LentaUpload] No unique valid data found in the file. Aborting.")
+                raise ValueError("В файле не найдено корректных уникальных строк для обработки.")
+
+            # Шаг 2: Вставка в ap_supply_notification_details
+            df_unique['quantity'] = pd.to_numeric(df_unique['quantity'], errors='coerce').fillna(0)
+            df_grouped = df_unique.groupby('gtin').agg(total_quantity=('quantity', 'sum')).reset_index()
+            logging.debug(f"[LentaUpload] Data grouped by GTIN. Resulting groups: {len(df_grouped)}")
+            
+            self.service.save_grouped_details_from_df(new_notif_id, df_grouped)
+            logging.debug(f"[LentaUpload] Data inserted into ap_supply_notification_details.")
+
+            # Шаг 3: Создание заказа на основе уведомления
+            success, message, new_order_id = self.service.create_or_recreate_order_from_notification(new_notif_id)
+            if not success:
+                raise Exception(f"Не удалось создать заказ: {message}")
+            logging.debug(f"[LentaUpload] Order created/updated with ID: {new_order_id}")
+
+            # Шаг 4: Вставка в aggregation_tasks с реальным order_id
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    logging.debug("[LentaUpload] DB transaction for details started.")
-                    # 2. Чтение файла по индексам колонок, без привязки к именам
-                    logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}, using columns by index [1, 2, 3].")
-                    df = pd.read_excel(self.filepath, header=0, usecols=[1, 2, 3], names=['gtin', 'sscc', 'quantity'], dtype=str)
-
-                    logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}. First 5 rows:\n{df.head().to_string()}")
-
-                    # Добавляем логирование длины SSCC для первых 5 строк
-                    for index, row in df.head().iterrows():
-                        sscc_val = row.get('sscc')
-                        if pd.notna(sscc_val):
-                            stripped_sscc = str(sscc_val).strip()
-                            logging.debug(f"[LentaUpload] Row {index}: SSCC='{sscc_val}', Stripped='{stripped_sscc}', Length={len(stripped_sscc)}")
-                        else:
-                            logging.debug(f"[LentaUpload] Row {index}: SSCC is empty or NaN.")
-
-                    df['gtin'] = df['gtin'].apply(lambda x: str(x).strip().zfill(14) if pd.notna(x) and len(str(x).strip()) < 14 else str(x).strip())
-                    # ИСПРАВЛЕНИЕ: Добавляем .strip() для удаления лишних пробелов перед проверкой длины
-                    df['sscc'] = df['sscc'].apply(lambda x: str(x).strip() if x and len(str(x).strip()) == 18 else None)
-                    logging.debug(f"[LentaUpload] Data cleaned (GTIN padded, SSCC length checked).")
-
-                    df.dropna(subset=['sscc'], inplace=True) # Игнорируем строки с неверной длиной SSCC
-                    logging.debug(f"[LentaUpload] Rows after dropping invalid SSCC: {len(df)}")
-
-                    # 3. Уникальные строки
-                    df_unique = df.drop_duplicates().copy()
-                    logging.debug(f"[LentaUpload] Unique rows count: {len(df_unique)}")
-
-                    if df_unique.empty:
-                        logging.warning("[LentaUpload] No unique valid data found in the file. Aborting details insertion.")
-                        raise ValueError("В файле не найдено корректных уникальных строк для обработки.")
-
-                    # 4. Вставка в aggregation_tasks
-                    df_unique['order_id'] = new_notif_id
+                    df_unique['order_id'] = new_order_id
                     df_unique['container_id'] = container_id
                     df_unique['owner'] = client['name']
                     
@@ -3977,38 +3976,8 @@ class LentaUploadDialog(QDialog):
                     logging.debug(f"[LentaUpload] Preparing to insert {len(tasks_to_insert)} rows into aggregation_tasks.")
                     execute_values(cur, insert_query_tasks, [tuple(x) for x in tasks_to_insert.to_numpy()])
                     logging.debug(f"[LentaUpload] Insertion into aggregation_tasks finished.")
-
-                    # 5. Группировка для notification_details
-                    # ИСПРАВЛЕНИЕ: Суммируем Quantity из файла, а не считаем SSCC.
-                    # Также преобразуем Quantity в число для корректного суммирования.
-                    df_unique['quantity'] = pd.to_numeric(df_unique['quantity'], errors='coerce').fillna(0)
-                    df_grouped = df_unique.groupby('gtin').agg(total_quantity=('quantity', 'sum')).reset_index()
-                    logging.debug(f"[LentaUpload] Data grouped by GTIN. Resulting groups: {len(df_grouped)}")
-
-                    # 6. Вставка в ap_supply_notification_details
-                    today = QDate.currentDate()
-                    expiry_date = today.addMonths(36)
-                    
-                    details_to_insert = []
-                    for _, row in df_grouped.iterrows():
-                        details_to_insert.append((
-                            new_notif_id,
-                            row['gtin'],
-                            row['total_quantity'], # Используем просуммированное значение
-                            'Короб', # aggregation
-                            today.toString("yyyy-MM-dd"), # production_date
-                            36, # shelf_life_months
-                            expiry_date.toString("yyyy-MM-dd") # expiry_date
-                        ))
-                    
-                    cols_details = ['notification_id', 'gtin', 'quantity', 'aggregation', 'production_date', 'shelf_life_months', 'expiry_date']
-                    insert_query_details = f"INSERT INTO ap_supply_notification_details ({', '.join(cols_details)}) VALUES %s"
-                    logging.debug(f"[LentaUpload] Preparing to insert {len(details_to_insert)} rows into ap_supply_notification_details.")
-                    execute_values(cur, insert_query_details, details_to_insert)
-                    logging.debug(f"[LentaUpload] Insertion into ap_supply_notification_details finished.")
-
-                logging.debug("[LentaUpload] Committing transaction.")
-                conn.commit()
+                    conn.commit()
+                logging.debug("[LentaUpload] Transaction for aggregation_tasks committed.")
 
             QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
             self.accept()
