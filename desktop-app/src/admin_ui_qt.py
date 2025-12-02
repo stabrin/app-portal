@@ -3967,7 +3967,10 @@ class LentaUploadDialog(QDialog):
                     logging.debug(f"[LentaUpload] Insertion into aggregation_tasks finished.")
 
                     # 5. Группировка для notification_details
-                    df_grouped = df_unique.groupby(['gtin']).agg(sscc_count=('sscc', 'count')).reset_index()
+                    # ИСПРАВЛЕНИЕ: Суммируем Quantity из файла, а не считаем SSCC.
+                    # Также преобразуем Quantity в число для корректного суммирования.
+                    df_unique['quantity'] = pd.to_numeric(df_unique['quantity'], errors='coerce').fillna(0)
+                    df_grouped = df_unique.groupby('gtin').agg(total_quantity=('quantity', 'sum')).reset_index()
                     logging.debug(f"[LentaUpload] Data grouped by GTIN. Resulting groups: {len(df_grouped)}")
 
                     # 6. Вставка в ap_supply_notification_details
@@ -3979,7 +3982,7 @@ class LentaUploadDialog(QDialog):
                         details_to_insert.append((
                             new_notif_id,
                             row['gtin'],
-                            row['sscc_count'],
+                            row['total_quantity'], # Используем просуммированное значение
                             'Короб', # aggregation
                             today.toString("yyyy-MM-dd"), # production_date
                             36, # shelf_life_months
