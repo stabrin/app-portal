@@ -3674,28 +3674,37 @@ class AdminWindowQt(QMainWindow):
 
     def _save_sscc_to_file(self, ssccs: list, progress_dialog: QProgressDialog):
         """Предлагает сохранить сгенерированные SSCC в CSV файл."""
+        logging.debug(f"[_save_sscc_to_file] Слот запущен. Получено {len(ssccs)} SSCC кодов.")
         progress_dialog.setValue(100)
         progress_dialog.setLabelText("Генерация завершена. Сохранение в файл...")
         QApplication.processEvents()
 
         if not ssccs:
+            logging.warning("[_save_sscc_to_file] Список SSCC пуст. Сохранение отменено.")
             QMessageBox.warning(self, "Внимание", "Не удалось сгенерировать SSCC коды.")
             progress_dialog.close()
             return
 
+        logging.debug("[_save_sscc_to_file] Открытие диалога сохранения файла...")
         filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить SSCC коды", "sscc_codes.csv", "CSV Files (*.csv)")
         if filepath:
+            logging.debug(f"[_save_sscc_to_file] Файл для сохранения выбран: {filepath}")
             try:
+                logging.debug("[_save_sscc_to_file] Начало записи в файл...")
                 with open(filepath, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
                     for sscc in ssccs:
                         writer.writerow([sscc])
+                logging.debug("[_save_sscc_to_file] Запись в файл завершена успешно.")
                 QMessageBox.information(self, "Успех", f"SSCC коды успешно сохранены в файл:\n{filepath}")
             except Exception as e:
+                logging.error(f"[_save_sscc_to_file] Ошибка при записи в файл: {e}", exc_info=True)
                 QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить SSCC коды в файл: {e}")
         else:
+            logging.debug("[_save_sscc_to_file] Диалог сохранения файла отменен пользователем.")
             QMessageBox.information(self, "Отмена", "Сохранение файла отменено.")
         
+        logging.debug("[_save_sscc_to_file] Закрытие диалога прогресса.")
         progress_dialog.close()
 
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
