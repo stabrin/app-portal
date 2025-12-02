@@ -3940,7 +3940,8 @@ class LentaUploadDialog(QDialog):
                     df = pd.read_excel(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
                     logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}")
                     df['gtin'] = df['gtin'].apply(lambda x: str(x).zfill(14) if len(str(x)) < 14 else str(x))
-                    df['sscc'] = df['sscc'].apply(lambda x: x if len(x) == 18 else None)
+                    # ИСПРАВЛЕНИЕ: Добавляем .strip() для удаления лишних пробелов перед проверкой длины
+                    df['sscc'] = df['sscc'].apply(lambda x: str(x).strip() if x and len(str(x).strip()) == 18 else None)
                     logging.debug(f"[LentaUpload] Data cleaned (GTIN padded, SSCC length checked).")
                     df.dropna(subset=['sscc'], inplace=True) # Игнорируем строки с неверной длиной SSCC
                     logging.debug(f"[LentaUpload] Rows after dropping invalid SSCC: {len(df)}")
