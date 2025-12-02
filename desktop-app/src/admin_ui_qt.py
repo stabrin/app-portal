@@ -3905,6 +3905,8 @@ class LentaUploadDialog(QDialog):
             QMessageBox.warning(self, "Внимание", "Поле 'Номер контейнера/ТС' обязательно для заполнения.")
             return
 
+        logging.debug("[LentaUpload] Starting save_and_process.")
+
         try:
             # 1. Создание уведомления и загрузка файла
             scenario = self.scenarios[self.scenario_combo.currentIndex()]
@@ -3917,26 +3919,39 @@ class LentaUploadDialog(QDialog):
                 'planned_arrival_date': self.arrival_date_edit.date().toString("yyyy-MM-dd"), 'comments': '',
                 'vehicle_number': container_id, 'client_local_id': client.get('id'),
             }
+            logging.debug(f"[LentaUpload] Notification data prepared: {notif_data}")
             
             # Шаг 1: Создание уведомления. Этот метод управляет своей транзакцией.
             new_notif_id = self.service.create_notification(notif_data)
+            logging.debug(f"[LentaUpload] Notification created with ID: {new_notif_id}")
 
             # Шаг 1.1: Прикрепление файла к уведомлению. Этот метод также управляет своей транзакцией.
             with open(self.filepath, 'rb') as f:
                 file_data = f.read()
             self.service.add_notification_file(new_notif_id, os.path.basename(self.filepath), file_data, 'lenta_upload')
+            logging.debug(f"[LentaUpload] File '{os.path.basename(self.filepath)}' attached to notification ID: {new_notif_id}")
 
             # Оборачиваем ВСЕ операции с БД в одну транзакцию для атомарности
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    logging.debug("[LentaUpload] DB transaction for details started.")
                     # 2. Чтение файла и создание DataFrame
+                    logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}")
                     df = pd.read_excel(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
+                    logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}")
                     df['gtin'] = df['gtin'].apply(lambda x: str(x).zfill(14) if len(str(x)) < 14 else str(x))
                     df['sscc'] = df['sscc'].apply(lambda x: x if len(x) == 18 else None)
+                    logging.debug(f"[LentaUpload] Data cleaned (GTIN padded, SSCC length checked).")
                     df.dropna(subset=['sscc'], inplace=True) # Игнорируем строки с неверной длиной SSCC
+                    logging.debug(f"[LentaUpload] Rows after dropping invalid SSCC: {len(df)}")
 
                     # 3. Уникальные строки
                     df_unique = df.drop_duplicates().copy()
+                    logging.debug(f"[LentaUpload] Unique rows count: {len(df_unique)}")
+
+                    if df_unique.empty:
+                        logging.warning("[LentaUpload] No unique valid data found in the file. Aborting details insertion.")
+                        raise ValueError("В файле не найдено корректных уникальных строк для обработки.")
 
                     # 4. Вставка в aggregation_tasks
                     df_unique['order_id'] = new_notif_id
@@ -3946,10 +3961,13 @@ class LentaUploadDialog(QDialog):
                     from psycopg2.extras import execute_values
                     tasks_to_insert = df_unique[['order_id', 'container_id', 'gtin', 'sscc', 'owner']]
                     insert_query_tasks = f"INSERT INTO aggregation_tasks ({', '.join(tasks_to_insert.columns)}) VALUES %s"
+                    logging.debug(f"[LentaUpload] Preparing to insert {len(tasks_to_insert)} rows into aggregation_tasks.")
                     execute_values(cur, insert_query_tasks, [tuple(x) for x in tasks_to_insert.to_numpy()])
+                    logging.debug(f"[LentaUpload] Insertion into aggregation_tasks finished.")
 
                     # 5. Группировка для notification_details
                     df_grouped = df_unique.groupby(['gtin']).agg(sscc_count=('sscc', 'count')).reset_index()
+                    logging.debug(f"[LentaUpload] Data grouped by GTIN. Resulting groups: {len(df_grouped)}")
 
                     # 6. Вставка в ap_supply_notification_details
                     today = QDate.currentDate()
@@ -3969,13 +3987,17 @@ class LentaUploadDialog(QDialog):
                     
                     cols_details = ['notification_id', 'gtin', 'quantity', 'aggregation', 'production_date', 'shelf_life_months', 'expiry_date']
                     insert_query_details = f"INSERT INTO ap_supply_notification_details ({', '.join(cols_details)}) VALUES %s"
+                    logging.debug(f"[LentaUpload] Preparing to insert {len(details_to_insert)} rows into ap_supply_notification_details.")
                     execute_values(cur, insert_query_details, details_to_insert)
+                    logging.debug(f"[LentaUpload] Insertion into ap_supply_notification_details finished.")
 
+                logging.debug("[LentaUpload] Committing transaction.")
                 conn.commit()
 
             QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
             self.accept()
         except Exception as e:
+            logging.exception("[LentaUpload] An error occurred during processing.")
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке: {e}")
 
