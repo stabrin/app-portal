@@ -3935,27 +3935,22 @@ class LentaUploadDialog(QDialog):
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     logging.debug("[LentaUpload] DB transaction for details started.")
-                    # 2. Чтение файла и создание DataFrame
-                    # ИСПРАВЛЕНИЕ: Указываем, что первая строка (индекс 0) является заголовком.
-                    # Pandas автоматически использует ее для имен колонок и начинает чтение данных со второй строки.
-                    logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}, using first row as header.")
-                    df = pd.read_excel(self.filepath, header=0, dtype=str)
-                    # ИСПРАВЛЕНИЕ: Очищаем имена колонок от лишних пробелов
-                    df.columns = df.columns.str.strip()
-                    logging.debug(f"[LentaUpload] Cleaned column names: {list(df.columns)}")
+                    # 2. Чтение файла по индексам колонок, без привязки к именам
+                    logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}, using columns by index [1, 2, 3].")
+                    df = pd.read_excel(self.filepath, header=0, usecols=[1, 2, 3], names=['gtin', 'sscc', 'quantity'], dtype=str)
 
                     logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}. First 5 rows:\n{df.head().to_string()}")
 
                     # Добавляем логирование длины SSCC для первых 5 строк
                     for index, row in df.head().iterrows():
-                        sscc_val = row['sscc']
+                        sscc_val = row.get('sscc')
                         if pd.notna(sscc_val):
                             stripped_sscc = str(sscc_val).strip()
                             logging.debug(f"[LentaUpload] Row {index}: SSCC='{sscc_val}', Stripped='{stripped_sscc}', Length={len(stripped_sscc)}")
                         else:
                             logging.debug(f"[LentaUpload] Row {index}: SSCC is empty or NaN.")
 
-                    df['gtin'] = df['gtin'].apply(lambda x: str(x).zfill(14) if len(str(x)) < 14 else str(x))
+                    df['gtin'] = df['gtin'].apply(lambda x: str(x).strip().zfill(14) if pd.notna(x) and len(str(x).strip()) < 14 else str(x).strip())
                     # ИСПРАВЛЕНИЕ: Добавляем .strip() для удаления лишних пробелов перед проверкой длины
                     df['sscc'] = df['sscc'].apply(lambda x: str(x).strip() if x and len(str(x).strip()) == 18 else None)
                     logging.debug(f"[LentaUpload] Data cleaned (GTIN padded, SSCC length checked).")
