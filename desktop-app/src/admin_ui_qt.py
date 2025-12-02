@@ -3914,7 +3914,7 @@ class LentaUploadDialog(QDialog):
             notif_data = {
                 'scenario_id': scenario['id'], 'scenario_name': scenario['name'], 'client_name': client['name'],
                 'product_groups': [{'id': pg['id'], 'name': pg['display_name']}],
-                'planned_arrival_date': self.arrival_date_edit.date().toString("yyyy-MM-dd"),
+                'planned_arrival_date': self.arrival_date_edit.date().toString("yyyy-MM-dd"), 'comments': '',
                 'vehicle_number': container_id, 'client_local_id': client.get('id'),
             }
             
