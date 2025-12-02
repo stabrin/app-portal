@@ -3936,8 +3936,10 @@ class LentaUploadDialog(QDialog):
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     logging.debug("[LentaUpload] DB transaction for details started.")
                     # 2. Чтение файла и создание DataFrame
-                    logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}")
-                    df = pd.read_excel(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
+                    # ИСПРАВЛЕНИЕ: Указываем, что первая строка (индекс 0) является заголовком.
+                    # Pandas автоматически использует ее для имен колонок и начинает чтение данных со второй строки.
+                    logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}, using first row as header.")
+                    df = pd.read_excel(self.filepath, header=0, dtype=str)
                     logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}. First 5 rows:\n{df.head().to_string()}")
 
                     # Добавляем логирование длины SSCC для первых 5 строк
