@@ -12,6 +12,7 @@ import traceback
 import logging
 import json
 
+from dateutil.relativedelta import relativedelta
 import pandas as pd
 from .db_connector import get_client_db_connection
 from .catalogs_service import CatalogsService
@@ -1214,6 +1215,7 @@ class AdminWindowQt(QMainWindow):
         item_admin_utilities = QTreeWidgetItem(item_admin, ["Служебные"]) # НОВЫЙ ПОДРАЗДЕЛ
         item_generate_sscc = QTreeWidgetItem(item_admin_utilities, ["Сгенерировать SSCC"]) # НОВЫЙ ПУНКТ
         item_config_save_ini = QTreeWidgetItem(item_admin_utilities, ["Сохранить INI"]) # ПЕРЕМЕЩЕНО
+        item_upload_lenta = QTreeWidgetItem(item_admin_utilities, ["Загрузить Ленту"]) # НОВЫЙ ПУНКТ
         item_admin_catalogs = QTreeWidgetItem(item_admin, ["Справочники"])
         item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
 
@@ -1233,6 +1235,7 @@ class AdminWindowQt(QMainWindow):
             'utilities': item_admin_utilities, # Добавляем в словарь
             'generate_sscc': item_generate_sscc, # Добавляем в словарь
             'save_ini': item_config_save_ini,
+            'upload_lenta': item_upload_lenta,
             'workplaces': item_config_workplaces,
         }
 
@@ -1441,6 +1444,8 @@ class AdminWindowQt(QMainWindow):
             self.content_stack.setCurrentIndex(self.stack_indices['workplaces'])
         elif text == "Сгенерировать SSCC":
             self._open_generate_sscc_dialog() # Вызываем диалог, не меняя основное окно
+        elif text == "Загрузить Ленту":
+            self._open_lenta_upload_dialog() # Вызываем новый диалог
         elif text == "Справочники":            self.content_stack.setCurrentIndex(self.stack_indices['catalogs'])
         else:
             # Для всех остальных пунктов пока показываем заглушку
@@ -3587,6 +3592,10 @@ class AdminWindowQt(QMainWindow):
         warehouse_name = self.warehouses_table.item(sel, 0).text()
         QMessageBox.information(self, "Печать", f"Вызов печати этикеток для склада: {warehouse_name} (в разработке)")
     def _open_generate_sscc_dialog(self):
+        """Открывает диалог для генерации SSCC."""
+        self._open_lenta_upload_dialog()
+
+    def _open_generate_sscc_dialog_old(self):
         """Открывает диалог для запроса количества SSCC и запускает генерацию."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Генерация SSCC кодов")
@@ -3685,6 +3694,11 @@ class AdminWindowQt(QMainWindow):
         else:
             logging.debug("[_save_sscc_to_file] Диалог сохранения файла отменен пользователем.")
             QMessageBox.information(self, "Отмена", "Сохранение файла отменено.")
+
+    def _open_lenta_upload_dialog(self):
+        """Открывает диалог для специальной загрузки 'Лента'."""
+        dialog = LentaUploadDialog(self, self.user_info)
+        dialog.exec()
 
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
 class NotificationEditorDialog(QDialog):
@@ -3800,6 +3814,167 @@ class NotificationEditorDialog(QDialog):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить уведомление: {e}")
 
+# --- НОВЫЙ КЛАСС: Диалог для загрузки "Лента" ---
+class LentaUploadDialog(QDialog):
+    def __init__(self, parent, user_info):
+        super().__init__(parent)
+        self.user_info = user_info
+        self.setWindowTitle("Загрузка уведомления для 'Ленты'")
+        self.setMinimumWidth(550)
+        self.filepath = None
+
+        # Инициализация сервисов
+        self.service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+        self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+
+        self._build_ui()
+        self._load_catalogs()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        # --- Поля, как в обычном уведомлении ---
+        self.scenario_combo = QComboBox()
+        form_layout.addRow("Сценарий маркировки:", self.scenario_combo)
+
+        self.client_combo = QComboBox()
+        form_layout.addRow("Клиент:", self.client_combo)
+
+        self.product_group_combo = QComboBox()
+        form_layout.addRow("Товарная группа:", self.product_group_combo)
+
+        self.arrival_date_edit = QDateEdit(QDate.currentDate())
+        self.arrival_date_edit.setCalendarPopup(True)
+        self.arrival_date_edit.setDisplayFormat("yyyy-MM-dd")
+        form_layout.addRow("Планируемая дата прибытия:", self.arrival_date_edit)
+
+        self.vehicle_number_edit = QLineEdit()
+        form_layout.addRow("Номер контейнера/ТС:", self.vehicle_number_edit)
+
+        # --- Специальное поле для выбора файла ---
+        file_layout = QHBoxLayout()
+        self.file_path_label = QLineEdit()
+        self.file_path_label.setReadOnly(True)
+        self.file_path_label.setPlaceholderText("Файл не выбран...")
+        btn_browse = QPushButton("Обзор...")
+        btn_browse.clicked.connect(self._select_file)
+        file_layout.addWidget(self.file_path_label)
+        file_layout.addWidget(btn_browse)
+        form_layout.addRow("Файл для загрузки:", file_layout)
+
+        layout.addLayout(form_layout)
+
+        # Кнопки
+        button_box = QHBoxLayout()
+        btn_save = QPushButton("Сохранить и обработать")
+        btn_save.clicked.connect(self.save_and_process)
+        btn_cancel = QPushButton("Отмена")
+        btn_cancel.clicked.connect(self.reject)
+        button_box.addStretch()
+        button_box.addWidget(btn_save)
+        button_box.addWidget(btn_cancel)
+        layout.addLayout(button_box)
+
+    def _select_file(self):
+        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите файл", "", "CSV Files (*.csv);;Text files (*.txt)")
+        if filepath:
+            self.filepath = filepath
+            self.file_path_label.setText(os.path.basename(filepath))
+
+    def _load_catalogs(self):
+        try:
+            self.scenarios = self.catalog_service.get_marking_scenarios()
+            self.scenario_combo.addItems([s['name'] for s in self.scenarios])
+
+            self.clients = self.catalog_service.get_local_clients()
+            self.client_combo.addItems([c['name'] for c in self.clients])
+
+            self.product_groups = self.catalog_service.get_product_groups()
+            self.product_group_combo.addItems([pg['display_name'] for pg in self.product_groups])
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить справочники: {e}")
+
+    def save_and_process(self):
+        if not self.filepath:
+            QMessageBox.warning(self, "Внимание", "Не выбран файл для загрузки.")
+            return
+        
+        container_id = self.vehicle_number_edit.text().strip()
+        if not container_id:
+            QMessageBox.warning(self, "Внимание", "Поле 'Номер контейнера/ТС' обязательно для заполнения.")
+            return
+
+        try:
+            # 1. Создание уведомления и загрузка файла
+            scenario = self.scenarios[self.scenario_combo.currentIndex()]
+            client = self.clients[self.client_combo.currentIndex()]
+            pg = self.product_groups[self.product_group_combo.currentIndex()]
+
+            notif_data = {
+                'scenario_id': scenario['id'], 'client_name': client['name'],
+                'product_groups': [{'id': pg['id'], 'name': pg['display_name']}],
+                'planned_arrival_date': self.arrival_date_edit.date().toString("yyyy-MM-dd"),
+                'vehicle_number': container_id, 'client_local_id': client.get('id'),
+            }
+            
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    new_notif_id = self.service.create_notification(notif_data, cur)
+                    
+                    with open(self.filepath, 'rb') as f:
+                        file_data = f.read()
+                    self.service.add_notification_file(new_notif_id, os.path.basename(self.filepath), file_data, 'lenta_upload', cur)
+
+                    # 2. Чтение файла и создание DataFrame
+                    df = pd.read_csv(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
+                    df['gtin'] = df['gtin'].apply(lambda x: x.zfill(14) if len(x) < 14 else x)
+                    df['sscc'] = df['sscc'].apply(lambda x: x if len(x) == 18 else None)
+                    df.dropna(subset=['sscc'], inplace=True) # Игнорируем строки с неверной длиной SSCC
+
+                    # 3. Уникальные строки
+                    df_unique = df.drop_duplicates().copy()
+
+                    # 4. Вставка в aggregation_tasks
+                    df_unique['order_id'] = new_notif_id
+                    df_unique['container_id'] = container_id
+                    df_unique['owner'] = client['name']
+                    
+                    from psycopg2.extras import execute_values
+                    tasks_to_insert = df_unique[['order_id', 'container_id', 'gtin', 'sscc', 'owner']]
+                    insert_query_tasks = f"INSERT INTO aggregation_tasks ({', '.join(tasks_to_insert.columns)}) VALUES %s"
+                    execute_values(cur, insert_query_tasks, [tuple(x) for x in tasks_to_insert.to_numpy()])
+
+                    # 5. Группировка для notification_details
+                    df_grouped = df_unique.groupby(['gtin']).agg(sscc_count=('sscc', 'count')).reset_index()
+
+                    # 6. Вставка в ap_supply_notification_details
+                    today = QDate.currentDate()
+                    expiry_date = today.addMonths(36)
+                    
+                    details_to_insert = []
+                    for _, row in df_grouped.iterrows():
+                        details_to_insert.append((
+                            new_notif_id,
+                            row['gtin'],
+                            row['sscc_count'],
+                            'Короб', # aggregation
+                            today.toString("yyyy-MM-dd"), # production_date
+                            36, # shelf_life_months
+                            expiry_date.toString("yyyy-MM-dd") # expiry_date
+                        ))
+                    
+                    cols_details = ['notification_id', 'gtin', 'quantity', 'aggregation', 'production_date', 'shelf_life_months', 'expiry_date']
+                    insert_query_details = f"INSERT INTO ap_supply_notification_details ({', '.join(cols_details)}) VALUES %s"
+                    execute_values(cur, insert_query_details, details_to_insert)
+
+                conn.commit()
+
+            QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
+            self.accept()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке: {e}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
