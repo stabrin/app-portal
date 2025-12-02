@@ -3938,11 +3938,22 @@ class LentaUploadDialog(QDialog):
                     # 2. Чтение файла и создание DataFrame
                     logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}")
                     df = pd.read_excel(self.filepath, header=None, names=['gtin', 'sscc', 'quantity'], dtype=str)
-                    logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}")
+                    logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}. First 5 rows:\n{df.head().to_string()}")
+
+                    # Добавляем логирование длины SSCC для первых 5 строк
+                    for index, row in df.head().iterrows():
+                        sscc_val = row['sscc']
+                        if pd.notna(sscc_val):
+                            stripped_sscc = str(sscc_val).strip()
+                            logging.debug(f"[LentaUpload] Row {index}: SSCC='{sscc_val}', Stripped='{stripped_sscc}', Length={len(stripped_sscc)}")
+                        else:
+                            logging.debug(f"[LentaUpload] Row {index}: SSCC is empty or NaN.")
+
                     df['gtin'] = df['gtin'].apply(lambda x: str(x).zfill(14) if len(str(x)) < 14 else str(x))
                     # ИСПРАВЛЕНИЕ: Добавляем .strip() для удаления лишних пробелов перед проверкой длины
                     df['sscc'] = df['sscc'].apply(lambda x: str(x).strip() if x and len(str(x).strip()) == 18 else None)
                     logging.debug(f"[LentaUpload] Data cleaned (GTIN padded, SSCC length checked).")
+
                     df.dropna(subset=['sscc'], inplace=True) # Игнорируем строки с неверной длиной SSCC
                     logging.debug(f"[LentaUpload] Rows after dropping invalid SSCC: {len(df)}")
 
