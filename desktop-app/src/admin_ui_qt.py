@@ -86,21 +86,23 @@ class SsccGeneratorWorker(QObject):
     def run(self):
         generated_ssccs = []
         try:
-            last_progress = -1 # --- ИЗМЕНЕНИЕ: Отслеживаем последнее отправленное значение прогресса ---
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    for i in range(self.quantity):
-                        # --- ИЗМЕНЕНИЕ: Отправляем сигнал только при изменении процента ---
-                        current_progress = int((i / self.quantity) * 100)
-                        if current_progress > last_progress:
-                            self.progress.emit(current_progress, f"Генерация SSCC: {i}/{self.quantity}")
-                            last_progress = current_progress
+                    # --- ИЗМЕНЕНИЕ: Резервируем ID одним запросом для производительности ---
+                    # Вместо инкремента на каждой итерации, получаем диапазон ID сразу.
+                    start_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id', increment_by=self.quantity)
+                    if warning:
+                        # Отправляем предупреждение, если оно есть
+                        self.error.emit(warning)
 
-                        box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
-                        if warning:
-                            self.progress.emit(0, warning) # Отправляем предупреждение, не меняя основной прогресс
+                    start_id = start_id - self.quantity # read_and_increment_counter возвращает ВЕРХНЮЮ границу
+
+                    for i in range(self.quantity):
+                        box_id = start_id + i + 1
+                        # Генерация SSCC теперь происходит локально, без запросов к БД в цикле
                         _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
                         generated_ssccs.append(full_sscc)
+
                     conn.commit() # Фиксируем изменения счетчика в БД
             self.finished.emit(generated_ssccs)
         except Exception as e:
