@@ -3620,7 +3620,10 @@ class AdminWindowQt(QMainWindow):
 
     def _generate_and_save_sscc(self, quantity: int):
         """Запускает генерацию SSCC в фоновом потоке и сохраняет результат."""
-        progress_dialog = QProgressDialog("Генерация SSCC кодов...", "Отмена", 0, 100, self)
+        # --- ИСПРАВЛЕНИЕ: Создаем диалог без родителя (parent=None), чтобы избежать конфликтов потоков ---
+        # Это делает диалог независимым и безопасным для управления из фонового потока.
+        progress_dialog = QProgressDialog("Генерация SSCC кодов...", "Отмена", 0, 100, None)
+        
         progress_dialog.setWindowTitle("Генерация SSCC")
         progress_dialog.setWindowModality(Qt.WindowModal)
         progress_dialog.setAutoClose(False)
