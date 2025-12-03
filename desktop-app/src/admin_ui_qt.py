@@ -88,8 +88,11 @@ class SsccGeneratorWorker(QObject):
         try:
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # --- ИЗМЕНЕНИЕ: Обновляем прогресс реже, чтобы не перегружать UI ---
+                    # Обновляем примерно 100 раз за весь процесс
+                    update_step = max(1, self.quantity // 100)
                     for i in range(self.quantity):
-                        if i % 1000 == 0: # Обновляем прогресс каждые 1000 кодов
+                        if i % update_step == 0:
                             self.progress.emit(int((i / self.quantity) * 100), f"Генерация SSCC: {i}/{self.quantity}")
                         box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
                         if warning:
