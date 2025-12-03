@@ -86,14 +86,16 @@ class SsccGeneratorWorker(QObject):
     def run(self):
         generated_ssccs = []
         try:
+            last_progress = -1 # --- ИЗМЕНЕНИЕ: Отслеживаем последнее отправленное значение прогресса ---
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # --- ИЗМЕНЕНИЕ: Обновляем прогресс реже, чтобы не перегружать UI ---
-                    # Обновляем примерно 100 раз за весь процесс
-                    update_step = max(1, self.quantity // 100)
                     for i in range(self.quantity):
-                        if i % update_step == 0:
-                            self.progress.emit(int((i / self.quantity) * 100), f"Генерация SSCC: {i}/{self.quantity}")
+                        # --- ИЗМЕНЕНИЕ: Отправляем сигнал только при изменении процента ---
+                        current_progress = int((i / self.quantity) * 100)
+                        if current_progress > last_progress:
+                            self.progress.emit(current_progress, f"Генерация SSCC: {i}/{self.quantity}")
+                            last_progress = current_progress
+
                         box_id, warning, gcp_for_sscc = read_and_increment_counter(cur, 'sscc_id')
                         if warning:
                             self.progress.emit(0, warning) # Отправляем предупреждение, не меняя основной прогресс
