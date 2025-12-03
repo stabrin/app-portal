@@ -3635,8 +3635,7 @@ class AdminWindowQt(QMainWindow):
         
         self.sscc_worker.progress.connect(lambda val, msg: (
             progress_dialog.setLabelText(msg),
-            progress_dialog.setValue(val) if val > 0 else None,
-            QApplication.processEvents()
+            progress_dialog.setValue(val) if val > 0 else None
         ))
         # --- ИСПРАВЛЕНИЕ: Передаем только текст ошибки, а диалог закрываем в основном потоке ---
         self.sscc_worker.error.connect(self.on_sscc_generation_error)
