@@ -3592,10 +3592,6 @@ class AdminWindowQt(QMainWindow):
         warehouse_name = self.warehouses_table.item(sel, 0).text()
         QMessageBox.information(self, "Печать", f"Вызов печати этикеток для склада: {warehouse_name} (в разработке)")
     def _open_generate_sscc_dialog(self):
-        """Открывает диалог для генерации SSCC."""
-        self._open_lenta_upload_dialog()
-
-    def _open_generate_sscc_dialog_old(self):
         """Открывает диалог для запроса количества SSCC и запускает генерацию."""
         dialog = QDialog(self)
         dialog.setWindowTitle("Генерация SSCC кодов")
