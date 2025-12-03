@@ -3620,6 +3620,7 @@ class AdminWindowQt(QMainWindow):
 
     def _generate_and_save_sscc(self, quantity: int):
         """Запускает генерацию SSCC в фоновом потоке и сохраняет результат."""
+        logging.debug(f"[_generate_and_save_sscc] Запуск генерации для {quantity} SSCC кодов.")
         # --- ИСПРАВЛЕНИЕ: Создаем диалог без родителя (parent=None), чтобы избежать конфликтов потоков ---
         # Это делает диалог независимым и безопасным для управления из фонового потока.
         progress_dialog = QProgressDialog("Генерация SSCC кодов...", "Отмена", 0, 100, None)
@@ -3630,6 +3631,7 @@ class AdminWindowQt(QMainWindow):
         progress_dialog.setAutoReset(False)
         progress_dialog.show()
 
+        logging.debug("[_generate_and_save_sscc] Создание и настройка QThread и SsccGeneratorWorker.")
         self.sscc_thread = QThread()
         self.sscc_worker = SsccGeneratorWorker(self.user_info, quantity)
         self.sscc_worker.moveToThread(self.sscc_thread)
@@ -3649,14 +3651,17 @@ class AdminWindowQt(QMainWindow):
         self.sscc_worker.finished.connect(self.sscc_worker.deleteLater)
         self.sscc_thread.finished.connect(self.sscc_thread.deleteLater)
 
+        logging.debug("[_generate_and_save_sscc] Запуск фонового потока...")
         self.sscc_thread.start()
 
         # Сохраняем ссылку на диалог, чтобы иметь к нему доступ в других слотах
         self.sscc_progress_dialog = progress_dialog
+        logging.debug("[_generate_and_save_sscc] Процесс генерации запущен.")
 
     @Slot(str)
     def on_sscc_generation_error(self, error_message: str):
         """Слот для обработки ошибки генерации SSCC."""
+        logging.error(f"[on_sscc_generation_error] Получена ошибка от воркера: {error_message}")
         if hasattr(self, 'sscc_progress_dialog') and self.sscc_progress_dialog:
             self.sscc_progress_dialog.cancel()
         QMessageBox.critical(self, "Ошибка генерации", error_message)
@@ -3664,6 +3669,7 @@ class AdminWindowQt(QMainWindow):
     @Slot(list)
     def on_sscc_generation_finished(self, ssccs: list):
         """Слот, который вызывается после успешной генерации SSCC."""
+        logging.debug(f"[on_sscc_generation_finished] Воркер завершил работу. Получено {len(ssccs)} кодов.")
         if hasattr(self, 'sscc_progress_dialog') and self.sscc_progress_dialog:
             self.sscc_progress_dialog.close()
         self._save_sscc_to_file(ssccs)
