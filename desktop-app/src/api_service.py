@@ -6,45 +6,80 @@ import logging
 import time
 import json
 import pandas as pd
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
 
 class ApiService:
     """
     Сервис для инкапсуляции всех взаимодействий с внешним API ДМкод.
+    Реализует "ленивую" загрузку и автоматическое обновление/повторную аутентификацию.
     """
-    def __init__(self, user_info, order_service=None):
+
+    def __init__(self, user_info: dict, order_service=None, reauth_handler: Optional[Callable[[], bool]] = None):
         """
         Инициализирует сервис.
         :param user_info: Словарь с данными пользователя.
         :param order_service: Экземпляр OrderService для работы с БД заказов.
+        :param reauth_handler: Функция обратного вызова для выполнения полной повторной аутентификации.
+                               Должна возвращать True в случае успеха.
         """
         self.user_info = user_info
         self.order_service = order_service
+        self.reauth_handler = reauth_handler
         api_config = self.user_info.get('client_api_config', {})
         self.api_base_url = api_config.get('api_base_url')
 
         if not self.api_base_url:
-            raise ValueError("URL для подключения к API не найден в конфигурации пользователя.")
+            # Не выбрасываем исключение, а логируем, т.к. API может не использоваться
+            logger.warning("URL для подключения к API не найден в конфигурации пользователя.")
 
-    def _get_auth_headers(self):
-        """Создает заголовок авторизации."""
-        access_token = self.user_info.get('api_access_token')
-        if not access_token:
-            raise ConnectionError("Отсутствует токен доступа к API.")
-        return {'Authorization': f'Bearer {access_token}'}
+    def authenticate(self) -> bool:
+        """
+        Выполняет аутентификацию в API, используя учетные данные из user_info.
+        Сохраняет токены в user_info.
+        Возвращает True в случае успеха, иначе выбрасывает исключение.
+        """
+        api_config = self.user_info.get('client_api_config', {})
+        api_email = api_config.get('api_email')
+        api_password = api_config.get('api_password')
 
-    def refresh_token(self):
+        if not self.api_base_url or not api_email or not api_password:
+            logger.error("API credentials (URL, email, password) are not fully configured.")
+            raise ConnectionError("Учетные данные API не настроены.")
+
+        logger.info(f"Попытка аутентификации в API для пользователя {api_email}...")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/user/token"
+            # В документации используется GET, но для передачи email/password безопаснее POST
+            response = requests.post(url, json={'email': api_email, 'password': api_password}, timeout=15)
+            response.raise_for_status()
+            
+            new_tokens = response.json()
+            self.user_info['api_access_token'] = new_tokens.get('access')
+            self.user_info['api_refresh_token'] = new_tokens.get('refresh')
+            
+            if not self.user_info['api_access_token']:
+                raise ValueError("API did not return an access token.")
+
+            logger.info("Аутентификация в API прошла успешно. Токены получены.")
+            return True
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Не удалось получить токен: {e}", exc_info=True)
+            raise ConnectionError("Не удалось выполнить аутентификацию в API.") from e
+
+    def refresh_token(self) -> bool:
         """Обновляет access и refresh токены, используя текущий refresh токен."""
         refresh_token = self.user_info.get('api_refresh_token')
         if not refresh_token:
-            logger.error("Refresh token не найден. Невозможно обновить токен доступа.")
+            logger.warning("Refresh token не найден. Невозможно обновить токен доступа.")
             raise ConnectionError("Refresh token отсутствует.")
 
         logger.info("Токен доступа истек или невалиден. Попытка обновления...")
         try:
             url = f"{self.api_base_url.rstrip('/')}/user/token/refresh"
-            response = requests.post(url, json={'refresh': refresh_token})
+            response = requests.post(url, json={'refresh': refresh_token}, timeout=10)
             response.raise_for_status()
             
             new_tokens = response.json()
@@ -55,20 +90,81 @@ class ApiService:
             return True
         except requests.exceptions.RequestException as e:
             logger.error(f"Не удалось обновить токен: {e}", exc_info=True)
+            # Очищаем старые токены, так как они, вероятно, недействительны
+            self.user_info['api_access_token'] = None
+            self.user_info['api_refresh_token'] = None
             raise ConnectionError("Не удалось обновить токен. Требуется повторная авторизация.") from e
 
-    def _api_request(self, method, url, **kwargs):
-        """Обертка для всех API-запросов с автоматическим обновлением токена."""
+    def _get_auth_headers(self) -> Optional[dict]:
+        """Создает заголовок авторизации, если токен существует."""
+        access_token = self.user_info.get('api_access_token')
+        if not access_token:
+            return None
+        return {'Authorization': f'Bearer {access_token}'}
+
+    def _ensure_token(self):
+        """Гарантирует наличие действительного токена, обновляя или получая его заново."""
+        if self._get_auth_headers():
+            return
+
+        logger.info("Токен доступа отсутствует. Попытка восстановить сессию...")
+        try:
+            # Сначала пытаемся обновить. Это сработает, если есть действительный refresh-токен.
+            if self.user_info.get('api_refresh_token'):
+                self.refresh_token()
+                logger.info("Сессия восстановлена с помощью refresh-токена.")
+                return
+        except ConnectionError:
+            # Если refresh не удался, переходим к полной аутентификации.
+            logger.warning("Не удалось обновить токен. Требуется полная аутентификация.")
+
+        # Если дошли до сюда, нужна полная аутентификация.
+        if self.reauth_handler:
+            logger.info("Вызов обработчика повторной аутентификации...")
+            if not self.reauth_handler():
+                raise ConnectionError("Повторная аутентификация не удалась или была отменена.")
+        else:
+            # Если обработчик не предоставлен, пытаемся аутентифицироваться напрямую.
+            logger.info("Обработчик не найден, попытка прямой аутентификации...")
+            self.authenticate()
+            
+        if not self.user_info.get('api_access_token'):
+             raise ConnectionError("Не удалось получить токен доступа после всех попыток.")
+
+
+    def _api_request(self, method, url, is_retry=False, **kwargs):
+        """
+        Обертка для всех API-запросов с ленивой загрузкой и автоматическим
+        обновлением/повторной аутентификацией.
+        """
+        if not self.api_base_url:
+            raise ConnectionError("URL API не настроен.")
+            
+        # 1. Гарантируем наличие токена перед запросом.
+        self._ensure_token()
+
+        # 2. Выполняем запрос.
         try:
             headers = self._get_auth_headers()
+            if headers is None:
+                 # Этого не должно произойти, если _ensure_token отработал корректно
+                 raise ConnectionError("Не удалось сформировать заголовок авторизации.")
+            
             response = requests.request(method, url, headers=headers, **kwargs)
             response.raise_for_status()
             return response
         except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401: # Unauthorized
-                self.refresh_token()
-                headers = self._get_auth_headers() # Получаем новые заголовки
-                return requests.request(method, url, headers=headers, **kwargs)
+            # 3. Обрабатываем ошибку авторизации.
+            if e.response.status_code == 401 and not is_retry:
+                logger.warning("Запрос не авторизован (401). Попытка обновить токен и повторить.")
+                # Очищаем недействительный токен
+                self.user_info['api_access_token'] = None
+                # Рекурсивный вызов, который снова пройдет через _ensure_token.
+                # is_retry=True предотвращает бесконечный цикл.
+                return self._api_request(method, url, is_retry=True, **kwargs)
+            
+            # Если это не 401 или если это уже повторная попытка, пробрасываем ошибку.
+            logger.error(f"Ошибка API запроса ({method.upper()} {url}): {e.response.status_code} - {e.response.text}")
             raise
 
     # --- НОВЫЙ ВЫСОКОУРОВНЕВЫЙ МЕТОД ---

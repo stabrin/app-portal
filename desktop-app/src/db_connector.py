@@ -149,37 +149,37 @@ def get_main_db_connection():
 
 @contextmanager
 def get_client_db_connection(user_info: Dict[str, Any]):
+    """
+    Контекстный менеджер для получения соединения с БД клиента из пула.
+    Обеспечивает корректное управление соединениями, вкл. обработку "протухших" соединений.
+    """
     db_config = user_info.get("client_db_config")
     if not db_config:
         raise ValueError("Нет конфига БД клиента")
+
     client_id = db_config.get('id')
     pool_key = db_config.get('db_name') if client_id == 0 else client_id
 
     client_pool = get_client_pool(pool_key, db_config)
-    max_retries = 3
-    last_exception = None
-
-    for attempt in range(max_retries):
-        conn = None
-        try:
-            conn = client_pool.getconn()
-            yield conn
-            # Если код внутри 'with' выполнился без ошибок, выходим из цикла
-            return
-        except psycopg2.OperationalError as e:
-            last_exception = e
-            logging.warning(f"Потеряно соединение с БД (попытка {attempt + 1}/{max_retries}): {e}")
-            if conn:
-                # Закрываем "сломанное" соединение, чтобы пул создал новое
-                client_pool.putconn(conn, close=True)
-            if attempt < max_retries - 1:
-                import time
-                time.sleep(0.5) # Пауза перед повторной попыткой
-        finally:
-            if conn and not conn.closed:
-                client_pool.putconn(conn)
-    # Если все попытки провалились, пробрасываем последнюю ошибку
-    raise ConnectionError(f"Не удалось подключиться к БД после {max_retries} попыток.") from last_exception
+    conn = None
+    try:
+        conn = client_pool.getconn()
+        yield conn
+    except psycopg2.OperationalError as e:
+        logging.warning(f"Проблема с соединением с БД (OperationalError): {e}. Соединение будет пересоздано при следующем запросе.")
+        if conn:
+            # Закрываем "сломанное" соединение, чтобы пул удалил его.
+            # `putconn` с `close=True` именно это и делает.
+            client_pool.putconn(conn, close=True)
+            conn = None  # Устанавливаем в None, чтобы finally его не возвращал снова
+        # Пробрасываем исключение дальше. Вызывающий код должен обработать сбой операции.
+        # Оборачиваем в ConnectionError для ясности.
+        raise ConnectionError("Операция с БД не удалась из-за проблемы с соединением. Пожалуйста, повторите операцию.") from e
+    finally:
+        # Если conn не None, значит исключения не было (или было не OperationalError),
+        # и соединение нужно вернуть в пул.
+        if conn:
+            client_pool.putconn(conn)
 
 # --- ВОССТАНОВЛЕННАЯ ФУНКЦИЯ ---
 @contextmanager

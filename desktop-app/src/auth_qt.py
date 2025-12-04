@@ -173,18 +173,7 @@ class AuthWindow(QMainWindow):
                         'api_password': settings.get('API_PASSWORD')
                     }
                 }
-                # Попытка получить токен API (если настроен)
-                try:
-                    api_base = settings.get('API_BASE_URL')
-                    if api_base:
-                        token_url = f"{api_base.rstrip('/')}/user/token"
-                        resp = requests.get(token_url, json={'email': settings.get('API_EMAIL'), 'password': settings.get('API_PASSWORD')}, timeout=10)
-                        resp.raise_for_status()
-                        tokens = resp.json()
-                        user_info['api_access_token'] = tokens.get('access')
-                        user_info['api_refresh_token'] = tokens.get('refresh')
-                except Exception:
-                    logging.exception('API token fetch failed in local auth')
+                # Токен API больше не получается здесь, только конфигурация
                 return user_info
         return None
 
@@ -207,16 +196,7 @@ class AuthWindow(QMainWindow):
                     'db_name': db_name, 'db_host': db_host, 'db_port': db_port, 'db_user': db_user, 'db_password': db_password, 'db_ssl_cert': db_ssl_cert, 'id': client_id
                 }
                 user_info['client_api_config'] = {'api_base_url': api_base_url, 'api_email': api_email, 'api_password': api_password}
-                try:
-                    if api_base_url:
-                        token_url = f"{api_base_url.rstrip('/')}/user/token"
-                        resp = requests.get(token_url, json={'email': api_email, 'password': api_password}, timeout=10)
-                        resp.raise_for_status()
-                        tokens = resp.json()
-                        user_info['api_access_token'] = tokens.get('access')
-                        user_info['api_refresh_token'] = tokens.get('refresh')
-                except Exception:
-                    logging.exception('API token fetch failed in online auth')
+                # Токен API больше не получается здесь
             return user_info
         return None
 

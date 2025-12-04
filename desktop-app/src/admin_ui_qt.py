@@ -772,11 +772,32 @@ class AdminWindowQt(QMainWindow):
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
         self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
         self.order_service = OrderService(self.user_info)
-        self.api_service = ApiService(self.user_info, self.order_service)
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+        # --- ИЗМЕНЕНИЕ: Передаем обработчик для повторной аутентификации ---
+        self.api_service = ApiService(self.user_info, self.order_service, reauth_handler=self._reauthenticate_api)
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
         self._build_ui()
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
         self._setup_api_status_checker() # Настраиваем и запускаем проверку API
+
+    def _reauthenticate_api(self):
+        """
+        Handles the full re-authentication flow for the API.
+        Called by ApiService when a refresh token is invalid.
+        Returns True on success, False on failure.
+        """
+        logging.info("Запуск процесса повторной аутентификации в API...")
+        try:
+            # Метод authenticate использует учетные данные из self.user_info.
+            success = self.api_service.authenticate()
+            if success:
+                QMessageBox.information(self, "Аутентификация API", "Аутентификация в API прошла успешно. Токены обновлены.")
+                self._update_api_status() # Обновляем индикатор
+            return success
+        except Exception as e:
+            logger.error(f"Повторная аутентификация в API не удалась: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка аутентификации API", f"Не удалось повторно пройти аутентификацию в API.\n\nОшибка: {e}\n\nПожалуйста, проверьте настройки API или перезапустите приложение.")
+            self._set_api_status_color(False) # Обновляем индикатор
+            return False
 
     def _build_ui(self):
         main_widget = QWidget()
