@@ -3088,6 +3088,125 @@ class AdminWindowQt(QMainWindow):
         # Эта функция потребует доработки для корректной загрузки JSON
         QMessageBox.information(self, "В разработке", "Импорт сценариев в разработке.")
 
+    def _build_print_management_page(self):
+        """Создает страницу для управления макетами печати."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        controls_layout = QHBoxLayout()
+        btn_create = QPushButton("Создать макет")
+        btn_create.clicked.connect(self._create_new_layout)
+        btn_edit = QPushButton("Редактировать макет")
+        btn_edit.clicked.connect(self._edit_selected_layout)
+        btn_delete = QPushButton("Удалить макет")
+        btn_delete.clicked.connect(self._delete_selected_layout)
+        btn_refresh = QPushButton("Обновить")
+        btn_refresh.clicked.connect(self._refresh_print_layouts)
+        
+        controls_layout.addWidget(btn_create)
+        controls_layout.addWidget(btn_edit)
+        controls_layout.addWidget(btn_delete)
+        controls_layout.addStretch()
+        controls_layout.addWidget(btn_refresh)
+        layout.addLayout(controls_layout)
+
+        self.print_layouts_table = QTableWidget(0, 2)
+        self.print_layouts_table.setHorizontalHeaderLabels(["Название макета", "Размер (мм)"])
+        self.print_layouts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.print_layouts_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.print_layouts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.print_layouts_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.print_layouts_table.doubleClicked.connect(self._edit_selected_layout)
+        layout.addWidget(self.print_layouts_table)
+
+        # Первая загрузка данных
+        self._refresh_print_layouts()
+
+        return widget
+
+    def _refresh_print_layouts(self):
+        """Загружает список макетов в таблицу."""
+        try:
+            self.print_layouts_table.setRowCount(0)
+            layouts = self.catalog_service.get_print_layouts()
+            self.print_layouts_table.setRowCount(len(layouts))
+            for i, layout_data in enumerate(layouts):
+                name = layout_data.get('name', '')
+                size_str = f"{layout_data.get('width_mm', '?')} x {layout_data.get('height_mm', '?')}"
+                
+                item_name = QTableWidgetItem(name)
+                # Сохраняем все данные макета в элементе таблицы
+                item_name.setData(Qt.UserRole, layout_data) 
+                
+                self.print_layouts_table.setItem(i, 0, item_name)
+                self.print_layouts_table.setItem(i, 1, QTableWidgetItem(size_str))
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты печати: {e}")
+
+    def _create_new_layout(self):
+        """Открывает диалог для создания нового макета."""
+        name, ok = QInputDialog.getText(self, "Новый макет", "Введите название макета:")
+        if not ok or not name:
+            return
+
+        size_str, ok = QInputDialog.getText(self, "Размеры макета", "Введите размеры этикетки (Ширина x Высота) в мм:", text="100 x 50")
+        if not ok or not size_str:
+            return
+
+        try:
+            width_str, height_str = size_str.lower().split('x')
+            width_mm = int(width_str.strip())
+            height_mm = int(height_str.strip())
+        except (ValueError, IndexError):
+            QMessageBox.showerror("Ошибка", "Неверный формат. Введите размеры в формате '100 x 50'.")
+            return
+            
+        new_layout_data = {
+            "name": name,
+            "width_mm": width_mm,
+            "height_mm": height_mm,
+            "objects": []
+        }
+        self._open_layout_editor(new_layout_data)
+
+    def _edit_selected_layout(self):
+        """Открывает редактор для выбранного макета."""
+        selected_items = self.print_layouts_table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Внимание", "Выберите макет для редактирования.")
+            return
+        
+        layout_data = selected_items[0].data(Qt.UserRole)
+        self._open_layout_editor(layout_data)
+
+    def _open_layout_editor(self, layout_data):
+        """Открывает диалог редактора макетов."""
+        if not layout_data:
+            return
+        # Создаем глубокую копию, чтобы изменения в диалоге не затрагивали данные в таблице до сохранения
+        data_copy = json.loads(json.dumps(layout_data))
+        dialog = LabelEditorDialog(self, self.user_info, self.catalog_service, data_copy)
+        if dialog.exec():
+            self._refresh_print_layouts()
+
+    def _delete_selected_layout(self):
+        """Удаляет выбранный макет."""
+        selected_items = self.print_layouts_table.selectedItems()
+        if not selected_items:
+            QMessageBox.warning(self, "Внимание", "Выберите макет для удаления.")
+            return
+
+        layout_data = selected_items[0].data(Qt.UserRole)
+        layout_name = layout_data.get('name')
+
+        if QMessageBox.question(self, "Подтверждение", f"Вы уверены, что хотите удалить макет '{layout_name}'?") == QMessageBox.Yes:
+            try:
+                self.catalog_service.delete_print_layout(layout_name)
+                self._refresh_print_layouts()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить макет: {e}")
+
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
         try:
