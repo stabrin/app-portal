@@ -941,30 +941,43 @@ class LabelEditorDialog(QDialog):
         self._redraw_canvas() # Перерисовываем, чтобы подсветить выделение
 
     def _update_properties_panel(self):
-        if self.selected_object_id is None or self.selected_object_id >= len(self.template.get('objects', [])):
+        logging.debug(f"Updating properties panel for selected_id: {self.selected_object_id}")
+        try:
+            if self.selected_object_id is None or self.selected_object_id >= len(self.template.get('objects', [])):
+                self.prop_x.clear()
+                self.prop_y.clear()
+                self.prop_w.clear()
+                self.prop_h.clear()
+                self.prop_x.setEnabled(False)
+                self.prop_y.setEnabled(False)
+                self.prop_w.setEnabled(False)
+                self.prop_h.setEnabled(False)
+                logging.debug("Properties panel cleared and disabled.")
+                return
+
+            self.prop_x.setEnabled(True)
+            self.prop_y.setEnabled(True)
+            self.prop_w.setEnabled(True)
+            self.prop_h.setEnabled(True)
+
+            obj_data = self.template['objects'][self.selected_object_id]
+            logging.debug(f"Loading data for object {self.selected_object_id}: {obj_data}")
+            self.prop_x.setText(str(obj_data.get('x_mm', '')))
+            self.prop_y.setText(str(obj_data.get('y_mm', '')))
+            self.prop_w.setText(str(obj_data.get('width_mm', '')))
+            self.prop_h.setText(str(obj_data.get('height_mm', '')))
+            logging.debug("Properties panel updated successfully.")
+        except Exception as e:
+            logging.error(f"FATAL: Crash in _update_properties_panel: {e}", exc_info=True)
+            # В случае ошибки, очищаем панель, чтобы избежать дальнейших проблем
             self.prop_x.clear()
             self.prop_y.clear()
             self.prop_w.clear()
             self.prop_h.clear()
-            self.prop_x.setEnabled(False)
-            self.prop_y.setEnabled(False)
-            self.prop_w.setEnabled(False)
-            self.prop_h.setEnabled(False)
-            return
-
-        self.prop_x.setEnabled(True)
-        self.prop_y.setEnabled(True)
-        self.prop_w.setEnabled(True)
-        self.prop_h.setEnabled(True)
-
-        obj_data = self.template['objects'][self.selected_object_id]
-        self.prop_x.setText(str(obj_data.get('x_mm', '')))
-        self.prop_y.setText(str(obj_data.get('y_mm', '')))
-        self.prop_w.setText(str(obj_data.get('width_mm', '')))
-        self.prop_h.setText(str(obj_data.get('height_mm', '')))
 
     def _apply_properties(self):
         if self.selected_object_id is None: return
+        logging.debug(f"Applying properties for object_id: {self.selected_object_id}")
         try:
             obj_data = self.template['objects'][self.selected_object_id]
             obj_data['x_mm'] = float(self.prop_x.text())
@@ -973,18 +986,24 @@ class LabelEditorDialog(QDialog):
             obj_data['height_mm'] = float(self.prop_h.text())
             #...
             self._redraw_canvas()
+            logging.debug("Properties applied and canvas redrawn.")
         except (ValueError, IndexError) as e:
             QMessageBox.warning(self, "Ошибка", f"Некорректные данные в свойствах: {e}")
             
     def _on_scene_selection_changed(self):
+        logging.debug("Scene selection changed.")
         selected_items = self.scene.selectedItems()
         if not selected_items:
+            logging.debug("No items selected.")
             self.selected_object_id = None
         else:
-            # Берем первый выделенный элемент
             item = selected_items[0]
             if isinstance(item, PrintableObjectItem):
                 self.selected_object_id = item.object_id
+                logging.debug(f"Item selected: id={self.selected_object_id}")
+            else:
+                self.selected_object_id = None
+                logging.debug("A non-PrintableObjectItem was selected.")
         
         self._update_properties_panel()
         self._redraw_canvas() # Перерисовываем для обновления подсветки
