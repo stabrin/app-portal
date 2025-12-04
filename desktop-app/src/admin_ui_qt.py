@@ -3,10 +3,11 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QTextEdit,
     QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter, QTabWidget, QProgressDialog, QDialogButtonBox, QCheckBox,
     QGroupBox, QRadioButton, QSpinBox,
-    QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView
+    QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView,
+    QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
 )
 from PySide6.QtCore import Qt, Slot, QDate, QTimer, QThread, Signal, QObject
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPen, QPainter
 import sys
 import traceback
 import logging
@@ -757,39 +758,244 @@ class ScenarioEditorDialog(QDialog):
         super().accept()
 
 
+# --- Новые классы для редактора макетов ---
+class PrintableObjectItem(QGraphicsRectItem):
+    """Кастомный элемент на сцене, представляющий объект на этикетке."""
+    def __init__(self, obj_data, object_id, scale):
+        self.obj_data = obj_data
+        self.object_id = object_id
+        self.scale = scale
+
+        x = obj_data.get('x_mm', 0) * scale
+        y = obj_data.get('y_mm', 0) * scale
+        w = obj_data.get('width_mm', 10) * scale
+        h = obj_data.get('height_mm', 10) * scale
+        super().__init__(x, y, w, h)
+
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        
+        # Визуальное оформление
+        obj_type = obj_data.get('type')
+        if obj_type == 'text':
+            self.setBrush(QColor("#fff8dc")) # Cornsilk
+        elif obj_type == 'barcode':
+            self.setBrush(QColor("#add8e6")) # LightBlue
+        elif obj_type == 'image':
+            self.setBrush(QColor("#d0f0c0")) # TeaGreen
+        else:
+            self.setBrush(QColor("#f0f0f0"))
+
+        self.setPen(QPen(QColor("gray"), 1))
+
+        # Добавляем текст внутрь
+        self.text_item = QGraphicsTextItem(self._get_display_text(), self)
+        self.text_item.setDefaultTextColor(QColor("black"))
+        # Центрируем текст
+        br = self.text_item.boundingRect()
+        self.text_item.setPos(x + (w - br.width()) / 2, y + (h - br.height()) / 2)
+
+    def _get_display_text(self):
+        obj_type = self.obj_data.get('type')
+        if obj_type == 'barcode':
+            return self.obj_data.get('barcode_type', 'BARCODE')
+        elif obj_type == 'text':
+            if self.obj_data.get('is_custom_text'):
+                return f"'{self.obj_data.get('data_source', '')}'"
+            return self.obj_data.get('data_source', 'text')
+        return obj_type or "object"
+    
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            # Обновляем координаты в исходном словаре данных
+            self.obj_data['x_mm'] = round(self.pos().x() / self.scale, 2)
+            self.obj_data['y_mm'] = round(self.pos().y() / self.scale, 2)
+            # Сообщаем родительскому диалогу об изменении
+            if self.scene() and hasattr(self.scene().parent(), 'on_item_moved'):
+                 self.scene().parent().on_item_moved(self.object_id)
+        return super().itemChange(change, value)
+
+
 class LabelEditorDialog(QDialog):
     """Диалоговое окно для визуального редактора макетов этикеток."""
     def __init__(self, parent, user_info, catalog_service, layout_data=None):
         super().__init__(parent)
         self.user_info = user_info
         self.catalog_service = catalog_service
-        # Работаем с копией, чтобы изменения можно было отменить
-        self.template = json.loads(json.dumps(layout_data or {}))
-        
-        is_new = not bool(layout_data)
-        title = "Новый макет" if is_new else f"Редактор: {self.template.get('name', '')}"
+        self.is_new_layout = not bool(layout_data)
+        self.template = json.loads(json.dumps(layout_data or {})) # Глубокая копия
+
+        title = "Новый макет" if self.is_new_layout else f"Редактор: {self.template.get('name', '')}"
         self.setWindowTitle(title)
         self.setMinimumSize(1200, 800)
 
-        # Здесь будет UI редактора
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"Редактор для '{self.template.get('name')}' (в разработке)"))
+        self.canvas_scale = 5
+        self.selected_object_id = None
         
-        # TODO: Перенести сюда всю логику из printing_service.LabelEditorWindow, 
-        # используя PySide6 виджеты (QGraphicsView, etc.)
-        
+        self._build_editor_ui()
+        self._load_template_to_ui()
+        self._redraw_canvas()
+
+    def _build_editor_ui(self):
+        main_layout = QHBoxLayout(self)
+        splitter = QSplitter(Qt.Horizontal)
+        main_layout.addWidget(splitter)
+
+        controls_widget = QWidget()
+        controls_layout = QVBoxLayout(controls_widget)
+        controls_widget.setMaximumWidth(350)
+
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
 
-    def accept(self):
-        """Сохраняет макет при нажатии на 'Save'."""
+        tools_group = QGroupBox("Инструменты")
+        tools_layout = QVBoxLayout(tools_group)
+        self.btn_add_text = QPushButton("Добавить Текст")
+        self.btn_add_text.clicked.connect(lambda: self._add_object('text'))
+        self.btn_add_qr = QPushButton("Добавить QR-код")
+        self.btn_add_qr.clicked.connect(lambda: self._add_object('barcode', 'QR'))
+        self.btn_add_dm = QPushButton("Добавить DataMatrix")
+        self.btn_add_dm.clicked.connect(lambda: self._add_object('barcode', 'DataMatrix'))
+        
+        tools_layout.addWidget(self.btn_add_text)
+        tools_layout.addWidget(self.btn_add_qr)
+        tools_layout.addWidget(self.btn_add_dm)
+        tools_layout.addStretch()
+
+        props_group = QGroupBox("Свойства объекта")
+        props_layout = QFormLayout(props_group)
+        self.prop_x = QLineEdit()
+        self.prop_y = QLineEdit()
+        self.prop_w = QLineEdit()
+        self.prop_h = QLineEdit()
+        self.prop_data_source = QComboBox()
+        props_layout.addRow("X (мм):", self.prop_x)
+        props_layout.addRow("Y (мм):", self.prop_y)
+        props_layout.addRow("Ширина (мм):", self.prop_w)
+        props_layout.addRow("Высота (мм):", self.prop_h)
+        props_layout.addRow("Источник:", self.prop_data_source)
+        
+        btn_apply_props = QPushButton("Применить свойства")
+        btn_apply_props.clicked.connect(self._apply_properties)
+        props_layout.addWidget(btn_apply_props)
+
+        controls_layout.addWidget(tools_group)
+        controls_layout.addWidget(props_group)
+        controls_layout.addStretch()
+        controls_layout.addWidget(button_box)
+
+        canvas_widget = QWidget()
+        canvas_layout = QVBoxLayout(canvas_widget)
+        self.scene = QGraphicsScene()
+        self.scene.selectionChanged.connect(self._on_scene_selection_changed)
+        self.view = QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.Antialiasing)
+        canvas_layout.addWidget(self.view)
+
+        splitter.addWidget(controls_widget)
+        splitter.addWidget(canvas_widget)
+        splitter.setSizes([300, 900])
+
+    def _redraw_canvas(self):
+        self.scene.clear()
+        if not self.template: return
         try:
-            # TODO: Здесь будет логика сбора данных из виджетов редактора в self.template
-            # Например: self.template['name'] = self.name_edit.text()
+            width_px = float(self.template['width_mm']) * self.canvas_scale
+            height_px = float(self.template['height_mm']) * self.canvas_scale
+            self.scene.setBackgroundBrush(QColor("lightgrey"))
+            label_rect = self.scene.addRect(0, 0, width_px, height_px, Qt.NoPen, QColor("white"))
+            label_rect.setZValue(-1)
+
+            for i, obj_data in enumerate(self.template.get('objects', [])):
+                self._draw_object(obj_data, i)
+        except (KeyError, ValueError) as e:
+            logging.error(f"Ошибка отрисовки холста: {e}")
+
+    def _draw_object(self, obj_data, object_id):
+        item = PrintableObjectItem(obj_data, object_id, self.canvas_scale)
+        self.scene.addItem(item)
+        if self.selected_object_id == object_id:
+            item.setSelected(True)
+
+    def _add_object(self, obj_type, barcode_type=None):
+        new_object = { "type": obj_type, "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 20 }
+        if obj_type == 'barcode':
+            new_object['barcode_type'] = barcode_type
+            new_object['data_source'] = '...scan...'
+        elif obj_type == 'text':
+            new_object['data_source'] = 'ap_workplaces.warehouse_name'
+        
+        if 'objects' not in self.template: self.template['objects'] = []
+        self.template['objects'].append(new_object)
+        self._redraw_canvas()
+
+    def _load_template_to_ui(self):
+        # Выбираем первый объект по умолчанию, если он есть
+        if self.template.get('objects'):
+            self.selected_object_id = 0
+        else:
+            self.selected_object_id = None
+        self._update_properties_panel()
+        self._redraw_canvas() # Перерисовываем, чтобы подсветить выделение
+
+    def _update_properties_panel(self):
+        if self.selected_object_id is None or self.selected_object_id >= len(self.template.get('objects', [])):
+            self.prop_x.clear()
+            self.prop_y.clear()
+            self.prop_w.clear()
+            self.prop_h.clear()
+            self.prop_x.setEnabled(False)
+            self.prop_y.setEnabled(False)
+            self.prop_w.setEnabled(False)
+            self.prop_h.setEnabled(False)
+            return
+
+        self.prop_x.setEnabled(True)
+        self.prop_y.setEnabled(True)
+        self.prop_w.setEnabled(True)
+        self.prop_h.setEnabled(True)
+
+        obj_data = self.template['objects'][self.selected_object_id]
+        self.prop_x.setText(str(obj_data.get('x_mm', '')))
+        self.prop_y.setText(str(obj_data.get('y_mm', '')))
+        self.prop_w.setText(str(obj_data.get('width_mm', '')))
+        self.prop_h.setText(str(obj_data.get('height_mm', '')))
+
+    def _apply_properties(self):
+        if self.selected_object_id is None: return
+        try:
+            obj_data = self.template['objects'][self.selected_object_id]
+            obj_data['x_mm'] = float(self.prop_x.text())
+            obj_data['y_mm'] = float(self.prop_y.text())
+            obj_data['width_mm'] = float(self.prop_w.text())
+            obj_data['height_mm'] = float(self.prop_h.text())
+            #...
+            self._redraw_canvas()
+        except (ValueError, IndexError) as e:
+            QMessageBox.warning(self, "Ошибка", f"Некорректные данные в свойствах: {e}")
             
-            # Пока что просто сохраняем то, что есть
+    def _on_scene_selection_changed(self):
+        selected_items = self.scene.selectedItems()
+        if not selected_items:
+            self.selected_object_id = None
+        else:
+            # Берем первый выделенный элемент
+            item = selected_items[0]
+            if isinstance(item, PrintableObjectItem):
+                self.selected_object_id = item.object_id
+        
+        self._update_properties_panel()
+        self._redraw_canvas() # Перерисовываем для обновления подсветки
+
+    def on_item_moved(self, object_id):
+        """Слот, вызываемый из PrintableObjectItem при перемещении."""
+        if self.selected_object_id == object_id:
+            self._update_properties_panel()
+            
+    def accept(self):
+        try:
             if not self.template.get('name'):
                 QMessageBox.warning(self, "Ошибка", "Название макета не может быть пустым.")
                 return
