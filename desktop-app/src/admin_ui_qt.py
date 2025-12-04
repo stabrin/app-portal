@@ -149,18 +149,20 @@ class OrderEditorFrameQt(QWidget):
             main_layout.addWidget(self.details_table)
 
         else: # --- Старая логика для неархивных заказов ---
-            # --- Ряд 1: Основные операции с детализацией ---
+            # --- Ряд 1: Основные операции ---
             controls_frame_1 = QHBoxLayout()
+            
+            # --- ИЗМЕНЕНИЕ: Поле для комментария (номер контейнера) ---
+            self.comment_label = QLabel("Комментарий (контейнер):")
+            self.comment_edit = QLineEdit()
+            
             btn_save = QPushButton("Сохранить")
             btn_save.clicked.connect(self._save_changes)
-            btn_export = QPushButton("Выгрузить")
-            btn_export.clicked.connect(self._export_details_to_excel)
-            btn_import = QPushButton("Загрузить")
-            btn_import.clicked.connect(self._import_details_from_excel)
+
+            controls_frame_1.addWidget(self.comment_label)
+            controls_frame_1.addWidget(self.comment_edit, 1) # Растягиваем поле ввода
             controls_frame_1.addWidget(btn_save)
-            controls_frame_1.addWidget(btn_export)
-            controls_frame_1.addWidget(btn_import)
-            controls_frame_1.addStretch()
+            
             main_layout.addLayout(controls_frame_1)
 
             # --- Ряд 2: Операции с товарами и Bartender ---
@@ -210,6 +212,12 @@ class OrderEditorFrameQt(QWidget):
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
+            # --- ИЗМЕНЕНИЕ: Загружаем не только детали, но и основную информацию о заказе ---
+            if not self.is_archive:
+                order_data = self.order_service.get_order_by_id(self.order_id)
+                if order_data: # Добавляем проверку, что данные заказа получены
+                    self.comment_edit.setText(order_data.get('notes', ''))
+
             details = self.order_service.get_order_details(self.order_id)
             for item in details:
                 row = self.details_table.rowCount()
@@ -221,17 +229,34 @@ class OrderEditorFrameQt(QWidget):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить детали заказа: {e}")
 
     def _save_changes(self):
-        updates = []
+        # --- ИЗМЕНЕНИЕ: Собираем данные не только из таблицы, но и из поля комментария ---
+        
+        # 1. Собираем данные из таблицы детализации
+        detail_updates = []
         for row in range(self.details_table.rowCount()):
             row_data = {}
             for col, key in enumerate(self.details_cols):
                 item = self.details_table.item(row, col)
                 row_data[key] = item.text() if item else None
-            updates.append(row_data)
+            # Убедимся, что ID есть в данных, он нужен для UPDATE
+            if 'id' not in row_data or not row_data['id']:
+                 id_item = self.details_table.item(row, self.details_cols.index('id'))
+                 if id_item:
+                     row_data['id'] = id_item.text()
+            detail_updates.append(row_data)
         
+        # 2. Получаем комментарий
+        comment_text = self.comment_edit.text()
+
         try:
-            self.order_service.save_order_details(self.order_id, updates)
+            # 3. Вызываем обновленный сервисный метод для сохранения всего вместе
+            self.order_service.save_order_changes(self.order_id, detail_updates, comment_text)
             QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
+            
+            # 4. Обновляем список заказов, чтобы отобразить новый комментарий
+            if self.main_app_window:
+                 self.main_app_window.load_orders(is_archive=self.is_archive)
+
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
 

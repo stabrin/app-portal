@@ -49,10 +49,14 @@ class OrderService:
                 cur.execute("SELECT * FROM dmkod_aggregation_details WHERE order_id = %s ORDER BY id", (order_id,))
                 return cur.fetchall()
 
-    def save_order_details(self, order_id: int, updates: list):
-        """Сохраняет изменения в детализации заказа."""
+    def save_order_changes(self, order_id: int, updates: list, notes: str):
+        """Сохраняет изменения в детализации и комментарии к заказу в одной транзакции."""
         with self._get_connection() as conn:
             with conn.cursor() as cur:
+                # 1. Обновляем комментарий в основной таблице orders
+                cur.execute("UPDATE orders SET notes = %s WHERE id = %s", (notes, order_id))
+                
+                # 2. Обновляем строки в детализации
                 for item in updates:
                     cur.execute("""
                         UPDATE dmkod_aggregation_details SET
