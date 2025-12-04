@@ -757,6 +757,49 @@ class ScenarioEditorDialog(QDialog):
         super().accept()
 
 
+class LabelEditorDialog(QDialog):
+    """Диалоговое окно для визуального редактора макетов этикеток."""
+    def __init__(self, parent, user_info, catalog_service, layout_data=None):
+        super().__init__(parent)
+        self.user_info = user_info
+        self.catalog_service = catalog_service
+        # Работаем с копией, чтобы изменения можно было отменить
+        self.template = json.loads(json.dumps(layout_data or {}))
+        
+        is_new = not bool(layout_data)
+        title = "Новый макет" if is_new else f"Редактор: {self.template.get('name', '')}"
+        self.setWindowTitle(title)
+        self.setMinimumSize(1200, 800)
+
+        # Здесь будет UI редактора
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Редактор для '{self.template.get('name')}' (в разработке)"))
+        
+        # TODO: Перенести сюда всю логику из printing_service.LabelEditorWindow, 
+        # используя PySide6 виджеты (QGraphicsView, etc.)
+        
+        button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def accept(self):
+        """Сохраняет макет при нажатии на 'Save'."""
+        try:
+            # TODO: Здесь будет логика сбора данных из виджетов редактора в self.template
+            # Например: self.template['name'] = self.name_edit.text()
+            
+            # Пока что просто сохраняем то, что есть
+            if not self.template.get('name'):
+                QMessageBox.warning(self, "Ошибка", "Название макета не может быть пустым.")
+                return
+
+            self.catalog_service.upsert_print_layout(self.template)
+            super().accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить макет: {e}")
+
+
 class AdminWindowQt(QMainWindow):
     """Переносная версия tkinter админ-интерфейса на PySide6 с левым меню и правой стеком контента."""
     def __init__(self, user_info: dict):
@@ -871,9 +914,9 @@ class AdminWindowQt(QMainWindow):
         self.page_catalogs = self._build_catalogs_page()
         self.content_stack.addWidget(self.page_catalogs)
 
-        # Страница 5: Редактор макетов печати
-        self.page_print_layouts = self._build_print_layouts_page()
-        self.content_stack.addWidget(self.page_print_layouts)
+        # Страница 5: Управление печатью
+        self.page_print_management = self._build_print_management_page()
+        self.content_stack.addWidget(self.page_print_management)
 
         # Страница 6: Пустая заглушка для остальных
         self.page_placeholder = QWidget()
@@ -889,7 +932,7 @@ class AdminWindowQt(QMainWindow):
             'orders': 2,
             'workplaces': 3,
             'catalogs': 4,
-            'print_layouts': 5,
+            'print_management': 5,
             'placeholder': 6,
         }
 
@@ -1061,7 +1104,7 @@ class AdminWindowQt(QMainWindow):
         elif text == "Справочники":
             self.content_stack.setCurrentIndex(self.stack_indices['catalogs'])
         elif text == "Управление печатью":
-            self.content_stack.setCurrentIndex(self.stack_indices['print_layouts'])
+            self.content_stack.setCurrentIndex(self.stack_indices['print_management'])
         else:
             # Для всех остальных пунктов пока показываем заглушку
             self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
@@ -3044,166 +3087,6 @@ class AdminWindowQt(QMainWindow):
     def _import_scenarios(self):
         # Эта функция потребует доработки для корректной загрузки JSON
         QMessageBox.information(self, "В разработке", "Импорт сценариев в разработке.")
-
-    def _build_print_layouts_page(self):
-        """Создает страницу для управления макетами печати."""
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        splitter = QSplitter(Qt.Horizontal)
-
-        # Left panel: list of layouts
-        left_widget = QWidget()
-        left_layout = QVBoxLayout(left_widget)
-        
-        self.print_layouts_table = QTableWidget(0, 3)
-        self.print_layouts_table.setHorizontalHeaderLabels(["ID", "Название", "Тип"])
-        self.print_layouts_table.setColumnHidden(0, True)
-        self.print_layouts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.print_layouts_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.print_layouts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.print_layouts_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.print_layouts_table.itemSelectionChanged.connect(self._on_layout_select)
-        left_layout.addWidget(self.print_layouts_table)
-
-        # Right panel: editor
-        right_widget = QWidget()
-        right_layout = QVBoxLayout(right_widget)
-
-        editor_controls = QHBoxLayout()
-        btn_add = QPushButton("Добавить")
-        btn_add.clicked.connect(self._add_print_layout)
-        btn_delete = QPushButton("Удалить")
-        btn_delete.clicked.connect(self._delete_print_layout)
-        editor_controls.addWidget(btn_add)
-        editor_controls.addWidget(btn_delete)
-        editor_controls.addStretch()
-        right_layout.addLayout(editor_controls)
-
-        form_layout = QFormLayout()
-        self.layout_name_edit = QLineEdit()
-        self.layout_type_combo = QComboBox()
-        self.layout_type_combo.addItems(["ZPL", "Bartender", "Text"])
-        self.layout_template_edit = QTextEdit()
-        self.layout_template_edit.setFontFamily("monospace")
-        form_layout.addRow("Название:", self.layout_name_edit)
-        form_layout.addRow("Тип:", self.layout_type_combo)
-        form_layout.addRow("Шаблон:", self.layout_template_edit)
-        right_layout.addLayout(form_layout)
-
-        save_button = QPushButton("Сохранить")
-        save_button.clicked.connect(self._save_print_layout)
-        right_layout.addWidget(save_button)
-
-        splitter.addWidget(left_widget)
-        splitter.addWidget(right_widget)
-        splitter.setSizes([300, 700])
-        layout.addWidget(splitter)
-        
-        self._refresh_print_layouts()
-        return widget
-
-    def _refresh_print_layouts(self):
-        """Загружает макеты в таблицу."""
-        try:
-            self.print_layouts_table.itemSelectionChanged.disconnect()
-        except RuntimeError:
-            pass # was not connected
-
-        try:
-            self.print_layouts_table.setRowCount(0)
-            layouts = self.catalog_service.get_print_layouts()
-            for layout in layouts:
-                row = self.print_layouts_table.rowCount()
-                self.print_layouts_table.insertRow(row)
-                item_id = QTableWidgetItem(str(layout['id']))
-                item_name = QTableWidgetItem(layout['name'])
-                item_type = QTableWidgetItem(layout.get('layout_type', ''))
-                
-                # Store full data in the first item
-                item_id.setData(Qt.UserRole, layout)
-
-                self.print_layouts_table.setItem(row, 0, item_id)
-                self.print_layouts_table.setItem(row, 1, item_name)
-                self.print_layouts_table.setItem(row, 2, item_type)
-            
-            if self.print_layouts_table.rowCount() > 0:
-                self.print_layouts_table.selectRow(0)
-
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты печати: {e}")
-        finally:
-            self.print_layouts_table.itemSelectionChanged.connect(self._on_layout_select)
-            self._on_layout_select()
-
-    def _on_layout_select(self):
-        """Отображает выбранный макет в редакторе."""
-        selected_items = self.print_layouts_table.selectedItems()
-        if not selected_items:
-            self.layout_name_edit.clear()
-            self.layout_type_combo.setCurrentIndex(-1)
-            self.layout_template_edit.clear()
-            self.layout_name_edit.setProperty("layout_id", None)
-            return
-
-        row = selected_items[0].row()
-        layout_id_item = self.print_layouts_table.item(row, 0)
-        if not layout_id_item: return
-        layout_data = layout_id_item.data(Qt.UserRole)
-        if not layout_data: return
-        
-        self.layout_name_edit.setText(layout_data.get('name', ''))
-        self.layout_type_combo.setCurrentText(layout_data.get('layout_type', ''))
-        self.layout_template_edit.setPlainText(layout_data.get('template_data', ''))
-        self.layout_name_edit.setProperty("layout_id", layout_data.get('id'))
-
-    def _add_print_layout(self):
-        """Очищает форму для создания нового макета."""
-        self.print_layouts_table.clearSelection()
-        self.layout_name_edit.clear()
-        self.layout_type_combo.setCurrentIndex(0)
-        self.layout_template_edit.clear()
-        self.layout_name_edit.setProperty("layout_id", None)
-        self.layout_name_edit.setFocus()
-
-    def _save_print_layout(self):
-        """Сохраняет текущий макет (новый или измененный)."""
-        layout_id = self.layout_name_edit.property("layout_id")
-        name = self.layout_name_edit.text().strip()
-        if not name:
-            QMessageBox.warning(self, "Внимание", "Название макета не может быть пустым.")
-            return
-
-        layout_data = {
-            'id': layout_id,
-            'name': name,
-            'layout_type': self.layout_type_combo.currentText(),
-            'template_data': self.layout_template_edit.toPlainText()
-        }
-
-        try:
-            self.catalog_service.upsert_print_layout(layout_data)
-            self._refresh_print_layouts()
-            QMessageBox.information(self, "Успех", f"Макет '{name}' сохранен.")
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить макет: {e}")
-
-    def _delete_print_layout(self):
-        """Удаляет выбранный макет."""
-        selected_items = self.print_layouts_table.selectedItems()
-        if not selected_items:
-            QMessageBox.warning(self, "Внимание", "Выберите макет для удаления.")
-            return
-
-        row = selected_items[0].row()
-        layout_id = int(self.print_layouts_table.item(row, 0).text())
-        layout_name = self.print_layouts_table.item(row, 1).text()
-
-        if QMessageBox.question(self, "Подтверждение", f"Удалить макет '{layout_name}'?") == QMessageBox.Yes:
-            try:
-                self.catalog_service.delete_print_layout(layout_id)
-                self._refresh_print_layouts()
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить макет: {e}")
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""

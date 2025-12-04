@@ -303,46 +303,55 @@ class CatalogsService:
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 # Проверяем, существует ли таблица перед выполнением запроса
-                cur.execute("SELECT to_regclass('public.print_layouts')")
+                cur.execute("SELECT to_regclass('public.label_templates')")
                 if cur.fetchone()[0] is None:
-                    logger.warning("Таблица 'print_layouts' не найдена. Создание таблицы...")
+                    logger.warning("Таблица 'label_templates' не найдена. Создание таблицы...")
                     cur.execute("""
-                        CREATE TABLE print_layouts (
-                            id SERIAL PRIMARY KEY,
-                            name TEXT NOT NULL UNIQUE,
-                            layout_type VARCHAR(50),
-                            template_data TEXT
+                        CREATE TABLE label_templates (
+                            name TEXT NOT NULL PRIMARY KEY,
+                            template_json JSONB,
+                            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                         )
                     """)
                     conn.commit()
-                    logger.info("Таблица 'print_layouts' успешно создана.")
+                    logger.info("Таблица 'label_templates' успешно создана.")
                     return [] # Возвращаем пустой список, так как таблица только что создана
                 
-                cur.execute("SELECT id, name, layout_type, template_data FROM print_layouts ORDER BY name")
-                return cur.fetchall()
+                cur.execute("SELECT name, template_json FROM label_templates ORDER BY name")
+                # Преобразуем данные, чтобы они соответствовали ожиданиям UI (id -> name)
+                layouts = []
+                for row in cur.fetchall():
+                    layout = row['template_json']
+                    layout['id'] = row['name'] # Используем имя как ID
+                    layout['name'] = row['name']
+                    layouts.append(layout)
+                return layouts
 
     def upsert_print_layout(self, layout_data: dict):
         """Добавляет или обновляет макет печати."""
-        layout_id = layout_data.get('id')
+        layout_name = layout_data.get('name')
+        if not layout_name:
+            raise ValueError("Имя макета не может быть пустым.")
+        
+        # Убираем 'id', так как он не является частью JSON
+        template_to_save = {k: v for k, v in layout_data.items() if k != 'id'}
+
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                if layout_id: # Обновление
-                    cur.execute("""
-                        UPDATE print_layouts SET name=%s, layout_type=%s, template_data=%s
-                        WHERE id=%s
-                    """, (layout_data['name'], layout_data.get('layout_type'), layout_data.get('template_data'), layout_id))
-                else: # Вставка
-                    cur.execute("""
-                        INSERT INTO print_layouts (name, layout_type, template_data)
-                        VALUES (%s, %s, %s)
-                    """, (layout_data['name'], layout_data.get('layout_type'), layout_data.get('template_data')))
+                cur.execute("""
+                    INSERT INTO label_templates (name, template_json, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (name) DO UPDATE SET
+                        template_json = EXCLUDED.template_json,
+                        updated_at = NOW();
+                """, (layout_name, json.dumps(template_to_save)))
             conn.commit()
 
-    def delete_print_layout(self, layout_id: int):
-        """Удаляет макет печати по ID."""
+    def delete_print_layout(self, layout_name: str):
+        """Удаляет макет печати по имени."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM print_layouts WHERE id = %s", (layout_id,))
+                cur.execute("DELETE FROM label_templates WHERE name = %s", (layout_name,))
             conn.commit()
 
     
