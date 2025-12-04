@@ -304,7 +304,7 @@ class CatalogsService:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 # Проверяем, существует ли таблица перед выполнением запроса
                 cur.execute("SELECT to_regclass('public.label_templates')")
-                if cur.fetchone()[0] is None:
+                if cur.fetchone()['to_regclass'] is None:
                     logger.warning("Таблица 'label_templates' не найдена. Создание таблицы...")
                     cur.execute("""
                         CREATE TABLE label_templates (
