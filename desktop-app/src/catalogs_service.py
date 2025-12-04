@@ -318,13 +318,44 @@ class CatalogsService:
                     return [] # Возвращаем пустой список, так как таблица только что создана
                 
                 cur.execute("SELECT name, template_json FROM label_templates ORDER BY name")
-                # Преобразуем данные, чтобы они соответствовали ожиданиям UI (id -> name)
+                rows = cur.fetchall()
+                logger.debug(f"Найдено {len(rows)} макетов в БД. Данные: {rows}")
+                
                 layouts = []
-                for row in cur.fetchall():
-                    layout = row['template_json']
-                    layout['id'] = row['name'] # Используем имя как ID
+                for row in rows:
+                    layout = None
+                    try:
+                        layout_data = row['template_json']
+                        if isinstance(layout_data, str):
+                            layout = json.loads(layout_data)
+                        else:
+                            layout = layout_data
+                        
+                        # Дополнительная проверка, что layout это словарь
+                        if not isinstance(layout, dict):
+                            logger.warning(f"Данные для макета '{row['name']}' не являются словарем. Пропуск.")
+                            layout = None
+
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.error(f"Ошибка декодирования JSON для макета '{row['name']}': {e}")
+                        layout = None # Явно обнуляем в случае ошибки
+                    
+                    if not layout:
+                        # Если layout пустой или произошла ошибка, создаем заглушку
+                        layout = {
+                            'name': row['name'],
+                            'width_mm': '?',
+                            'height_mm': '?',
+                            'objects': [],
+                            '_is_invalid': True # Флаг для UI
+                        }
+
+                    # 'id' и 'name' берем из имени строки в любом случае
+                    layout['id'] = row['name']
                     layout['name'] = row['name']
                     layouts.append(layout)
+                
+                logger.debug(f"Возвращено {len(layouts)} обработанных макетов.")
                 return layouts
 
     def upsert_print_layout(self, layout_data: dict):
