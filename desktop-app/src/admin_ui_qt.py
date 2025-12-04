@@ -180,14 +180,15 @@ class OrderEditorFrameQt(QWidget):
         self.details_table.setColumnHidden(0, True) # Скрываем ID
         main_layout.addWidget(self.details_table)
 
-        # --- Кнопка архивации ---
-        archive_layout = QHBoxLayout()
-        archive_layout.addStretch()
-        btn_archive = QPushButton("Перенести в архив")
-        btn_archive.setStyleSheet("background-color: #FFB6C1;") # Light Pink
-        btn_archive.clicked.connect(self._move_to_archive)
-        archive_layout.addWidget(btn_archive)
-        main_layout.addLayout(archive_layout)
+        # --- ИЗМЕНЕНИЕ: Кнопка архивации видна только для неархивных заказов ---
+        if not self.is_archive:
+            archive_layout = QHBoxLayout()
+            archive_layout.addStretch()
+            btn_archive = QPushButton("Перенести в архив")
+            btn_archive.setStyleSheet("background-color: #FFB6C1;") # Light Pink
+            btn_archive.clicked.connect(self._move_to_archive)
+            archive_layout.addWidget(btn_archive)
+            main_layout.addLayout(archive_layout)
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
@@ -1723,8 +1724,8 @@ class AdminWindowQt(QMainWindow):
 
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
-            # logging.debug(f"on_order_select: Создание OrderEditorFrameQt для заказа ID {order_id}...")
-            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data, self)
+            # --- ИЗМЕНЕНИЕ: Передаем флаг is_archive в редактор ---
+            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data, self, is_archive=is_archive)
             edit_tab.layout().addWidget(editor_frame)
 
             # --- ИЗМЕНЕНИЕ: Создаем и заполняем вкладку "Документы" ---
@@ -1732,26 +1733,32 @@ class AdminWindowQt(QMainWindow):
             docs_tab.layout().addWidget(docs_frame)
 
             # Вкладки "АПИ" и "Загрузка кодов"
-            if dm_source == "Файлы клиента (csv, txt)":
-                # logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
-                upload_frame = CodeUploadFrameQt(self.user_info, order_id, self)
-                upload_tab.layout().addWidget(upload_frame)
+            # --- ИЗМЕНЕНИЕ: Для архивных заказов скрываем вкладку АПИ ---
+            if is_archive:
                 management_tabs.setTabVisible(management_tabs.indexOf(api_tab), False)
                 management_tabs.setTabVisible(management_tabs.indexOf(docs_tab), True) # Показываем документы
-                management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), True)
-                # logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
-            else: # По умолчанию или "Заказ в ДМ.Код"
-                # logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
-                api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode, self)
-                api_tab.layout().addWidget(api_frame)
-                management_tabs.setTabVisible(management_tabs.indexOf(api_tab), True)
-                management_tabs.setTabVisible(management_tabs.indexOf(docs_tab), True) # Показываем документы
                 management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), False)
-                # logging.debug("on_order_select: Вкладка 'АПИ' показана, 'Загрузка кодов' скрыта.")
-                # Активируем вкладку АПИ только для нужных статусов
-                is_api_enabled = order_status in ('delta', 'dmkod')
-                management_tabs.setTabEnabled(management_tabs.indexOf(api_tab), is_api_enabled)
-                # logging.debug(f"on_order_select: Вкладка 'АПИ' {'включена' if is_api_enabled else 'отключена'} для статуса '{order_status}'.")
+            else:
+                if dm_source == "Файлы клиента (csv, txt)":
+                    # logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
+                    upload_frame = CodeUploadFrameQt(self.user_info, order_id, self)
+                    upload_tab.layout().addWidget(upload_frame)
+                    management_tabs.setTabVisible(management_tabs.indexOf(api_tab), False)
+                    management_tabs.setTabVisible(management_tabs.indexOf(docs_tab), True) # Показываем документы
+                    management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), True)
+                    # logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
+                else: # По умолчанию или "Заказ в ДМ.Код"
+                    # logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
+                    api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode, self)
+                    api_tab.layout().addWidget(api_frame)
+                    management_tabs.setTabVisible(management_tabs.indexOf(api_tab), True)
+                    management_tabs.setTabVisible(management_tabs.indexOf(docs_tab), True) # Показываем документы
+                    management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), False)
+                    # logging.debug("on_order_select: Вкладка 'АПИ' показана, 'Загрузка кодов' скрыта.")
+                    # Активируем вкладку АПИ только для нужных статусов
+                    is_api_enabled = order_status in ('delta', 'dmkod')
+                    management_tabs.setTabEnabled(management_tabs.indexOf(api_tab), is_api_enabled)
+                    # logging.debug(f"on_order_select: Вкладка 'АПИ' {'включена' if is_api_enabled else 'отключена'} для статуса '{order_status}'.")
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось отобразить панель управления: {e}")
