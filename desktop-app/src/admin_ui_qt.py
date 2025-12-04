@@ -1489,8 +1489,9 @@ class AdminWindowQt(QMainWindow):
         (in_progress_widget, 
          self.in_progress_orders_table, self.in_progress_management_stack,
          self.in_progress_client_filter, self.in_progress_search_filter,
-         self.in_progress_edit_tab, self.in_progress_api_tab, self.in_progress_upload_tab
-        , self.in_progress_stats_table
+         self.in_progress_edit_tab, self.in_progress_api_tab, self.in_progress_upload_tab,
+         self.in_progress_docs_tab, # --- ИЗМЕНЕНИЕ: Добавляем вкладку документов ---
+         self.in_progress_stats_table
         ) = self._create_orders_view(is_archive=False)
         self.orders_tab_widget.addTab(in_progress_widget, "В работе")
 
@@ -1498,8 +1499,9 @@ class AdminWindowQt(QMainWindow):
         (archive_widget, 
          self.archive_orders_table, self.archive_management_stack,
          self.archive_client_filter, self.archive_search_filter,
-         self.archive_edit_tab, self.archive_api_tab, self.archive_upload_tab
-        , self.archive_stats_table
+         self.archive_edit_tab, self.archive_api_tab, self.archive_upload_tab,
+         self.archive_docs_tab, # --- ИЗМЕНЕНИЕ: Добавляем вкладку документов ---
+         self.archive_stats_table
         ) = self._create_orders_view(is_archive=True)
         self.orders_tab_widget.addTab(archive_widget, "Архив")
 
@@ -1543,9 +1545,12 @@ class AdminWindowQt(QMainWindow):
         order_api_tab.setLayout(QVBoxLayout())
         order_upload_tab = QWidget()
         order_upload_tab.setLayout(QVBoxLayout())
+        order_docs_tab = QWidget() # --- ИЗМЕНЕНИЕ: Создаем виджет для вкладки документов ---
+        order_docs_tab.setLayout(QVBoxLayout())
         
         management_tabs.addTab(order_edit_tab, "Редактирование")
         management_tabs.addTab(order_api_tab, "АПИ")
+        management_tabs.addTab(order_docs_tab, "Документы") # --- ИЗМЕНЕНИЕ: Добавляем вкладку в таб-виджет ---
         management_tabs.addTab(order_upload_tab, "Загрузка кодов")
 
         # --- НОВЫЙ БЛОК: Фильтры для заказов ---
@@ -1604,8 +1609,8 @@ class AdminWindowQt(QMainWindow):
         client_filter_combo.currentIndexChanged.connect(lambda: self.apply_order_filters(is_archive))
         search_filter_edit.textChanged.connect(lambda: self.apply_order_filters(is_archive))
 
-        # --- ИСПРАВЛЕНИЕ: Возвращаем все созданные виджеты, включая таблицу статистики ---
-        return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit, order_edit_tab, order_api_tab, order_upload_tab, stats_table
+        # --- ИЗМЕНЕНИЕ: Возвращаем все созданные виджеты, включая новую вкладку документов ---
+        return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit, order_edit_tab, order_api_tab, order_upload_tab, order_docs_tab, stats_table
 
     def _on_orders_tab_changed(self, index):
         """Загружает данные при переключении вкладок 'В работе' / 'Архив'."""
@@ -1619,7 +1624,7 @@ class AdminWindowQt(QMainWindow):
         # --- НОВЫЙ БЛОК: Получаем нужные виджеты фильтров ---
         client_filter = self.archive_client_filter if is_archive else self.in_progress_client_filter
         search_filter = self.archive_search_filter if is_archive else self.in_progress_search_filter
-        cache = self.archive_orders_cache if is_archive else self.in_progress_orders_cache
+        cache = self.archive_orders_cache if is_archive else self.in_progress_orders_cache # --- ИЗМЕНЕНИЕ: Используем правильный кеш ---
 
         # Блокируем сигналы, чтобы избежать лишних вызовов apply_filters при очистке
         client_filter.blockSignals(True)
@@ -1628,7 +1633,7 @@ class AdminWindowQt(QMainWindow):
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     # --- ИСПРАВЛЕНИЕ: Добавляем JOIN и агрегацию для подсчета позиций и ДМ ---
-                    status_filter = "status LIKE 'Архив%%'" if is_archive else "status NOT LIKE 'Архив%%'"
+                    status_filter = "o.status LIKE 'Архив%%'" if is_archive else "o.status NOT LIKE 'Архив%%'"
                     query = f"""
                         SELECT o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status, s.scenario_data,
                                COUNT(DISTINCT d.gtin) as positions_count,
@@ -1687,9 +1692,10 @@ class AdminWindowQt(QMainWindow):
             # logging.debug(f"on_order_select: Выбран заказ ID: {order_id}, Статус: {order_status}")
 
             # 1. Получаем данные сценария для этого заказа
+            # --- ИЗМЕНЕНИЕ: Также получаем notification_id для загрузки документов ---
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("SELECT s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
+                    cur.execute("SELECT o.notification_id, s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
                     result = cur.fetchone()
             scenario_data = result['scenario_data'] if result else {}
             dm_source = scenario_data.get('dm_source')
@@ -1713,6 +1719,7 @@ class AdminWindowQt(QMainWindow):
             edit_tab = self.archive_edit_tab if is_archive else self.in_progress_edit_tab
             api_tab = self.archive_api_tab if is_archive else self.in_progress_api_tab
             upload_tab = self.archive_upload_tab if is_archive else self.in_progress_upload_tab
+            docs_tab = self.archive_docs_tab if is_archive else self.in_progress_docs_tab # --- ИЗМЕНЕНИЕ: Получаем виджет вкладки документов ---
 
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
@@ -1720,12 +1727,17 @@ class AdminWindowQt(QMainWindow):
             editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data, self)
             edit_tab.layout().addWidget(editor_frame)
 
+            # --- ИЗМЕНЕНИЕ: Создаем и заполняем вкладку "Документы" ---
+            docs_frame = self._create_order_documents_frame(result.get('notification_id'))
+            docs_tab.layout().addWidget(docs_frame)
+
             # Вкладки "АПИ" и "Загрузка кодов"
             if dm_source == "Файлы клиента (csv, txt)":
                 # logging.debug(f"on_order_select: Создание CodeUploadFrameQt для заказа ID {order_id}...")
                 upload_frame = CodeUploadFrameQt(self.user_info, order_id, self)
                 upload_tab.layout().addWidget(upload_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(api_tab), False)
+                management_tabs.setTabVisible(management_tabs.indexOf(docs_tab), True) # Показываем документы
                 management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), True)
                 # logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
             else: # По умолчанию или "Заказ в ДМ.Код"
@@ -1733,6 +1745,7 @@ class AdminWindowQt(QMainWindow):
                 api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode, self)
                 api_tab.layout().addWidget(api_frame)
                 management_tabs.setTabVisible(management_tabs.indexOf(api_tab), True)
+                management_tabs.setTabVisible(management_tabs.indexOf(docs_tab), True) # Показываем документы
                 management_tabs.setTabVisible(management_tabs.indexOf(upload_tab), False)
                 # logging.debug("on_order_select: Вкладка 'АПИ' показана, 'Загрузка кодов' скрыта.")
                 # Активируем вкладку АПИ только для нужных статусов
@@ -1747,6 +1760,50 @@ class AdminWindowQt(QMainWindow):
 
         # Переключаем QStackedWidget на панель с вкладками
         management_stack.setCurrentIndex(1)
+
+    def _create_order_documents_frame(self, notification_id):
+        """Создает виджет для вкладки 'Документы' заказа, аналогичный тому, что в уведомлениях."""
+        frame = QWidget()
+        layout = QVBoxLayout(frame)
+        
+        if not notification_id:
+            layout.addWidget(QLabel("Заказ не связан с уведомлением, документы недоступны."))
+            return frame
+
+        # Сохраняем ID для использования в обработчиках
+        frame.notification_id = notification_id
+
+        # Кнопки управления
+        controls = QHBoxLayout()
+        btn_upload_doc = QPushButton("Загрузить")
+        btn_download_doc = QPushButton("Скачать")
+        btn_delete_doc = QPushButton("Удалить")
+        controls.addWidget(btn_upload_doc)
+        controls.addWidget(btn_download_doc)
+        controls.addWidget(btn_delete_doc)
+        controls.addStretch()
+        layout.addLayout(controls)
+
+        # Таблица файлов
+        files_table = QTableWidget(0, 1)
+        files_table.setHorizontalHeaderLabels(["Имя файла"])
+        files_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        files_table.setSelectionBehavior(QTableWidget.SelectRows)
+        files_table.setSelectionMode(QTableWidget.SingleSelection)
+        files_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        files_table.setStyleSheet("QTableWidget::item:selected { background-color: #ADD8E6; }")
+        layout.addWidget(files_table)
+        frame.files_table = files_table # Сохраняем ссылку на таблицу
+
+        # Привязка обработчиков (используем методы от уведомлений, передавая ID)
+        # Мы используем self.current_notification_id, который устанавливается в load_notification_details
+        # Здесь мы его переопределим для контекста заказа
+        btn_upload_doc.clicked.connect(lambda: self.upload_notification_doc(notification_id))
+        btn_download_doc.clicked.connect(lambda: self.download_notification_doc(frame))
+        btn_delete_doc.clicked.connect(lambda: self.delete_notification_doc(frame))
+
+        self.load_notification_files(notification_id, target_table=files_table)
+        return frame
 
     def _load_order_statistics(self):
         """Загружает и отображает статистику по активным заказам."""
@@ -2389,24 +2446,27 @@ class AdminWindowQt(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить детали уведомления: {e}")
 
-    def load_notification_files(self, notif_id):
+    def load_notification_files(self, notif_id, target_table=None):
         """Загружает список файлов для уведомления."""
+        # --- ИЗМЕНЕНИЕ: Принимаем целевую таблицу как аргумент ---
+        table = target_table if target_table is not None else self.notification_files_table
+
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             files = service.get_notification_files(notif_id)
             
-            self.notification_files_table.setRowCount(0)
-            self.notification_files_cache = files
+            table.setRowCount(0)
+            table.files_cache = files # Сохраняем кэш прямо в виджете таблицы
             
             for file_info in files:
-                row = self.notification_files_table.rowCount()
-                self.notification_files_table.insertRow(row)
+                row = table.rowCount()
+                table.insertRow(row)
                 
                 # ИСПРАВЛЕНИЕ: Заполняем только одну колонку
                 filename = file_info.get('filename', '')
                 it = QTableWidgetItem(filename)
                 it.setFlags(it.flags() & ~Qt.ItemIsEditable)
-                self.notification_files_table.setItem(row, 0, it)
+                table.setItem(row, 0, it)
         except Exception as e:
             traceback.print_exc()
 
@@ -2492,9 +2552,15 @@ class AdminWindowQt(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось создать заказ: {e}")
 
-    def upload_notification_doc(self):
+    def upload_notification_doc(self, notification_id=None):
         """Загружает документ для уведомления."""
-        if not hasattr(self, 'current_notification_id'):
+        # --- ИЗМЕНЕНИЕ: Определяем ID уведомления ---
+        notif_id = notification_id
+        if notif_id is None:
+            if hasattr(self, 'current_notification_id'):
+                notif_id = self.current_notification_id
+        
+        if not notif_id:
             QMessageBox.warning(self, "Ошибка", "Не выбрано уведомление")
             return
         
@@ -2508,23 +2574,32 @@ class AdminWindowQt(QMainWindow):
             
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             filename = os.path.basename(filepath)
-            service.add_notification_file(self.current_notification_id, filename, file_data, 'client_document')
+            service.add_notification_file(notif_id, filename, file_data, 'client_document')
             QMessageBox.information(self, "Успех", "Файл успешно загружен")
-            self.load_notification_files(self.current_notification_id)
+            
+            # Обновляем обе таблицы, если они существуют
+            self.load_notification_files(notif_id, self.notification_files_table)
+            if hasattr(self, 'in_progress_docs_tab'): # Проверяем, создана ли вкладка
+                self.on_order_select(is_archive=False) # Перезагружаем панель управления
+            if hasattr(self, 'archive_docs_tab'):
+                self.on_order_select(is_archive=True)
+
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл: {e}")
 
-    def download_notification_doc(self):
+    def download_notification_doc(self, parent_frame=None):
         """Скачивает документ от уведомления."""
-        sel = self.notification_files_table.currentRow()
+        # --- ИЗМЕНЕНИЕ: Определяем, из какой таблицы скачивать ---
+        table = parent_frame.files_table if parent_frame else self.notification_files_table
+        sel = table.currentRow()
         if sel < 0:
             QMessageBox.warning(self, "Внимание", "Выберите файл для скачивания")
             return
         
         try:
             # ИСПРАВЛЕНИЕ: Получаем ID файла из кэша, а не из виджета
-            file_info = self.notification_files_cache[sel]
+            file_info = table.files_cache[sel]
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             content, filename = service.get_file_content(file_info['id'])
             
@@ -2537,15 +2612,18 @@ class AdminWindowQt(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось скачать файл: {e}")
 
-    def delete_notification_doc(self):
+    def delete_notification_doc(self, parent_frame=None):
         """Удаляет выбранный документ уведомления."""
-        sel = self.notification_files_table.currentRow()
+        # --- ИЗМЕНЕНИЕ: Определяем, из какой таблицы удалять ---
+        table = parent_frame.files_table if parent_frame else self.notification_files_table
+        notif_id = parent_frame.notification_id if parent_frame else self.current_notification_id
+        sel = table.currentRow()
         if sel < 0:
             QMessageBox.warning(self, "Внимание", "Выберите файл для удаления")
             return
 
         try:
-            file_info = self.notification_files_cache[sel]
+            file_info = table.files_cache[sel]
             file_id = file_info['id']
             filename = file_info['filename']
 
@@ -2557,7 +2635,12 @@ class AdminWindowQt(QMainWindow):
             service.delete_notification_file(file_id)
             QMessageBox.information(self, "Успех", "Файл успешно удален.")
             # Обновляем список файлов
-            self.load_notification_files(self.current_notification_id)
+            self.load_notification_files(notif_id, table)
+            # Обновляем и другую таблицу, если нужно
+            if table is not self.notification_files_table:
+                self.load_notification_files(self.current_notification_id, self.notification_files_table)
+            else:
+                self.on_order_select(is_archive=self.orders_tab_widget.currentIndex() == 1)
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {e}")
