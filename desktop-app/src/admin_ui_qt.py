@@ -2172,6 +2172,12 @@ class AdminWindowQt(QMainWindow):
             
             # Загружаем сводку
             self.load_summary_data()
+        except psycopg2.OperationalError as e:
+            # --- ИСПРАВЛЕНИЕ: Перехватываем ошибку соединения с БД, чтобы избежать RuntimeError ---
+            # Это предотвращает падение приложения, если get_client_db_connection не может установить соединение
+            # и некорректно обрабатывает исключение внутри генератора.
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка соединения", f"Не удалось подключиться к базе данных:\n{e}")
         except (Exception, psycopg2.Error) as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить уведомления: {e}")
