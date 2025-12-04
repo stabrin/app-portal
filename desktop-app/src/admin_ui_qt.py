@@ -1858,29 +1858,6 @@ class AdminWindowQt(QMainWindow):
                 if col == 0: item.setData(Qt.UserRole, order)
                 table.setItem(row, col, item)
 
-    def _build_notifications_page(self):
-        """Страница управления уведомлениями о поставках - с переключением между списком и деталями."""
-        widget = QWidget()
-        layout = QVBoxLayout()
-
-        # Стек для переключения между списком и деталями
-        self.notifications_stack = QStackedWidget()
-        layout.addWidget(self.notifications_stack)
-
-        # Страница 1: Список уведомлений
-        self.page_notifications_list = self._build_notifications_list_page()
-        self.notifications_stack.addWidget(self.page_notifications_list)
-
-        # Страница 2: Детали уведомления
-        self.page_notification_details = self._build_notification_details_page()
-        self.notifications_stack.addWidget(self.page_notification_details)
-
-        # По умолчанию показываем список
-        self.notifications_stack.setCurrentIndex(0)
-
-        widget.setLayout(layout)
-        return widget
-
     def _build_notifications_list_page(self):
         """Таблица со списком уведомлений и сводкой по дням."""
         widget = QWidget()
@@ -1889,14 +1866,12 @@ class AdminWindowQt(QMainWindow):
         # Кнопки управления
         controls = QHBoxLayout()
         btn_new = QPushButton("Новое уведомление")
-        btn_new.clicked.connect(self.create_new_notification)
-        btn_edit = QPushButton("Открыть")
-        btn_edit.clicked.connect(self.open_notification_details)
+        btn_new.clicked.connect(self.create_new_notification) # Этот метод останется для создания
         btn_delete = QPushButton("Удалить уведомление")
         btn_delete.clicked.connect(self.delete_notification)
-        
+        btn_refresh = QPushButton("Обновить")
+        btn_refresh.clicked.connect(self.load_notifications)
         controls.addWidget(btn_new)
-        controls.addWidget(btn_edit)
         controls.addWidget(btn_delete)
         controls.addStretch()
         layout.addLayout(controls)
@@ -1936,8 +1911,8 @@ class AdminWindowQt(QMainWindow):
                 background-color: #ADD8E6;
             }
         """)
-        # Двойной клик открывает детали
-        self.notifications_table.doubleClicked.connect(self.open_notification_details)
+        # Выбор строки загружает детали
+        self.notifications_table.itemSelectionChanged.connect(self.on_notification_select)
         layout.addWidget(self.notifications_table)
 
         # ИСПРАВЛЕНИЕ: Устанавливаем разумную ширину для большинства колонок,
@@ -2016,15 +1991,44 @@ class AdminWindowQt(QMainWindow):
         widget.setLayout(layout)
         return widget
 
+    def _build_notifications_page(self):
+        """Создает страницу управления уведомлениями в стиле 'список-детали'."""
+        widget = QWidget()
+        main_layout = QHBoxLayout(widget)
+
+        # Разделитель для списка (слева) и деталей (справа)
+        splitter = QSplitter(Qt.Horizontal)
+
+        # --- Левая панель: Список уведомлений и сводка ---
+        left_panel = self._build_notifications_list_page()
+        splitter.addWidget(left_panel)
+
+        # --- Правая панель: Детали уведомления ---
+        # Используем QStackedWidget для переключения между заглушкой и деталями
+        self.notification_details_stack = QStackedWidget()
+
+        # Виджет-заглушка
+        placeholder_widget = QWidget()
+        placeholder_layout = QVBoxLayout(placeholder_widget)
+        placeholder_label = QLabel("Выберите уведомление для просмотра деталей")
+        placeholder_label.setAlignment(Qt.AlignCenter)
+        placeholder_layout.addWidget(placeholder_label)
+        self.notification_details_stack.addWidget(placeholder_widget) # Индекс 0
+
+        # Виджет с деталями (вкладки)
+        details_widget = self._build_notification_details_page()
+        self.notification_details_stack.addWidget(details_widget) # Индекс 1
+
+        splitter.addWidget(self.notification_details_stack)
+        splitter.setSizes([650, 550]) # Начальные пропорции
+
+        main_layout.addWidget(splitter)
+        return widget
+
     def _build_notification_details_page(self):
         """Страница с деталями уведомления."""
         widget = QWidget()
         layout = QVBoxLayout()
-
-        # Кнопка "Назад"
-        back_btn = QPushButton("← Вернуться к списку")
-        back_btn.clicked.connect(lambda: self.notifications_stack.setCurrentIndex(0))
-        layout.addWidget(back_btn)
 
         # Основная область с вкладками
         self.notification_details_notebook = self._create_notification_tabs()
@@ -2313,16 +2317,21 @@ class AdminWindowQt(QMainWindow):
             # Если диалог был закрыт через "Сохранить", обновляем список
             self.load_notifications()
 
-    def open_notification_details(self):
-        """Открывает детали выбранного уведомления."""
+    def on_notification_select(self):
+        """Обработчик выбора уведомления в таблице. Отображает панель управления."""
         sel = self.notifications_table.currentRow()
         if sel < 0:
-            QMessageBox.warning(self, "Внимание", "Выберите уведомление для просмотра")
+            self.notification_details_stack.setCurrentIndex(0) # Показываем заглушку
             return
         
-        notif_id = int(self.notifications_table.item(sel, 0).text())
-        self.load_notification_details(notif_id)
-        self.notifications_stack.setCurrentIndex(1)
+        try:
+            notif_id = int(self.notifications_table.item(sel, 0).text())
+            self.load_notification_details(notif_id)
+            # Переключаем правую панель на виджет с деталями
+            self.notification_details_stack.setCurrentIndex(1)
+        except (ValueError, AttributeError) as e:
+            logging.error(f"Ошибка при выборе уведомления: {e}")
+            self.notification_details_stack.setCurrentIndex(0)
 
     def load_notification_details(self, notif_id):
         """Загружает и отображает детали уведомления."""
