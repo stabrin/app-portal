@@ -2415,13 +2415,29 @@ class AdminWindowQt(QMainWindow):
                     row = self.participants_table.rowCount()
                     self.participants_table.insertRow(row)
                     
-                    poa_end_date = p.get('poa_validity_end', '')
-                    if poa_end_date and 'T' in poa_end_date:
-                        poa_end_date = poa_end_date.split('T')[0]
+                    poa_end_date_str = p.get('poa_validity_end', '')
+                    if poa_end_date_str and 'T' in poa_end_date_str:
+                        poa_end_date_str = poa_end_date_str.split('T')[0]
 
-                    self.participants_table.setItem(row, 0, QTableWidgetItem(p.get('name', '')))
-                    self.participants_table.setItem(row, 1, QTableWidgetItem(p.get('inn', '')))
-                    self.participants_table.setItem(row, 2, QTableWidgetItem(poa_end_date))
+                    # Сначала создаем и вставляем все элементы
+                    item_name = QTableWidgetItem(p.get('name', ''))
+                    item_inn = QTableWidgetItem(p.get('inn', ''))
+                    item_date = QTableWidgetItem(poa_end_date_str)
+                    
+                    self.participants_table.setItem(row, 0, item_name)
+                    self.participants_table.setItem(row, 1, item_inn)
+                    self.participants_table.setItem(row, 2, item_date)
+
+                    # Логика подсветки
+                    if poa_end_date_str:
+                        expiry_date = QDate.fromString(poa_end_date_str, "yyyy-MM-dd")
+                        if expiry_date.isValid():
+                            today = QDate.currentDate()
+                            days_left = today.daysTo(expiry_date)
+                            if 0 <= days_left < 30:
+                                pale_pink = QColor("#FFB6C1") # LightPink
+                                for col in range(self.participants_table.columnCount()):
+                                    self.participants_table.item(row, col).setBackground(pale_pink)
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить участников из АПИ: {e}")
 
