@@ -52,8 +52,8 @@ class ApiService:
         logger.info(f"Попытка аутентификации в API для пользователя {api_email}...")
         try:
             url = f"{self.api_base_url.rstrip('/')}/user/token"
-            # В документации используется GET, но для передачи email/password безопаснее POST
-            response = requests.post(url, json={'email': api_email, 'password': api_password}, timeout=15)
+            # Используем GET, как было в оригинальном коде в auth_qt
+            response = requests.get(url, json={'email': api_email, 'password': api_password}, timeout=15)
             response.raise_for_status()
             
             new_tokens = response.json()
