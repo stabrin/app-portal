@@ -131,58 +131,77 @@ class OrderEditorFrameQt(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)
 
-        # --- Ряд 1: Основные операции с детализацией ---
-        controls_frame_1 = QHBoxLayout()
-        btn_save = QPushButton("Сохранить")
-        btn_save.clicked.connect(self._save_changes)
-        btn_export = QPushButton("Выгрузить")
-        btn_export.clicked.connect(self._export_details_to_excel)
-        btn_import = QPushButton("Загрузить")
-        btn_import.clicked.connect(self._import_details_from_excel)
-        controls_frame_1.addWidget(btn_save)
-        controls_frame_1.addWidget(btn_export)
-        controls_frame_1.addWidget(btn_import)
-        controls_frame_1.addStretch()
-        main_layout.addLayout(controls_frame_1)
+        # --- ИЗМЕНЕНИЕ: Для архивных заказов оставляем только отчет и детализацию ---
+        if self.is_archive:
+            # --- Ряд 3 (только кнопка отчета) ---
+            controls_frame_3 = QHBoxLayout()
+            btn_download_report = QPushButton("Отчет декларанта")
+            btn_download_report.clicked.connect(self._download_declarator_report)
+            controls_frame_3.addWidget(btn_download_report)
+            controls_frame_3.addStretch()
+            main_layout.addLayout(controls_frame_3)
 
-        # --- Ряд 2: Операции с товарами и Bartender ---
-        controls_frame_2 = QHBoxLayout()
-        btn_export_prod = QPushButton("Экспорт товаров")
-        btn_export_prod.clicked.connect(self._export_products_to_excel)
-        btn_import_prod = QPushButton("Импорт товаров")
-        btn_import_prod.clicked.connect(self._import_products_from_excel)
-        btn_create_view = QPushButton("Создать View")
-        btn_create_view.clicked.connect(self._create_bartender_view)
-        controls_frame_2.addWidget(btn_export_prod)
-        controls_frame_2.addWidget(btn_import_prod)
-        controls_frame_2.addWidget(btn_create_view)
-        controls_frame_2.addStretch()
-        main_layout.addLayout(controls_frame_2)
+            # --- Таблица детализации ---
+            self.details_table = QTableWidget()
+            self.details_cols = ["id", "gtin", "dm_quantity", "aggregation_level", "production_date", "expiry_date"]
+            self.details_table.setColumnCount(len(self.details_cols))
+            self.details_table.setHorizontalHeaderLabels(["ID", "GTIN", "Кол-во", "Агрегация", "Дата произв.", "Годен до"])
+            self.details_table.setColumnHidden(0, True) # Скрываем ID
+            self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers) # Запрещаем редактирование
+            main_layout.addWidget(self.details_table)
 
-        # --- Ряд 3: Отчеты и интеграции ---
-        controls_frame_3 = QHBoxLayout()
-        btn_export_delta = QPushButton("Экспорт (Внешнее ПО)")
-        btn_export_delta.clicked.connect(self._export_data_for_external_sw)
-        btn_import_delta = QPushButton("Импорт (Внешнее ПО)")
-        btn_import_delta.clicked.connect(self._import_data_for_external_sw)
-        btn_download_report = QPushButton("Отчет декларанта")
-        btn_download_report.clicked.connect(self._download_declarator_report)
-        controls_frame_3.addWidget(btn_export_delta)
-        controls_frame_3.addWidget(btn_import_delta)
-        controls_frame_3.addWidget(btn_download_report)
-        controls_frame_3.addStretch()
-        main_layout.addLayout(controls_frame_3)
+        else: # --- Старая логика для неархивных заказов ---
+            # --- Ряд 1: Основные операции с детализацией ---
+            controls_frame_1 = QHBoxLayout()
+            btn_save = QPushButton("Сохранить")
+            btn_save.clicked.connect(self._save_changes)
+            btn_export = QPushButton("Выгрузить")
+            btn_export.clicked.connect(self._export_details_to_excel)
+            btn_import = QPushButton("Загрузить")
+            btn_import.clicked.connect(self._import_details_from_excel)
+            controls_frame_1.addWidget(btn_save)
+            controls_frame_1.addWidget(btn_export)
+            controls_frame_1.addWidget(btn_import)
+            controls_frame_1.addStretch()
+            main_layout.addLayout(controls_frame_1)
 
-        # --- Таблица детализации ---
-        self.details_table = QTableWidget()
-        self.details_cols = ["id", "gtin", "dm_quantity", "aggregation_level", "production_date", "expiry_date"]
-        self.details_table.setColumnCount(len(self.details_cols))
-        self.details_table.setHorizontalHeaderLabels(["ID", "GTIN", "Кол-во", "Агрегация", "Дата произв.", "Годен до"])
-        self.details_table.setColumnHidden(0, True) # Скрываем ID
-        main_layout.addWidget(self.details_table)
+            # --- Ряд 2: Операции с товарами и Bartender ---
+            controls_frame_2 = QHBoxLayout()
+            btn_export_prod = QPushButton("Экспорт товаров")
+            btn_export_prod.clicked.connect(self._export_products_to_excel)
+            btn_import_prod = QPushButton("Импорт товаров")
+            btn_import_prod.clicked.connect(self._import_products_from_excel)
+            btn_create_view = QPushButton("Создать View")
+            btn_create_view.clicked.connect(self._create_bartender_view)
+            controls_frame_2.addWidget(btn_export_prod)
+            controls_frame_2.addWidget(btn_import_prod)
+            controls_frame_2.addWidget(btn_create_view)
+            controls_frame_2.addStretch()
+            main_layout.addLayout(controls_frame_2)
 
-        # --- ИЗМЕНЕНИЕ: Кнопка архивации видна только для неархивных заказов ---
-        if not self.is_archive:
+            # --- Ряд 3: Отчеты и интеграции ---
+            controls_frame_3 = QHBoxLayout()
+            btn_export_delta = QPushButton("Экспорт (Внешнее ПО)")
+            btn_export_delta.clicked.connect(self._export_data_for_external_sw)
+            btn_import_delta = QPushButton("Импорт (Внешнее ПО)")
+            btn_import_delta.clicked.connect(self._import_data_for_external_sw)
+            btn_download_report = QPushButton("Отчет декларанта")
+            btn_download_report.clicked.connect(self._download_declarator_report)
+            controls_frame_3.addWidget(btn_export_delta)
+            controls_frame_3.addWidget(btn_import_delta)
+            controls_frame_3.addWidget(btn_download_report)
+            controls_frame_3.addStretch()
+            main_layout.addLayout(controls_frame_3)
+
+            # --- Таблица детализации ---
+            self.details_table = QTableWidget()
+            self.details_cols = ["id", "gtin", "dm_quantity", "aggregation_level", "production_date", "expiry_date"]
+            self.details_table.setColumnCount(len(self.details_cols))
+            self.details_table.setHorizontalHeaderLabels(["ID", "GTIN", "Кол-во", "Агрегация", "Дата произв.", "Годен до"])
+            self.details_table.setColumnHidden(0, True) # Скрываем ID
+            main_layout.addWidget(self.details_table)
+
+            # --- Кнопка архивации ---
             archive_layout = QHBoxLayout()
             archive_layout.addStretch()
             btn_archive = QPushButton("Перенести в архив")
