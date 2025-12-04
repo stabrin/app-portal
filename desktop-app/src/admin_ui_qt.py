@@ -1985,8 +1985,8 @@ class AdminWindowQt(QMainWindow):
             QTableWidget {
                 gridline-color: #E0E0E0;
             }
-        """)
-        layout.addWidget(self.summary_table)
+        """)        # layout.addWidget(self.summary_table)
+        self.summary_table.setVisible(False) # Также скрываем виджет
 
         widget.setLayout(layout)
         return widget
@@ -2020,7 +2020,8 @@ class AdminWindowQt(QMainWindow):
         self.notification_details_stack.addWidget(details_widget) # Индекс 1
 
         splitter.addWidget(self.notification_details_stack)
-        splitter.setSizes([650, 550]) # Начальные пропорции
+        # --- ИЗМЕНЕНИЕ: Устанавливаем пропорции 2:1, как в заказах ---
+        splitter.setSizes([800, 400])
 
         main_layout.addWidget(splitter)
         return widget
