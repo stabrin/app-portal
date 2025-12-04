@@ -993,20 +993,22 @@ class LabelEditorDialog(QDialog):
     def _on_scene_selection_changed(self):
         logging.debug("Scene selection changed.")
         selected_items = self.scene.selectedItems()
-        if not selected_items:
-            logging.debug("No items selected.")
-            self.selected_object_id = None
-        else:
+        
+        new_selected_id = None
+        if selected_items:
             item = selected_items[0]
             if isinstance(item, PrintableObjectItem):
-                self.selected_object_id = item.object_id
-                logging.debug(f"Item selected: id={self.selected_object_id}")
+                new_selected_id = item.object_id
+
+        # Обновляем панель свойств, только если ID выбранного объекта действительно изменился
+        if self.selected_object_id != new_selected_id:
+            self.selected_object_id = new_selected_id
+            if new_selected_id is None:
+                logging.debug("No items selected or a non-PrintableObjectItem was selected.")
             else:
-                self.selected_object_id = None
-                logging.debug("A non-PrintableObjectItem was selected.")
-        
-        self._update_properties_panel()
-        self._redraw_canvas() # Перерисовываем для обновления подсветки
+                logging.debug(f"Item selected: id={self.selected_object_id}")
+            self._update_properties_panel()
+
 
     def on_item_moved(self, object_id):
         """Слот, вызываемый из PrintableObjectItem при перемещении."""
