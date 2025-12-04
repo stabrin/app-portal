@@ -23,6 +23,7 @@ import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добавляем импорт RealDictCursor
 from .sscc_service import generate_sscc, read_and_increment_counter # НОВОЕ: Импорт для генерации SSCC
+from .order_service import OrderService # НОВЫЙ СЕРВИС
 import base64
 import os
 import re # ИСПРАВЛЕНИЕ: Добавляем импорт модуля re
@@ -113,9 +114,9 @@ class SsccGeneratorWorker(QObject):
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
 class OrderEditorFrameQt(QWidget):
     """Полнофункциональный фрейм для редактирования заказа."""
-    def __init__(self, user_info, order_id, scenario_data, main_app_window, parent=None, is_archive=False):
+    def __init__(self, order_service, order_id, scenario_data, main_app_window, parent=None, is_archive=False):
         super().__init__(parent)
-        self.user_info = user_info
+        self.order_service = order_service
         self.order_id = order_id
         self.scenario_data = scenario_data
         self.main_app_window = main_app_window
@@ -123,9 +124,6 @@ class OrderEditorFrameQt(QWidget):
 
         self._create_widgets()
         self._load_details()
-
-    def _get_client_db_connection(self):
-        return get_client_db_connection(self.user_info)
 
     def _create_widgets(self):
         main_layout = QVBoxLayout(self)
@@ -212,11 +210,7 @@ class OrderEditorFrameQt(QWidget):
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT * FROM dmkod_aggregation_details WHERE order_id = %s ORDER BY id", (self.order_id,))
-                    details = cur.fetchall()
-            
+            details = self.order_service.get_order_details(self.order_id)
             for item in details:
                 row = self.details_table.rowCount()
                 self.details_table.insertRow(row)
@@ -236,20 +230,7 @@ class OrderEditorFrameQt(QWidget):
             updates.append(row_data)
         
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    for item in updates:
-                        cur.execute("""
-                            UPDATE dmkod_aggregation_details SET
-                                gtin = %s, dm_quantity = %s, aggregation_level = %s,
-                                production_date = %s, expiry_date = %s
-                            WHERE id = %s
-                        """, (
-                            item['gtin'], item['dm_quantity'], item['aggregation_level'],
-                            item['production_date'] or None, item['expiry_date'] or None,
-                            item['id']
-                        ))
-                conn.commit()
+            self.order_service.save_order_details(self.order_id, updates)
             QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
@@ -274,47 +255,16 @@ class OrderEditorFrameQt(QWidget):
             QMessageBox.information(self, "Успех", f"Детализация выгружена в файл:\n{filepath}")
 
     def _import_details_from_excel(self):
-        logging.debug(f"Запуск импорта детализации для заказа ID: {self.order_id}")
         if QMessageBox.question(self, "Подтверждение", "Импорт из файла полностью заменит текущую детализацию. Продолжить?") != QMessageBox.Yes:
-            logging.debug("Импорт отменен пользователем.")
             return
 
         filepath, _ = QFileDialog.getOpenFileName(self, "Выберите Excel-файл", "", "Excel Files (*.xlsx *.xls)")
         if not filepath:
-            logging.debug("Файл для импорта не выбран.")
             return
         
-        logging.debug(f"Выбран файл для импорта: {filepath}")
-
         try:
-            logging.debug("Чтение Excel файла с помощью pandas...")
-            df = pd.read_excel(filepath, dtype={'gtin': str})
-            df = df.where(pd.notna(df), None)
-            df['order_id'] = self.order_id
-            logging.debug(f"Файл успешно прочитан. Обнаружено {len(df)} строк. Колонки: {list(df.columns)}")
-
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    logging.debug(f"Удаление старой детализации для заказа ID: {self.order_id}...")
-                    cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (self.order_id,))
-                    logging.debug("Старая детализация удалена. Запуск массовой вставки...")
-                    
-                    # --- ИСПРАВЛЕНИЕ: Заменяем UPSERT на прямой INSERT ---
-                    from psycopg2.extras import execute_values
-                    
-                    # Убедимся, что колонки в DataFrame соответствуют таблице
-                    cols = ['order_id', 'gtin', 'dm_quantity', 'aggregation_level', 'production_date', 'expiry_date']
-                    df_to_insert = df[[c for c in cols if c in df.columns]]
-                    
-                    insert_query = f"""
-                        INSERT INTO dmkod_aggregation_details ({", ".join(df_to_insert.columns)}) 
-                        VALUES %s
-                    """
-                    data_tuples = [tuple(x) for x in df_to_insert.to_numpy()]
-                    execute_values(cur, insert_query, data_tuples)
-                    logging.debug("upsert_data_to_db завершен.")
-                conn.commit()
-            QMessageBox.information(self, "Успех", f"Детализация импортирована. Загружено {len(df)} строк.")
+            imported_count = self.order_service.import_details_from_excel(self.order_id, filepath)
+            QMessageBox.information(self, "Успех", f"Детализация импортирована. Загружено {imported_count} строк.")
             self._load_details()
         except Exception as e:
             logging.error(f"Критическая ошибка при импорте детализации: {e}", exc_info=True)
@@ -325,31 +275,7 @@ class OrderEditorFrameQt(QWidget):
             return
 
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT client_name, status FROM orders WHERE id = %s", (self.order_id,))
-                    order_info = cur.fetchone()
-                    if order_info:
-                        client_name = order_info['client_name']
-                        current_status = order_info['status']
-                        
-                        base_view_name_str = f"{client_name}_{self.order_id}"
-                        sanitized_name = re.sub(r'[^\w]', '_', base_view_name_str)
-                        sanitized_name = re.sub(r'_+', '_', sanitized_name).strip('_')
-                        
-                        base_view_name = psycopg2.sql.Identifier(sanitized_name)
-                        sscc_view_name = psycopg2.sql.Identifier(f"{sanitized_name}_sscc")
-
-                        cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(sscc_view_name))
-                        cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(base_view_name))
-
-                        new_status = f"Архив_{current_status}"
-                        cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, self.order_id))
-                        result = cur.fetchone()
-                        notification_id = result['notification_id'] if result else None
-                        if notification_id:
-                            cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
-                conn.commit()
+            self.order_service.move_order_to_archive(self.order_id)
             
             if self.main_app_window:
                 self.main_app_window.load_orders(is_archive=False)
@@ -363,18 +289,9 @@ class OrderEditorFrameQt(QWidget):
     def _export_products_to_excel(self):
         """Выгружает в Excel данные о товарах, связанных с текущим заказом."""
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT DISTINCT gtin FROM dmkod_aggregation_details WHERE order_id = %s AND gtin IS NOT NULL", (self.order_id,))
-                    gtins = [row['gtin'] for row in cur.fetchall()]
-                    if not gtins:
-                        QMessageBox.warning(self, "Внимание", "В заказе нет товаров для экспорта.")
-                        return
-                    cur.execute("SELECT gtin, name, description_1, description_2, description_3 FROM products WHERE gtin = ANY(%s)", (gtins,))
-                    products_data = cur.fetchall()
-
+            products_data = self.order_service.get_products_for_order(self.order_id)
             if not products_data:
-                QMessageBox.warning(self, "Внимание", "Не найдено записей в справочнике товаров для GTIN из этого заказа.")
+                QMessageBox.warning(self, "Внимание", "Не найдено товаров в заказе для экспорта.")
                 return
 
             df = pd.DataFrame(products_data)
@@ -395,33 +312,20 @@ class OrderEditorFrameQt(QWidget):
             return
 
         try:
-            df = pd.read_excel(filepath, dtype={'gtin': str})
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    from .utils import upsert_data_to_db
-                    upsert_data_to_db(cur, 'products', df, 'gtin')
-                conn.commit()
-            QMessageBox.information(self, "Успех", f"Справочник товаров успешно обновлен. Обработано {len(df)} строк.")
+            count = self.order_service.import_products_from_excel(filepath)
+            QMessageBox.information(self, "Успех", f"Справочник товаров успешно обновлен. Обработано {count} строк.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать товары: {e}")
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""
-        from .aggregation_service import run_import_from_dmkod, create_bartender_views
-        
         progress = QProgressDialog("Выполняется импорт и создание представлений...", "Отмена", 0, 100, self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setValue(10)
         
         try:
-            # Шаг 1: Импорт кодов
-            progress.setLabelText("Шаг 1/2: Импорт кодов из базы...")
-            run_import_from_dmkod(self.user_info, self.order_id)
-            progress.setValue(50)
-
-            # Шаг 2: Создание представлений
-            progress.setLabelText("Шаг 2/2: Создание представлений для Bartender...")
-            result = create_bartender_views(self.user_info, self.order_id)
+            # Сервисный метод теперь инкапсулирует оба шага
+            result = self.order_service.create_bartender_views_for_order(self.order_id)
             progress.setValue(100)
 
             if result.get('success'):
@@ -434,297 +338,61 @@ class OrderEditorFrameQt(QWidget):
 
     def _export_data_for_external_sw(self):
         """Выгружает данные в формате 'Дельта' для внешнего ПО."""
-        logging.info(f"Запуск экспорта данных в формате 'Дельта' для заказа ID: {self.order_id}")
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT notes FROM orders WHERE id = %s", (self.order_id,))
-                    order_info = cur.fetchone()
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute(
-                        "SELECT api_codes_json, production_date, expiry_date FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
-                        (self.order_id,)
-                    )
-                    details_to_process = cur.fetchall()
+            df, report_name = self.order_service.export_data_for_external_sw(self.order_id)
 
-            if not details_to_process:
+            if df is None:
                 QMessageBox.warning(self, "Нет данных", "В заказе нет скачанных кодов для выгрузки.")
                 return
-
-            all_rows = []
-            from dateutil.relativedelta import relativedelta
-
-            for detail in details_to_process:
-                codes = detail.get('api_codes_json', {}).get('codes', [])
-                prod_date = detail.get('production_date')
-                exp_date = detail.get('expiry_date')
-
-                life_time_months = ''
-                if prod_date and exp_date:
-                    delta = relativedelta(exp_date, prod_date)
-                    life_time_months = delta.years * 12 + delta.months
-
-                for code in codes:
-                    if not code or len(code) < 16: continue
-                    all_rows.append({
-                        'DataMatrix': code,
-                        'DataMatrixCode': '',
-                        'Barcode': code[2:16],
-                        'LifeTime': life_time_months
-                    })
-
-            if not all_rows:
-                QMessageBox.warning(self, "Нет данных", "Не найдено корректных кодов для выгрузки.")
-                return
-
-            df = pd.DataFrame(all_rows)
-            report_name = re.sub(r'[^\w]', '_', order_info.get('notes', '') if order_info else '').strip('_')
-            initial_filename = f"{report_name}_order_{self.order_id}.csv"
             
+            initial_filename = f"{report_name}_order_{self.order_id}.csv"
             filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить файл для Внешнего ПО", initial_filename, "CSV Files (*.csv)")
-            if not filepath: return
+            if not filepath: 
+                return
 
             import csv
             df.to_csv(filepath, sep='\t', index=False, encoding='utf-8', lineterminator='\r\n', quoting=csv.QUOTE_NONE)
-
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE orders SET status = 'delta' WHERE id = %s", (self.order_id,))
-                conn.commit()
-
+            
             QMessageBox.information(self, "Успех", f"Данные успешно выгружены в файл:\n{filepath}\n\nСтатус заказа обновлен на 'delta'.")
-            self.main_app_window.load_orders(is_archive=False)
+            self.main_app_window.load_orders(is_archive=False) # Обновляем UI
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать данные: {e}")
 
     def _import_data_for_external_sw(self):
-        """
-        Обрабатывает CSV-файл от 'Дельта', создает упаковки, товары и готовит данные для API.
-        Адаптировано из dmkod-integration-app/app/routes.py, action 'upload_delta_csv'.
-        """
-        logging.info(f"[Delta Import] Запуск импорта данных из CSV для заказа ID: {self.order_id}")
-
-        filepath, _ = QFileDialog.getOpenFileName( # ИСПРАВЛЕНИЕ: Используем правильные аргументы для PySide6
-            self,
-            "Выберите CSV-файл от 'Дельта'", # caption (заголовок)
-            filter="CSV files (*.csv)"      # filter (фильтр файлов)
-        )
+        """Обрабатывает CSV-файл от 'Дельта'."""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите CSV-файл от 'Дельта'", filter="CSV files (*.csv)")
         if not filepath:
-            logging.info("[Delta Import] Импорт отменен пользователем.")
             return
 
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог прогресса только при запуске операции ---
-        progress_dialog = QProgressDialog("Выполняется импорт данных...", "Отмена", 0, 100, self)
-        progress_dialog.setWindowModality(Qt.WindowModal)
-        progress_dialog.setAutoClose(False)
-        progress_dialog.setAutoReset(True)
-        progress_dialog.setValue(0)
-
-        # 1. Валидация имени файла
         expected_filename_part = f"order_{self.order_id}.csv"
         if expected_filename_part not in os.path.basename(filepath):
             QMessageBox.critical(self, "Ошибка", f'Имя файла должно содержать "{expected_filename_part}".')
             return
 
+        progress_dialog = QProgressDialog("Выполняется импорт данных...", "Отмена", 0, 100, self)
+        progress_dialog.setWindowModality(Qt.WindowModal)
+        progress_dialog.show()
+
         try:
-            # --- ИСПРАВЛЕНИЕ: Показываем диалог только после всех проверок ---
-            progress_dialog.setLabelText("Чтение и валидация CSV...")
-            progress_dialog.show()
-            QApplication.processEvents()
-            # 2. Чтение и валидация CSV
-            df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str})
-            df.columns = df.columns.str.strip()
-            required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
-            if not all(col in df.columns for col in required_columns):
-                raise ValueError(f'В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.')
-
-            # --- ИСПРАВЛЕНИЕ: Добавляем ведущий ноль к 13-значным GTIN ---
-            # Это решает проблему, когда в файле от "Дельты" GTIN представлен
-            # в формате EAN-13 (13 символов) вместо GTIN-14.
-            df['Barcode'] = df['Barcode'].apply(lambda x: '0' + str(x) if isinstance(x, str) and len(x) == 13 else x)
-
-            df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
-            df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
-            df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-            df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-
-            progress_dialog.setValue(10)
-            progress_dialog.setLabelText("Создание упаковок...")
-            QApplication.processEvents()
-
-            # --- ИСПРАВЛЕНИЕ: Используем новый метод подключения к БД через пул ---
-            # Это решает проблему с созданием лишних подключений.
-            with get_client_db_connection(self.user_info) as conn:
-              with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                from .utils import upsert_data_to_db
-                
-                # 3. Создание упаковок (короба и паллеты)
-                unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
-                unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
-                
-                packages_to_insert = []
-                if not unique_boxes.empty:
-                    unique_boxes['level'] = 1
-                    packages_to_insert.append(unique_boxes)
-                if not unique_pallets.empty:
-                    unique_pallets['level'] = 2
-                    packages_to_insert.append(unique_pallets)
-
-                if packages_to_insert:
-                    all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
-                    all_packages_df['owner'] = 'delta'
-                    
-                    # Устанавливаем связи "короб-паллета"
-                    box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
-                    box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
-                    
-                    def find_parent_sscc(row):
-                        if row['level'] == 1: return box_to_pallet_sscc_map.get(row['sscc'])
-                        return None
-                    all_packages_df['parent_sscc'] = all_packages_df.apply(find_parent_sscc, axis=1)
-
-                    # Используем UPSERT для безопасной вставки
-                    upsert_data_to_db(cur, 'packages', all_packages_df, 'sscc')
-                    logging.info(f"[Delta Import] Загружено/обновлено {len(all_packages_df)} упаковок.")
-
-                    # Обновляем parent_id после вставки
-                    cur.execute("""
-                        UPDATE packages p_child SET parent_id = p_parent.id
-                        FROM packages AS p_parent
-                        WHERE p_child.parent_sscc = p_parent.sscc AND p_child.parent_sscc IS NOT NULL;
-                    """)
-                    cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
-                    logging.info("[Delta Import] Связи 'короб-паллета' обновлены.")
-
-                progress_dialog.setValue(30)
-                progress_dialog.setLabelText("Создание товаров (items)...")
-                QApplication.processEvents()
-
-                # 4. Создание товаров (items)
-                from .aggregation_service import parse_datamatrix
-                parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
-                items_df = pd.DataFrame(parsed_dm_data)
-                items_df['order_id'] = self.order_id
-                items_df['BoxSSCC'] = df['BoxSSCC']
-
-                # Получаем ID коробов для привязки
-                box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
-                sscc_to_id_map = {}
-                if box_ssccs_tuple:
-                    cur.execute("SELECT sscc, id FROM packages WHERE sscc IN %s", (box_ssccs_tuple,))
-                    sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
-                
-                items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
-                items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
-                
-                columns_to_save = ['datamatrix', 'gtin', 'serial', 'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 'order_id', 'package_id']
-                items_to_upload = items_df[columns_to_save]
-                upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
-                logging.info(f"[Delta Import] Загружено/обновлено {len(items_to_upload)} кодов маркировки.")
-
-                progress_dialog.setValue(80)
-                progress_dialog.setLabelText("Подготовка данных для API...")
-                QApplication.processEvents()
-
-                # 5. Подготовка данных для delta_result
-                df_for_json = df.copy()
-                df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
-                
-                cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (self.order_id,))
-                # --- ИСПРАВЛЕНИЕ: Гарантируем, что ключ (GTIN) является строкой ---
-                # Это решает проблему, когда GTIN с ведущим нулем обрабатывался как число.
-                gtin_to_printrun_map = {str(row['gtin']): row['api_id'] for row in cur.fetchall()}
-
-                # --- ИСПРАВЛЕНИЕ №2: Принудительно приводим GTIN к строковому типу СРАЗУ ПОСЛЕ ПЕРЕИМЕНОВАНИЯ ---
-                # Это гарантирует, что pandas будет работать с GTIN как с текстом на всех последующих этапах,
-                # предотвращая потерю ведущих нулей и ошибки сопоставления.
-                df_for_json['gtin'] = df_for_json['gtin'].astype(str)
-
-                if not gtin_to_printrun_map:
-                    raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
-
-                df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
-                # --- ИСПРАВЛЕНИЕ: Проверяем, что все GTIN были сопоставлены ---
-                # Это предотвращает молчаливую потерю данных, если для GTIN из файла нет тиража.
-                if df_for_json['printrun_id'].isnull().any():
-                    unmapped_gtins = df_for_json[df_for_json['printrun_id'].isnull()]['gtin'].unique()
-                    raise ValueError(f"Ошибка: Для GTIN(ов) {list(unmapped_gtins)} из файла не найден соответствующий ID тиража в заказе.")
-
-                grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
-
-                # --- ИСПРАВЛЕНИЕ: Полностью переписанная логика для устранения SyntaxError ---
-                # Используем list comprehension для надежного и быстрого создания JSON.
-                # Это решает ошибку с несоответствием скобок.
-                grouped_for_api['codes_json'] = [
-                    json.dumps({
-                        "include": [{"code": code.replace('\x1d', '')} for code in row.DataMatrix],
-                        "attributes": {
-                            "production_date": str(row.production_date),
-                            "expiration_date": str(row.expiration_date)
-                        }
-                    })
-                    for row in grouped_for_api.itertuples()
-                ]
-                grouped_for_api['order_id'] = self.order_id
-                grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
-                grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
-
-                delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
-                upsert_data_to_db(cur, 'delta_result', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
-                logging.info(f"[Delta Import] Сохранено {len(delta_result_df)} сгруппированных записей в 'delta_result'.")
-
-                # # 6. Обновление статуса заказа
-                # cur.execute("UPDATE orders SET status = 'delta_loaded' WHERE id = %s", (self.order_id,))
-              # 6. Фиксируем все изменения в одной транзакции
-              conn.commit()
-              QMessageBox.information(self, "Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.")
-
+            self.order_service.import_data_from_external_sw(self.order_id, filepath)
+            progress_dialog.setValue(100)
+            QMessageBox.information(self, "Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.")
         except Exception as e:
             logging.error(f"Ошибка при импорте данных 'Дельта' для заказа {self.order_id}: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось импортировать данные: {e}")
         finally:
-            # --- ИСПРАВЛЕНИЕ: Гарантированно скрываем и удаляем диалог ---
             progress_dialog.hide()
 
     def _download_declarator_report(self):
         """Формирует и выгружает отчет для декларанта."""
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT notes FROM orders WHERE id = %s", (self.order_id,))
-                    order_info = cur.fetchone()
-
-                    # --- ИСПРАВЛЕНИЕ: Выполняем запрос через курсор, а не pd.read_sql, чтобы избежать UserWarning ---
-                    query = """
-                        WITH RECURSIVE base_data AS (
-                            SELECT i.datamatrix, i.gtin, i.package_id, p.name AS product_name, p.description_1, p.description_2, p.description_3
-                            FROM items i LEFT JOIN products p ON i.gtin = p.gtin
-                            WHERE i.order_id = %(order_id)s
-                        ), package_hierarchy AS (
-                            SELECT p.id as base_box_id, p.id as package_id, p.level, p.sscc, p.parent_id
-                            FROM packages p WHERE p.level = 1 AND p.id IN (SELECT DISTINCT package_id FROM base_data WHERE package_id IS NOT NULL)
-                            UNION ALL
-                            SELECT ph.base_box_id, p_parent.id as package_id, p_parent.level, p_parent.sscc, p_parent.parent_id
-                            FROM package_hierarchy ph JOIN packages p_parent ON ph.parent_id = p_parent.id
-                        ), sscc_data AS (
-                            SELECT base_box_id AS id_level_1, MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1, MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2, MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
-                            FROM package_hierarchy GROUP BY base_box_id
-                        )
-                        SELECT b.datamatrix, b.gtin, SUBSTRING(b.datamatrix for 24) AS dm_part_24, SUBSTRING(b.datamatrix for 31) AS dm_part_31, s.sscc_level_1, s.sscc_level_2, s.sscc_level_3, b.product_name, b.description_1, b.description_2, b.description_3
-                        FROM base_data b LEFT JOIN sscc_data s ON b.package_id = s.id_level_1 ORDER BY b.datamatrix;
-                    """
-                    cur.execute(query, {'order_id': self.order_id})
-                    report_data = cur.fetchall()
-                    df = pd.DataFrame(report_data)
-
-            if df.empty:
+            df, report_name = self.order_service.get_declarator_report_data(self.order_id)
+            
+            if df is None:
                 QMessageBox.warning(self, "Нет данных", "Не найдено данных для формирования отчета.")
                 return
 
-            df = df.applymap(lambda val: val.replace('\x1d', ' ') if isinstance(val, str) else val)
-            report_name = re.sub(r'[^\w]', '_', order_info.get('notes', '') if order_info else '').strip('_')
             filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить отчет декларанта", f"{report_name}_order_{self.order_id}.xlsx", "Excel Files (*.xlsx)")
-            
             if filepath:
                 df.to_excel(filepath, index=False)
                 QMessageBox.information(self, "Успех", f"Отчет декларанта успешно сохранен в файл:\n{filepath}")
@@ -1215,6 +883,7 @@ class AdminWindowQt(QMainWindow):
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервис для работы со справочниками ---
         self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+        self.order_service = OrderService(self.user_info)
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         self._build_ui()
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
@@ -1651,23 +1320,7 @@ class AdminWindowQt(QMainWindow):
         client_filter.blockSignals(True)
         table.setRowCount(0)
         try:
-            with get_client_db_connection(self.user_info) as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    # --- ИСПРАВЛЕНИЕ: Добавляем JOIN и агрегацию для подсчета позиций и ДМ ---
-                    status_filter = "o.status LIKE 'Архив%%'" if is_archive else "o.status NOT LIKE 'Архив%%'"
-                    query = f"""
-                        SELECT o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status, s.scenario_data,
-                               COUNT(DISTINCT d.gtin) as positions_count,
-                               COALESCE(SUM(d.dm_quantity), 0) as dm_count
-                        FROM orders o
-                        LEFT JOIN dmkod_aggregation_details d ON o.id = d.order_id
-                        LEFT JOIN ap_marking_scenarios s ON o.scenario_id = s.id
-                        WHERE {status_filter}
-                        GROUP BY o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status, s.scenario_data
-                        ORDER BY o.id DESC
-                    """
-                    cur.execute(query)
-                    orders = cur.fetchall()
+            orders = self.order_service.get_orders(is_archive)
 
             # Сохраняем данные в кэш
             cache.clear()
@@ -1676,8 +1329,9 @@ class AdminWindowQt(QMainWindow):
             # Заполняем комбобокс клиентов
             client_filter.clear()
             client_filter.addItem("Все клиенты")
-            client_names = sorted(list(set(o['client_name'] for o in orders)))
-            client_filter.addItems(client_names)
+            if orders:
+                client_names = sorted(list(set(o['client_name'] for o in orders)))
+                client_filter.addItems(client_names)
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить заказы: {e}")
@@ -1713,11 +1367,7 @@ class AdminWindowQt(QMainWindow):
             # logging.debug(f"on_order_select: Выбран заказ ID: {order_id}, Статус: {order_status}")
 
             # 1. Получаем данные сценария для этого заказа
-            # --- ИЗМЕНЕНИЕ: Также получаем notification_id для загрузки документов ---
-            with get_client_db_connection(self.user_info) as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("SELECT o.notification_id, s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
-                    result = cur.fetchone()
+            result = self.order_service.get_order_scenario_data(order_id)
             scenario_data = result['scenario_data'] if result else {}
             dm_source = scenario_data.get('dm_source')
             post_processing_mode = scenario_data.get('post_processing')
@@ -1744,8 +1394,8 @@ class AdminWindowQt(QMainWindow):
 
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
-            # --- ИЗМЕНЕНИЕ: Передаем флаг is_archive в редактор ---
-            editor_frame = OrderEditorFrameQt(self.user_info, order_id, scenario_data, self, is_archive=is_archive)
+            # --- ИЗМЕНЕНИЕ: Передаем сервис заказов и флаг is_archive в редактор ---
+            editor_frame = OrderEditorFrameQt(self.order_service, order_id, scenario_data, self, is_archive=is_archive)
             edit_tab.layout().addWidget(editor_frame)
 
             # --- ИЗМЕНЕНИЕ: Создаем и заполняем вкладку "Документы" ---

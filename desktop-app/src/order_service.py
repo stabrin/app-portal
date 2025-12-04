@@ -1,0 +1,343 @@
+import logging
+import re
+import pandas as pd
+import psycopg2
+from psycopg2.extras import RealDictCursor, execute_values
+from dateutil.relativedelta import relativedelta
+
+from .db_connector import get_client_db_connection
+from .utils import upsert_data_to_db
+from .aggregation_service import run_import_from_dmkod, create_bartender_views, parse_datamatrix
+import json
+
+class OrderService:
+    """
+    Сервисный слой для инкапсуляции бизнес-логики, связанной с заказами.
+    """
+    def __init__(self, user_info):
+        self.user_info = user_info
+
+    def _get_connection(self):
+        """Возвращает соединение с БД клиента."""
+        return get_client_db_connection(self.user_info)
+
+    def get_orders(self, is_archive: bool):
+        """
+        Загружает список заказов (активных или архивных) с агрегированной информацией.
+        """
+        status_filter = "o.status LIKE 'Архив%%'" if is_archive else "o.status NOT LIKE 'Архив%%'"
+        query = f"""
+            SELECT o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status, s.scenario_data,
+                   COUNT(DISTINCT d.gtin) as positions_count,
+                   COALESCE(SUM(d.dm_quantity), 0) as dm_count
+            FROM orders o
+            LEFT JOIN dmkod_aggregation_details d ON o.id = d.order_id
+            LEFT JOIN ap_marking_scenarios s ON o.scenario_id = s.id
+            WHERE {status_filter}
+            GROUP BY o.id, o.client_name, o.order_date, o.status, o.notes, o.api_status, s.scenario_data
+            ORDER BY o.id DESC
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(query)
+                return cur.fetchall()
+
+    def get_order_details(self, order_id: int):
+        """Загружает детализацию для конкретного заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM dmkod_aggregation_details WHERE order_id = %s ORDER BY id", (order_id,))
+                return cur.fetchall()
+
+    def save_order_details(self, order_id: int, updates: list):
+        """Сохраняет изменения в детализации заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                for item in updates:
+                    cur.execute("""
+                        UPDATE dmkod_aggregation_details SET
+                            gtin = %s, dm_quantity = %s, aggregation_level = %s,
+                            production_date = %s, expiry_date = %s
+                        WHERE id = %s
+                    """, (
+                        item['gtin'], item['dm_quantity'], item['aggregation_level'],
+                        item['production_date'] or None, item['expiry_date'] or None,
+                        item['id']
+                    ))
+            conn.commit()
+
+    def import_details_from_excel(self, order_id: int, filepath: str):
+        """Импортирует детализацию из Excel-файла, полностью заменяя существующую."""
+        df = pd.read_excel(filepath, dtype={'gtin': str})
+        df = df.where(pd.notna(df), None)
+        df['order_id'] = order_id
+
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                logging.debug(f"Удаление старой детализации для заказа ID: {order_id}...")
+                cur.execute("DELETE FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
+                
+                cols = ['order_id', 'gtin', 'dm_quantity', 'aggregation_level', 'production_date', 'expiry_date']
+                df_to_insert = df[[c for c in cols if c in df.columns]]
+                
+                insert_query = f"""
+                    INSERT INTO dmkod_aggregation_details ({", ".join(df_to_insert.columns)}) 
+                    VALUES %s
+                """
+                data_tuples = [tuple(x) for x in df_to_insert.to_numpy()]
+                execute_values(cur, insert_query, data_tuples)
+            conn.commit()
+        return len(df)
+
+    def move_order_to_archive(self, order_id: int):
+        """Перемещает заказ в архив, удаляя связанные с ним представления."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT client_name, status FROM orders WHERE id = %s", (order_id,))
+                order_info = cur.fetchone()
+                if not order_info:
+                    raise ValueError(f"Заказ с ID {order_id} не найден.")
+
+                client_name = order_info['client_name']
+                current_status = order_info['status']
+                
+                base_view_name_str = f"{client_name}_{order_id}"
+                sanitized_name = re.sub(r'[^\w]', '_', base_view_name_str)
+                sanitized_name = re.sub(r'_+', '_', sanitized_name).strip('_')
+                
+                base_view_name = psycopg2.sql.Identifier(sanitized_name)
+                sscc_view_name = psycopg2.sql.Identifier(f"{sanitized_name}_sscc")
+
+                cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(sscc_view_name))
+                cur.execute(psycopg2.sql.SQL("DROP VIEW IF EXISTS {};").format(base_view_name))
+
+                new_status = f"Архив_{current_status}"
+                cur.execute("UPDATE orders SET status = %s WHERE id = %s RETURNING notification_id", (new_status, order_id))
+                result = cur.fetchone()
+                notification_id = result['notification_id'] if result else None
+                if notification_id:
+                    cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
+            conn.commit()
+
+    def get_order_scenario_data(self, order_id: int):
+        """Возвращает данные сценария и ID уведомления для заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT o.notification_id, s.scenario_data FROM orders o JOIN ap_marking_scenarios s ON o.scenario_id = s.id WHERE o.id = %s", (order_id,))
+                return cur.fetchone()
+
+    def get_products_for_order(self, order_id: int):
+        """Возвращает данные о товарах, связанных с заказом, из справочника."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT DISTINCT gtin FROM dmkod_aggregation_details WHERE order_id = %s AND gtin IS NOT NULL", (order_id,))
+                gtins = [row['gtin'] for row in cur.fetchall()]
+                if not gtins:
+                    return []
+                
+                cur.execute("SELECT gtin, name, description_1, description_2, description_3 FROM products WHERE gtin = ANY(%s)", (gtins,))
+                return cur.fetchall()
+
+    def import_products_from_excel(self, filepath: str):
+        """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
+        df = pd.read_excel(filepath, dtype={'gtin': str})
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                upsert_data_to_db(cur, 'products', df, 'gtin')
+            conn.commit()
+        return len(df)
+
+    def create_bartender_views_for_order(self, order_id: int):
+        """Выполняет импорт кодов и создает/обновляет представления для Bartender."""
+        # Шаг 1: Импорт кодов
+        run_import_from_dmkod(self.user_info, order_id)
+        # Шаг 2: Создание представлений
+        result = create_bartender_views(self.user_info, order_id)
+        return result
+
+    def export_data_for_external_sw(self, order_id: int):
+        """Готовит DataFrame для выгрузки данных в формате 'Дельта'."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT notes FROM orders WHERE id = %s", (order_id,))
+                order_info = cur.fetchone()
+                
+                cur.execute(
+                    "SELECT api_codes_json, production_date, expiry_date FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
+                    (order_id,)
+                )
+                details_to_process = cur.fetchall()
+
+        if not details_to_process:
+            return None, None # Нет данных для экспорта
+
+        all_rows = []
+        for detail in details_to_process:
+            codes = detail.get('api_codes_json', {}).get('codes', [])
+            prod_date = detail.get('production_date')
+            exp_date = detail.get('expiry_date')
+
+            life_time_months = ''
+            if prod_date and exp_date:
+                delta = relativedelta(exp_date, prod_date)
+                life_time_months = delta.years * 12 + delta.months
+
+            for code in codes:
+                if not code or len(code) < 16: continue
+                all_rows.append({
+                    'DataMatrix': code,
+                    'DataMatrixCode': '',
+                    'Barcode': code[2:16],
+                    'LifeTime': life_time_months
+                })
+        
+        if not all_rows:
+            return None, None
+
+        df = pd.DataFrame(all_rows)
+        report_name = re.sub(r'[^\w]', '_', order_info.get('notes', '') if order_info else '').strip('_')
+        
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE orders SET status = 'delta' WHERE id = %s", (order_id,))
+            conn.commit()
+
+        return df, report_name
+
+    def import_data_from_external_sw(self, order_id: int, filepath: str):
+        """Обрабатывает CSV-файл от 'Дельта', обновляет базу данных."""
+        df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str})
+        df.columns = df.columns.str.strip()
+        required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
+        if not all(col in df.columns for col in required_columns):
+            raise ValueError(f'В файле отсутствуют необходимые колонки. Ожидаются: {", ".join(required_columns)}.')
+
+        df['Barcode'] = df['Barcode'].apply(lambda x: '0' + str(x) if isinstance(x, str) and len(x) == 13 else x)
+        df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
+        df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
+        df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+        df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
+        
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1. Создание упаковок (короба и паллеты)
+                unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
+                unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
+                
+                packages_to_insert = []
+                if not unique_boxes.empty:
+                    unique_boxes['level'] = 1
+                    packages_to_insert.append(unique_boxes)
+                if not unique_pallets.empty:
+                    unique_pallets['level'] = 2
+                    packages_to_insert.append(unique_pallets)
+
+                if packages_to_insert:
+                    all_packages_df = pd.concat(packages_to_insert, ignore_index=True)
+                    all_packages_df['owner'] = 'delta'
+                    
+                    box_pallet_map = df[['BoxSSCC', 'PaletSSCC']].dropna().drop_duplicates()
+                    box_to_pallet_sscc_map = pd.Series(box_pallet_map.PaletSSCC.values, index=box_pallet_map.BoxSSCC).to_dict()
+                    
+                    all_packages_df['parent_sscc'] = all_packages_df.apply(
+                        lambda row: box_to_pallet_sscc_map.get(row['sscc']) if row['level'] == 1 else None, 
+                        axis=1
+                    )
+                    upsert_data_to_db(cur, 'packages', all_packages_df, 'sscc')
+                    
+                    cur.execute("""
+                        UPDATE packages p_child SET parent_id = p_parent.id
+                        FROM packages AS p_parent
+                        WHERE p_child.parent_sscc = p_parent.sscc AND p_child.parent_sscc IS NOT NULL;
+                    """)
+                    cur.execute("UPDATE packages SET parent_sscc = NULL WHERE parent_sscc IS NOT NULL;")
+
+                # 2. Создание товаров (items)
+                parsed_dm_data = [parse_datamatrix(dm) for dm in df['DataMatrix']]
+                items_df = pd.DataFrame(parsed_dm_data)
+                items_df['order_id'] = order_id
+                items_df['BoxSSCC'] = df['BoxSSCC']
+
+                box_ssccs_tuple = tuple(df['BoxSSCC'].dropna().unique())
+                sscc_to_id_map = {}
+                if box_ssccs_tuple:
+                    cur.execute("SELECT sscc, id FROM packages WHERE sscc IN %s", (box_ssccs_tuple,))
+                    sscc_to_id_map = {row['sscc']: row['id'] for row in cur.fetchall()}
+                
+                items_df['package_id'] = items_df['BoxSSCC'].map(sscc_to_id_map)
+                items_df['package_id'] = items_df['package_id'].astype('object').where(pd.notna(items_df['package_id']), None)
+                
+                columns_to_save = ['datamatrix', 'gtin', 'serial', 'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 'order_id', 'package_id']
+                items_to_upload = items_df[columns_to_save]
+                upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
+
+                # 3. Подготовка данных для delta_result
+                df_for_json = df.copy()
+                df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
+                df_for_json['gtin'] = df_for_json['gtin'].astype(str)
+                
+                cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (order_id,))
+                gtin_to_printrun_map = {str(row['gtin']): row['api_id'] for row in cur.fetchall()}
+
+                if not gtin_to_printrun_map:
+                    raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
+
+                df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
+                if df_for_json['printrun_id'].isnull().any():
+                    unmapped_gtins = df_for_json[df_for_json['printrun_id'].isnull()]['gtin'].unique()
+                    raise ValueError(f"Ошибка: Для GTIN(ов) {list(unmapped_gtins)} из файла не найден соответствующий ID тиража в заказе.")
+
+                grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
+                
+                grouped_for_api['codes_json'] = [
+                    json.dumps({
+                        "include": [{"code": code.replace('\x1d', '')} for code in row.DataMatrix],
+                        "attributes": { "production_date": str(row.production_date), "expiration_date": str(row.expiration_date) }
+                    })
+                    for row in grouped_for_api.itertuples()
+                ]
+                grouped_for_api['order_id'] = order_id
+                grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
+                grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
+
+                delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
+                upsert_data_to_db(cur, 'delta_result', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
+
+            conn.commit()
+
+    def get_declarator_report_data(self, order_id: int):
+        """Формирует и возвращает DataFrame для отчета декларанта."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT notes FROM orders WHERE id = %s", (order_id,))
+                order_info = cur.fetchone()
+                
+                query = """
+                    WITH RECURSIVE base_data AS (
+                        SELECT i.datamatrix, i.gtin, i.package_id, p.name AS product_name, p.description_1, p.description_2, p.description_3
+                        FROM items i LEFT JOIN products p ON i.gtin = p.gtin
+                        WHERE i.order_id = %(order_id)s
+                    ), package_hierarchy AS (
+                        SELECT p.id as base_box_id, p.id as package_id, p.level, p.sscc, p.parent_id
+                        FROM packages p WHERE p.level = 1 AND p.id IN (SELECT DISTINCT package_id FROM base_data WHERE package_id IS NOT NULL)
+                        UNION ALL
+                        SELECT ph.base_box_id, p_parent.id as package_id, p_parent.level, p_parent.sscc, p_parent.parent_id
+                        FROM package_hierarchy ph JOIN packages p_parent ON ph.parent_id = p_parent.id
+                    ), sscc_data AS (
+                        SELECT base_box_id AS id_level_1, MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1, MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2, MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
+                        FROM package_hierarchy GROUP BY base_box_id
+                    )
+                    SELECT b.datamatrix, b.gtin, SUBSTRING(b.datamatrix for 24) AS dm_part_24, SUBSTRING(b.datamatrix for 31) AS dm_part_31, s.sscc_level_1, s.sscc_level_2, s.sscc_level_3, b.product_name, b.description_1, b.description_2, b.description_3
+                    FROM base_data b LEFT JOIN sscc_data s ON b.package_id = s.id_level_1 ORDER BY b.datamatrix;
+                """
+                cur.execute(query, {'order_id': order_id})
+                report_data = cur.fetchall()
+        
+        if not report_data:
+            return None, None
+
+        df = pd.DataFrame(report_data)
+        df = df.applymap(lambda val: val.replace('\x1d', ' ') if isinstance(val, str) else val)
+        report_name = re.sub(r'[^\w]', '_', order_info.get('notes', '') if order_info else '').strip('_')
+        
+        return df, report_name
