@@ -769,6 +769,11 @@ class AdminWindowQt(QMainWindow):
         self.user_info = user_info
         self.setWindowTitle(f"Admin - {user_info.get('name', '')}")
         self.resize(1200, 700)
+        
+        # --- ИСПРАВЛЕНИЕ: Инициализируем кэши для заказов ---
+        self.in_progress_orders_cache = []
+        self.archive_orders_cache = []
+
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
         self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
         self.order_service = OrderService(self.user_info)
