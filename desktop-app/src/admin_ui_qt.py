@@ -113,12 +113,13 @@ class SsccGeneratorWorker(QObject):
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
 class OrderEditorFrameQt(QWidget):
     """Полнофункциональный фрейм для редактирования заказа."""
-    def __init__(self, user_info, order_id, scenario_data, main_app_window, parent=None):
+    def __init__(self, user_info, order_id, scenario_data, main_app_window, parent=None, is_archive=False):
         super().__init__(parent)
         self.user_info = user_info
         self.order_id = order_id
         self.scenario_data = scenario_data
         self.main_app_window = main_app_window
+        self.is_archive = is_archive
 
         self._create_widgets()
         self._load_details()
