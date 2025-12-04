@@ -1,4 +1,5 @@
 from PySide6.QtWidgets import (
+import copy
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QTextEdit,
     QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter, QTabWidget, QProgressDialog, QDialogButtonBox, QCheckBox,
@@ -784,6 +785,8 @@ class PrintableObjectItem(QGraphicsRectItem):
             self.setBrush(QColor("#add8e6")) # LightBlue
         elif obj_type == 'image':
             self.setBrush(QColor("#d0f0c0")) # TeaGreen
+        elif obj_type == 'text_with_image':
+            self.setBrush(QColor("#E6E6FA")) # Lavender
         else:
             self.setBrush(QColor("#f0f0f0"))
 
@@ -802,18 +805,28 @@ class PrintableObjectItem(QGraphicsRectItem):
             return self.obj_data.get('barcode_type', 'BARCODE')
         elif obj_type == 'text':
             if self.obj_data.get('is_custom_text'):
-                return f"'{self.obj_data.get('data_source', '')}'"
+                # Не показываем длинный текст в предпросмотре
+                return "'...' (свой текст)" if self.obj_data.get('data_source') else "Свой текст"
             return self.obj_data.get('data_source', 'text')
+        elif obj_type == 'image':
+            return 'IMG'
+        elif obj_type == 'text_with_image':
+            return 'Текст+IMG'
         return obj_type or "object"
     
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionHasChanged:
             # Обновляем координаты в исходном словаре данных
-            self.obj_data['x_mm'] = round(self.pos().x() / self.scale, 2)
-            self.obj_data['y_mm'] = round(self.pos().y() / self.scale, 2)
-            # Сообщаем родительскому диалогу об изменении
-            if self.scene() and hasattr(self.scene().parent(), 'on_item_moved'):
-                 self.scene().parent().on_item_moved(self.object_id)
+            new_x = round(self.pos().x() / self.scale, 2)
+            new_y = round(self.pos().y() / self.scale, 2)
+
+            # --- ИСПРАВЛЕНИЕ: Проверяем, изменились ли координаты, чтобы избежать рекурсии ---
+            if self.obj_data.get('x_mm') != new_x or self.obj_data.get('y_mm') != new_y:
+                self.obj_data['x_mm'] = new_x
+                self.obj_data['y_mm'] = new_y
+                # Сообщаем родительскому диалогу об изменении
+                if self.scene() and hasattr(self.scene().parent(), 'on_item_moved'):
+                    self.scene().parent().on_item_moved(self.object_id)
         return super().itemChange(change, value)
 
 
@@ -833,6 +846,29 @@ class LabelEditorDialog(QDialog):
         self.canvas_scale = 5
         self.selected_object_id = None
         
+        # --- НОВЫЙ БЛОК: Шаблоны и источники данных ---
+        self.object_templates = {
+            'text': { "type": "text", "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "ap_workplaces.warehouse_name", "font_name": "arial" },
+            'custom_text': { "type": "text", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "", "font_name": "arial" },
+            'qr': { "type": "barcode", "barcode_type": "QR", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "QR: Конфигурация рабочего места" },
+            'sscc': { "type": "barcode", "barcode_type": "SSCC", "x_mm": 10, "y_mm": 10, "width_mm": 50, "height_mm": 20, "data_source": "packages.sscc_code" },
+            'datamatrix': { "type": "barcode", "barcode_type": "DataMatrix", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "items.datamatrix" },
+            'image': { "type": "image", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "" },
+            'text_with_image': { "type": "text_with_image", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 60, "height_mm": 30, "data_source": "", "image_source": "", "font_name": "arial" }
+        }
+        self.available_text_sources = [
+            "ap_workplaces.warehouse_name",
+            "ap_workplaces.workplace_number",
+            "orders.client_name",
+            "packages.sscc_code"
+        ]
+        self.available_qr_sources = [
+            "QR: Конфигурация рабочего места",
+            "QR: Конфигурация сервера"
+        ]
+        self.available_sscc_sources = ["packages.sscc_code"]
+        self.available_datamatrix_sources = ["items.datamatrix"]
+
         self._build_editor_ui()
         self._load_template_to_ui()
         self._redraw_canvas()
@@ -850,36 +886,72 @@ class LabelEditorDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
+        # --- ИЗМЕНЕНИЕ: Добавляем все кнопки для создания объектов ---
         tools_group = QGroupBox("Инструменты")
         tools_layout = QVBoxLayout(tools_group)
-        self.btn_add_text = QPushButton("Добавить Текст")
-        self.btn_add_text.clicked.connect(lambda: self._add_object('text'))
-        self.btn_add_qr = QPushButton("Добавить QR-код")
-        self.btn_add_qr.clicked.connect(lambda: self._add_object('barcode', 'QR'))
-        self.btn_add_dm = QPushButton("Добавить DataMatrix")
-        self.btn_add_dm.clicked.connect(lambda: self._add_object('barcode', 'DataMatrix'))
+        btn_add_text = QPushButton("Добавить Текст (БД)")
+        btn_add_text.clicked.connect(lambda: self._add_object('text'))
+        btn_add_custom_text = QPushButton("Добавить Текст (свой)")
+        btn_add_custom_text.clicked.connect(lambda: self._add_object('custom_text'))
+        btn_add_qr = QPushButton("Добавить QR-код")
+        btn_add_qr.clicked.connect(lambda: self._add_object('qr'))
+        btn_add_sscc = QPushButton("Добавить SSCC")
+        btn_add_sscc.clicked.connect(lambda: self._add_object('sscc'))
+        btn_add_dm = QPushButton("Добавить DataMatrix")
+        btn_add_dm.clicked.connect(lambda: self._add_object('datamatrix'))
+        btn_add_image = QPushButton("Добавить Изображение")
+        btn_add_image.clicked.connect(lambda: self._add_object('image'))
+        btn_add_text_image = QPushButton("Добавить Текст+Картинка")
+        btn_add_text_image.clicked.connect(lambda: self._add_object('text_with_image'))
         
-        tools_layout.addWidget(self.btn_add_text)
-        tools_layout.addWidget(self.btn_add_qr)
-        tools_layout.addWidget(self.btn_add_dm)
+        tools_layout.addWidget(btn_add_text)
+        tools_layout.addWidget(btn_add_custom_text)
+        tools_layout.addWidget(btn_add_qr)
+        tools_layout.addWidget(btn_add_sscc)
+        tools_layout.addWidget(btn_add_dm)
+        tools_layout.addWidget(btn_add_image)
+        tools_layout.addWidget(btn_add_text_image)
         tools_layout.addStretch()
 
+        # --- ИЗМЕНЕНИЕ: Создаем все возможные виджеты для панели свойств ---
         props_group = QGroupBox("Свойства объекта")
-        props_layout = QFormLayout(props_group)
+        self.props_layout = QFormLayout(props_group)
+        
         self.prop_x = QLineEdit()
         self.prop_y = QLineEdit()
         self.prop_w = QLineEdit()
         self.prop_h = QLineEdit()
-        self.prop_data_source = QComboBox()
-        props_layout.addRow("X (мм):", self.prop_x)
-        props_layout.addRow("Y (мм):", self.prop_y)
-        props_layout.addRow("Ширина (мм):", self.prop_w)
-        props_layout.addRow("Высота (мм):", self.prop_h)
-        props_layout.addRow("Источник:", self.prop_data_source)
+        
+        self.prop_is_custom_text = QCheckBox("Произвольный текст")
+        
+        # --- ИЗМЕНЕНИЕ: Создаем контейнеры для динамических виджетов ---
+        self.prop_data_source_widget = QWidget()
+        data_source_layout = QHBoxLayout(self.prop_data_source_widget)
+        data_source_layout.setContentsMargins(0, 0, 0, 0)
+        self.prop_data_source_combo = QComboBox()
+        self.prop_data_source_combo.setEditable(False) # По умолчанию нередактируемый
+        self.prop_data_source_entry = QLineEdit()
+        data_source_layout.addWidget(self.prop_data_source_combo)
+        data_source_layout.addWidget(self.prop_data_source_entry)
+        
+        self.prop_image_source_widget = QWidget()
+        image_source_layout = QHBoxLayout(self.prop_image_source_widget)
+        image_source_layout.setContentsMargins(0, 0, 0, 0)
+        self.prop_image_source_combo = QComboBox()
+        self.prop_image_source_combo.setEditable(True) # Можно вписать имя
+        image_source_layout.addWidget(self.prop_image_source_combo)
+
+        self.props_layout.addRow("X (мм):", self.prop_x)
+        self.props_layout.addRow("Y (мм):", self.prop_y)
+        self.props_layout.addRow("Ширина (мм):", self.prop_w)
+        self.props_layout.addRow("Высота (мм):", self.prop_h)
+        self.props_layout.addRow(self.prop_is_custom_text)
+        self.props_layout.addRow("Источник:", self.prop_data_source_widget)
+        self.props_layout.addRow("Источник картинки:", self.prop_image_source_widget)
         
         btn_apply_props = QPushButton("Применить свойства")
         btn_apply_props.clicked.connect(self._apply_properties)
-        props_layout.addWidget(btn_apply_props)
+        self.props_layout.addWidget(btn_apply_props)
 
         controls_layout.addWidget(tools_group)
         controls_layout.addWidget(props_group)
@@ -897,11 +969,17 @@ class LabelEditorDialog(QDialog):
         splitter.addWidget(controls_widget)
         splitter.addWidget(canvas_widget)
         splitter.setSizes([300, 900])
+        
+        # Коннекторы
+        self.prop_is_custom_text.stateChanged.connect(self._update_properties_panel)
+
 
     def _redraw_canvas(self):
-        self.scene.clear()
-        if not self.template: return
+        self.scene.blockSignals(True)
         try:
+            self.scene.clear()
+            if not self.template: return
+            
             width_px = float(self.template['width_mm']) * self.canvas_scale
             height_px = float(self.template['height_mm']) * self.canvas_scale
             self.scene.setBackgroundBrush(QColor("lightgrey"))
@@ -910,8 +988,11 @@ class LabelEditorDialog(QDialog):
 
             for i, obj_data in enumerate(self.template.get('objects', [])):
                 self._draw_object(obj_data, i)
-        except (KeyError, ValueError) as e:
+        except (KeyError, ValueError, TypeError) as e:
             logging.error(f"Ошибка отрисовки холста: {e}")
+        finally:
+            self.scene.blockSignals(False)
+
 
     def _draw_object(self, obj_data, object_id):
         item = PrintableObjectItem(obj_data, object_id, self.canvas_scale)
@@ -919,72 +1000,138 @@ class LabelEditorDialog(QDialog):
         if self.selected_object_id == object_id:
             item.setSelected(True)
 
-    def _add_object(self, obj_type, barcode_type=None):
-        new_object = { "type": obj_type, "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 20 }
-        if obj_type == 'barcode':
-            new_object['barcode_type'] = barcode_type
-            new_object['data_source'] = '...scan...'
-        elif obj_type == 'text':
-            new_object['data_source'] = 'ap_workplaces.warehouse_name'
+    def _add_object(self, template_key: str):
+        import copy
+        new_object = copy.deepcopy(self.object_templates[template_key])
         
         if 'objects' not in self.template: self.template['objects'] = []
         self.template['objects'].append(new_object)
         self._redraw_canvas()
 
     def _load_template_to_ui(self):
-        # Выбираем первый объект по умолчанию, если он есть
         if self.template.get('objects'):
             self.selected_object_id = 0
         else:
             self.selected_object_id = None
         self._update_properties_panel()
-        self._redraw_canvas() # Перерисовываем, чтобы подсветить выделение
+        self._redraw_canvas() 
 
     def _update_properties_panel(self):
         logging.debug(f"Updating properties panel for selected_id: {self.selected_object_id}")
-        try:
-            if self.selected_object_id is None or self.selected_object_id >= len(self.template.get('objects', [])):
-                self.prop_x.clear()
-                self.prop_y.clear()
-                self.prop_w.clear()
-                self.prop_h.clear()
-                self.prop_x.setEnabled(False)
-                self.prop_y.setEnabled(False)
-                self.prop_w.setEnabled(False)
-                self.prop_h.setEnabled(False)
-                logging.debug("Properties panel cleared and disabled.")
-                return
 
-            self.prop_x.setEnabled(True)
-            self.prop_y.setEnabled(True)
-            self.prop_w.setEnabled(True)
-            self.prop_h.setEnabled(True)
+        is_object_selected = self.selected_object_id is not None and self.selected_object_id < len(self.template.get('objects', []))
+        
+        # Включаем/выключаем все поля, кроме чекбокса
+        self.prop_x.setEnabled(is_object_selected)
+        self.prop_y.setEnabled(is_object_selected)
+        self.prop_w.setEnabled(is_object_selected)
+        self.prop_h.setEnabled(is_object_selected)
+        self.prop_data_source_widget.setEnabled(is_object_selected)
+        self.prop_image_source_widget.setEnabled(is_object_selected)
+        self.props_layout.labelForField(self.prop_data_source_widget).setEnabled(is_object_selected)
+        self.props_layout.labelForField(self.prop_image_source_widget).setEnabled(is_object_selected)
 
-            obj_data = self.template['objects'][self.selected_object_id]
-            logging.debug(f"Loading data for object {self.selected_object_id}: {obj_data}")
-            self.prop_x.setText(str(obj_data.get('x_mm', '')))
-            self.prop_y.setText(str(obj_data.get('y_mm', '')))
-            self.prop_w.setText(str(obj_data.get('width_mm', '')))
-            self.prop_h.setText(str(obj_data.get('height_mm', '')))
-            logging.debug("Properties panel updated successfully.")
-        except Exception as e:
-            logging.error(f"FATAL: Crash in _update_properties_panel: {e}", exc_info=True)
-            # В случае ошибки, очищаем панель, чтобы избежать дальнейших проблем
-            self.prop_x.clear()
-            self.prop_y.clear()
-            self.prop_w.clear()
-            self.prop_h.clear()
+
+        # Сначала скрываем все опциональные виджеты
+        self.prop_is_custom_text.setVisible(False)
+        self.props_layout.labelForField(self.prop_image_source_widget).setVisible(False)
+        self.prop_image_source_widget.setVisible(False)
+        self.prop_data_source_combo.setVisible(False)
+        self.prop_data_source_entry.setVisible(False)
+
+        if not is_object_selected:
+            self.prop_x.clear(); self.prop_y.clear(); self.prop_w.clear(); self.prop_h.clear()
+            self.prop_data_source_combo.clear(); self.prop_data_source_entry.clear()
+            logging.debug("Properties panel cleared and disabled.")
+            return
+            
+        obj_data = self.template['objects'][self.selected_object_id]
+        obj_type = obj_data.get("type")
+
+        # Заполняем универсальные поля
+        self.prop_x.setText(str(obj_data.get('x_mm', '')))
+        self.prop_y.setText(str(obj_data.get('y_mm', '')))
+        self.prop_w.setText(str(obj_data.get('width_mm', '')))
+        self.prop_h.setText(str(obj_data.get('height_mm', '')))
+        
+        # Блокируем сигналы, чтобы не вызывать _update_properties_panel рекурсивно
+        self.prop_is_custom_text.blockSignals(True)
+        self.prop_is_custom_text.setChecked(obj_data.get('is_custom_text', False))
+        self.prop_is_custom_text.blockSignals(False)
+
+        # Настраиваем панель под конкретный тип объекта
+        if obj_type == 'text':
+            self.prop_is_custom_text.setVisible(True)
+            if obj_data.get('is_custom_text'):
+                self.prop_data_source_entry.setVisible(True)
+                self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
+            else:
+                self.prop_data_source_combo.setVisible(True)
+                self.prop_data_source_combo.setEditable(False)
+                self.prop_data_source_combo.clear()
+                self.prop_data_source_combo.addItems(self.available_text_sources)
+                self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+        elif obj_type == 'barcode':
+            self.prop_data_source_combo.setVisible(True)
+            self.prop_data_source_combo.setEditable(False)
+            self.prop_data_source_combo.clear()
+            barcode_type = obj_data.get('barcode_type', '').upper()
+            sources = {
+                'QR': self.available_qr_sources,
+                'SSCC': self.available_sscc_sources,
+                'DATAMATRIX': self.available_datamatrix_sources
+            }.get(barcode_type, [])
+            self.prop_data_source_combo.addItems(sources)
+            self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+        elif obj_type == 'image':
+            self.prop_data_source_combo.setVisible(True)
+            self.prop_data_source_combo.setEditable(True)
+            self.prop_data_source_combo.clear()
+            # TODO: Загружать список доступных картинок из БД
+            self.prop_data_source_combo.addItem(obj_data.get('data_source', '')) # Добавляем текущее значение
+            self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+        elif obj_type == 'text_with_image':
+            self.prop_data_source_entry.setVisible(True)
+            self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
+            self.prop_image_source_widget.setVisible(True)
+            self.props_layout.labelForField(self.prop_image_source_widget).setVisible(True)
+            self.prop_image_source_combo.clear()
+            # TODO: Загружать список доступных картинок из БД
+            self.prop_image_source_combo.addItem(obj_data.get('image_source', ''))
+            self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
+
+        logging.debug("Properties panel updated successfully.")
 
     def _apply_properties(self):
         if self.selected_object_id is None: return
         logging.debug(f"Applying properties for object_id: {self.selected_object_id}")
         try:
             obj_data = self.template['objects'][self.selected_object_id]
+            obj_type = obj_data.get("type")
+
             obj_data['x_mm'] = float(self.prop_x.text())
             obj_data['y_mm'] = float(self.prop_y.text())
             obj_data['width_mm'] = float(self.prop_w.text())
             obj_data['height_mm'] = float(self.prop_h.text())
-            #...
+
+            if obj_type == 'text':
+                is_custom = self.prop_is_custom_text.isChecked()
+                obj_data['is_custom_text'] = is_custom
+                if is_custom:
+                    obj_data['data_source'] = self.prop_data_source_entry.text()
+                else:
+                    obj_data['data_source'] = self.prop_data_source_combo.currentText()
+            
+            elif obj_type in ['barcode', 'image']:
+                obj_data['data_source'] = self.prop_data_source_combo.currentText()
+
+            elif obj_type == 'text_with_image':
+                obj_data['data_source'] = self.prop_data_source_entry.text()
+                obj_data['image_source'] = self.prop_image_source_combo.currentText()
+
             self._redraw_canvas()
             logging.debug("Properties applied and canvas redrawn.")
         except (ValueError, IndexError) as e:
@@ -1000,7 +1147,6 @@ class LabelEditorDialog(QDialog):
             if isinstance(item, PrintableObjectItem):
                 new_selected_id = item.object_id
 
-        # Обновляем панель свойств, только если ID выбранного объекта действительно изменился
         if self.selected_object_id != new_selected_id:
             self.selected_object_id = new_selected_id
             if new_selected_id is None:
@@ -1008,7 +1154,6 @@ class LabelEditorDialog(QDialog):
             else:
                 logging.debug(f"Item selected: id={self.selected_object_id}")
             self._update_properties_panel()
-
 
     def on_item_moved(self, object_id):
         """Слот, вызываемый из PrintableObjectItem при перемещении."""
@@ -1025,6 +1170,7 @@ class LabelEditorDialog(QDialog):
             super().accept()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить макет: {e}")
+
 
 
 class AdminWindowQt(QMainWindow):
