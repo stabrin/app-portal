@@ -198,23 +198,23 @@ class ApiService:
             if progress_callback:
                 progress_callback(message)
 
-        log("--- НАЧАЛО ЦИКЛА ПОЛУЧЕНИЯ КОДОВ ---")
-
-        # --- ШАГ 1: РАЗБИВКА НА ТИРАЖИ ---
+        log("--- НАЧАЛО ПОЛНОГО ЦИКЛА ПОЛУЧЕНИЯ КОДОВ ---")
+        
+        # Шаг 1: Тиражи
         log("\n--- Шаг 1/3: Создание тиражей ---")
         self._split_runs_step(order_id, post_processing_mode, log)
-
-        # --- ШАГ 2: ПОДГОТОВКА JSON ---
+        
+        # Шаг 2: JSON
         log("\n--- Шаг 2/3: Запрос на подготовку JSON ---")
         self._prepare_json_step(order_id, log)
 
-        # --- ШАГ 3: СКАЧИВАНИЕ КОДОВ ---
+        # Шаг 3: Скачивание
         log("\n--- Шаг 3/3: Скачивание кодов ---")
         self._download_codes_step(order_id, log)
-
+        
         self.order_service.update_order_status(order_id, 'Коды скачаны')
-        log("\n--- ЦИКЛ ПОЛУЧЕНИЯ КОДОВ УСПЕШНО ЗАВЕРШЕН ---")
-        return "Все коды успешно скачаны и сохранены в базу данных."
+        log("\n--- ПОЛНЫЙ ЦИКЛ ПОЛУЧЕНИЯ КОДОВ УСПЕШНО ЗАВЕРШЕН ---")
+        return "Все шаги (тиражи, JSON, скачивание) успешно выполнены."
 
     def _split_runs_step(self, order_id, post_processing_mode, log):
         """Часть полного цикла: создание тиражей."""

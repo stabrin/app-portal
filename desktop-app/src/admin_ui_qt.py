@@ -427,78 +427,60 @@ class ApiIntegrationFrameQt(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)
 
-        self.flow_panel = QHBoxLayout()
-        self.request_codes_btn = QPushButton("Запросить коды")
+        # Панель с основными кнопками циклов
+        buttons_layout = QHBoxLayout()
+        self.request_codes_btn = QPushButton("1. Запросить коды")
         self.request_codes_btn.clicked.connect(self._request_codes_flow)
-        self.get_codes_btn = QPushButton("Получить коды")
+        
+        self.get_codes_btn = QPushButton("2. Получить коды")
         self.get_codes_btn.clicked.connect(self._get_codes_flow)
-        # ... (остальные кнопки пока оставим без изменений)
-        self.split_runs_btn = QPushButton("Разбить на тиражи")
-        self.split_runs_btn.clicked.connect(self._split_runs)
-        self.prepare_json_btn = QPushButton("Подготовить JSON")
-        self.prepare_json_btn.clicked.connect(self._prepare_json)
-        self.download_codes_btn = QPushButton("Скачать коды")
-        self.download_codes_btn.clicked.connect(self._download_codes)
-        
-        self.flow_panel.addWidget(self.request_codes_btn)
-        self.flow_panel.addWidget(self.get_codes_btn)
-        self.flow_panel.addWidget(self.split_runs_btn)
-        self.flow_panel.addWidget(self.prepare_json_btn)
-        self.flow_panel.addWidget(self.download_codes_btn)
-        self.flow_panel.addStretch()
-        main_layout.addLayout(self.flow_panel)
 
-        self.reporting_panel = QHBoxLayout()
-        self.prepare_report_data_btn = QPushButton("Подготовить сведения")
-        self.prepare_report_data_btn.clicked.connect(self._prepare_report_data)
-        self.prepare_report_btn = QPushButton("Подготовить отчет")
-        self.prepare_report_btn.clicked.connect(self._prepare_report)
-        
-        self.reporting_panel.addWidget(self.prepare_report_data_btn)
-        self.reporting_panel.addWidget(self.prepare_report_btn)
-        self.reporting_panel.addStretch()
-        main_layout.addLayout(self.reporting_panel)
+        self.prepare_report_data_btn = QPushButton("3. Подготовить сведения")
+        self.prepare_report_data_btn.clicked.connect(self._prepare_report_data_flow)
 
+        self.prepare_report_btn = QPushButton("4. Подготовить отчет")
+        self.prepare_report_btn.clicked.connect(self._prepare_report_flow)
+        
+        buttons_layout.addWidget(self.request_codes_btn)
+        buttons_layout.addWidget(self.get_codes_btn)
+        buttons_layout.addWidget(self.prepare_report_data_btn)
+        buttons_layout.addWidget(self.prepare_report_btn)
+        buttons_layout.addStretch()
+        main_layout.addLayout(buttons_layout)
+
+        # Поле для вывода логов
         self.response_text = QTextEdit()
         self.response_text.setReadOnly(True)
+        self.response_text.setLineWrapMode(QTextEdit.NoWrap)
         main_layout.addWidget(self.response_text)
 
     def _update_buttons_state(self):
         """Обновляет состояние кнопок в зависимости от статуса заказа."""
         if not self.order_data: return
 
-        api_order_id = self.order_data.get('api_order_id')
         api_status = self.order_data.get('api_status')
 
-        all_buttons = [
-            self.request_codes_btn, self.get_codes_btn, self.split_runs_btn, self.prepare_json_btn,
-            self.download_codes_btn, self.prepare_report_data_btn, self.prepare_report_btn
-        ]
-        # Прячем все кнопки, чтобы потом показать только нужные
-        for btn in all_buttons:
-            btn.setVisible(False)
-
-        if api_status == 'Отчет подготовлен':
-            self._display_api_response("Завершено", "Работа с заказом в АПИ завершена. Отчет об использовании кодов подготовлен.")
-            return
-
-        if not api_order_id or not api_status:
-            self.request_codes_btn.setVisible(True)
+        # Сначала деактивируем все
+        self.request_codes_btn.setEnabled(False)
+        self.get_codes_btn.setEnabled(False)
+        self.prepare_report_data_btn.setEnabled(False)
+        self.prepare_report_btn.setEnabled(False)
+        
+        # Активируем нужные в зависимости от статуса
+        if not api_status:
+            self.request_codes_btn.setEnabled(True)
         elif api_status == 'Запрос создан':
-            self.get_codes_btn.setVisible(True)
-        else:
-            self.split_runs_btn.setVisible(True)
-            self.prepare_json_btn.setVisible(True)
-            self.download_codes_btn.setVisible(True)
-            self.prepare_report_data_btn.setVisible(True)
-            self.prepare_report_btn.setVisible(True)
-            
-            # Управляем состоянием (активна/неактивна)
-            # self.split_runs_btn.setEnabled(api_status in ['Коды получены']) # Пример
-            self.prepare_json_btn.setEnabled(api_status == 'Тиражи созданы')
-            self.download_codes_btn.setEnabled(api_status in ['JSON заказан', 'Коды скачаны'])
-            self.prepare_report_data_btn.setEnabled(api_status in ['JSON заказан', 'Коды скачааны'])
-            self.prepare_report_btn.setEnabled(api_status == 'Сведения подготовлены')
+            self.get_codes_btn.setEnabled(True)
+        elif api_status == 'Коды скачаны':
+            self.prepare_report_data_btn.setEnabled(True)
+        elif api_status == 'Сведения подготовлены':
+            # Обе кнопки активны, т.к. пользователь может хотеть пере-подготовить сведения
+            self.prepare_report_data_btn.setEnabled(True)
+            self.prepare_report_btn.setEnabled(True)
+        elif api_status == 'Отчет подготовлен':
+            self._display_api_response("Завершено", "Работа с заказом в АПИ полностью завершена.")
+        else: # Для промежуточных статусов ('Тиражи созданы', 'JSON заказан')
+            self.get_codes_btn.setEnabled(True) # Позволяем перезапустить весь цикл получения кодов
 
     def _display_api_response(self, title, body):
         self.response_text.setPlainText(f"--- {title} ---\n\n{body}")
@@ -541,56 +523,38 @@ class ApiIntegrationFrameQt(QWidget):
         if error:
             logging.error("Ошибка в фоновой задаче API", exc_info=error)
             QMessageBox.critical(self, "Ошибка выполнения", str(error))
-            # При ошибке тоже перезагружаем данные, чтобы видеть актуальный статус
-            self._load_order_data()
-            self._update_buttons_state()
-            return
-        
-        if result and isinstance(result, str):
-             QMessageBox.information(self, "Требуется действие", result)
+        elif result and isinstance(result, str):
+             QMessageBox.information(self, "Результат операции", result)
 
-        # Перезагружаем данные и обновляем кнопки после успешного выполнения
         self._load_order_data()
-        self._update_buttons_state()
-        self._append_log("\nОперация успешно завершена.")
+        self._update_buttons_state() # Перезагружаем данные и обновляем кнопки
+        if not error:
+            self._append_log("\nОперация успешно завершена.")
 
     def _request_codes_flow(self):
-        """Полный цикл запроса кодов."""
-        self._display_api_response("Запрос кодов", "Запуск операции...")
+        """Запускает полный цикл запроса кодов."""
+        self._display_api_response("1. Запрос кодов", "Запуск операции...")
         self._run_in_thread(
             self.api_service.request_codes_full_cycle, 
             self.order_id, 
             self._append_log
         )
     
-    # --- Методы-заглушки для остального функционала ---
-    def _show_not_implemented(self):
-        QMessageBox.warning(self, "В разработке", "Эта функция еще не реализована.")
-
     def _get_codes_flow(self):
-        """Полный цикл получения кодов: тиражи, JSON, скачивание."""
-        self._display_api_response("Получение кодов", "Запуск полного цикла...")
+        """Запускает полный цикл получения кодов."""
+        self._display_api_response("2. Получение кодов", "Запуск операции...")
         self._run_in_thread(
             self.api_service.get_codes_full_cycle,
             self.order_id,
             self.post_processing_mode,
             self._append_log
         )
+    
+    def _prepare_report_data_flow(self):
+        QMessageBox.warning(self, "В разработке", "Цикл 'Подготовить сведения' еще не реализован.")
 
-    def _split_runs(self):
-        self._show_not_implemented()
-
-    def _prepare_json(self):
-        self._show_not_implemented()
-
-    def _download_codes(self):
-        self._show_not_implemented()
-
-    def _prepare_report_data(self):
-        self._show_not_implemented()
-
-    def _prepare_report(self):
-        self._show_not_implemented()
+    def _prepare_report_flow(self):
+        QMessageBox.warning(self, "В разработке", "Цикл 'Подготовить отчет' еще не реализован.")
 
 
 class CodeUploadFrameQt(QWidget):
