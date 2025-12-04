@@ -263,166 +263,86 @@ class CatalogsService:
         """Возвращает шаблон для импорта локальных клиентов."""
         return pd.DataFrame(columns=['id', 'name', 'inn'])
 
-        def process_local_clients_import(self, df: pd.DataFrame):
-
-            """Обрабатывает импорт локальных клиентов из DataFrame."""
-
-            with self.get_db_connection() as conn:
-
-                # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
-
-                # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
-
-                df = df.where(pd.notna(df), None)
-
-    
-
-                # --- НОВАЯ ЛОГИКА: Разделяем на вставку и обновление для детального логирования ---
-
-                with conn.cursor() as cur:
-
-                    # Разделяем данные на те, что с ID (для обновления) и без (для вставки)
-
-                    update_df = df[pd.to_numeric(df['id'], errors='coerce').notna()].copy()
-
-                    insert_df = df[pd.to_numeric(df['id'], errors='coerce').isna()].copy()
-
-    
-
-                    # Обновляем существующие записи
-
-                    if not update_df.empty:
-
-                        update_df['id'] = update_df['id'].astype(int) # Приводим ID к целочисленному типу
-
-                        update_tuples = [tuple(x) for x in update_df[['name', 'inn', 'id']].to_numpy()]
-
-                        update_query = "UPDATE ap_clients SET name=%s, inn=%s WHERE id=%s"
-
-                        logger.info(f"Подготовлено к обновлению {len(update_tuples)} записей. Первые 5: {update_tuples[:5]}")
-
-                        cur.executemany(update_query, update_tuples)
-
-                        logger.info(f"Выполнен executemany для обновления {cur.rowcount} записей.")
-
-    
-
-                    # Вставляем новые записи
-
-                    if not insert_df.empty:
-
-                        # Для вставки убираем столбец 'id', так как он будет сгенерирован автоматически
-
-                        insert_tuples = [tuple(x) for x in insert_df[['name', 'inn']].to_numpy()]
-
-                        insert_query = "INSERT INTO ap_clients (name, inn) VALUES %s"
-
-                        logger.info(f"Подготовлено к вставке {len(insert_tuples)} новых записей. Первые 5: {insert_tuples[:5]}")
-
-                        execute_values(cur, insert_query, insert_tuples)
-
-                        logger.info(f"Выполнен execute_values для вставки {cur.rowcount} новых записей.")
-
-                conn.commit()
-
-    
-
-        # --- Методы для макетов печати ---
-
-    
-
-        def get_print_layouts(self):
-
-            """Возвращает список макетов печати из БД клиента."""
-
-            logger.info("Запрос справочника макетов печати из БД клиента.")
-
-            with self.get_db_connection() as conn:
-
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-
-                    # Проверяем, существует ли таблица перед выполнением запроса
-
-                    cur.execute("SELECT to_regclass('public.print_layouts')")
-
-                    if cur.fetchone()[0] is None:
-
-                        logger.warning("Таблица 'print_layouts' не найдена. Создание таблицы...")
-
-                        cur.execute("""
-
-                            CREATE TABLE print_layouts (
-
-                                id SERIAL PRIMARY KEY,
-
-                                name TEXT NOT NULL UNIQUE,
-
-                                layout_type VARCHAR(50),
-
-                                template_data TEXT
-
-                            )
-
-                        """)
-
-                        conn.commit()
-
-                        logger.info("Таблица 'print_layouts' успешно создана.")
-
-                        return [] # Возвращаем пустой список, так как таблица только что создана
-
-                    
-
-                    cur.execute("SELECT id, name, layout_type, template_data FROM print_layouts ORDER BY name")
-
-                    return cur.fetchall()
-
-    
-
-        def upsert_print_layout(self, layout_data: dict):
-
-            """Добавляет или обновляет макет печати."""
-
-            layout_id = layout_data.get('id')
-
-            with self.get_db_connection() as conn:
-
-                with conn.cursor() as cur:
-
-                    if layout_id: # Обновление
-
-                        cur.execute("""
-
-                            UPDATE print_layouts SET name=%s, layout_type=%s, template_data=%s
-
-                            WHERE id=%s
-
-                        """, (layout_data['name'], layout_data.get('layout_type'), layout_data.get('template_data'), layout_id))
-
-                    else: # Вставка
-
-                        cur.execute("""
-
-                            INSERT INTO print_layouts (name, layout_type, template_data)
-
-                            VALUES (%s, %s, %s)
-
-                        """, (layout_data['name'], layout_data.get('layout_type'), layout_data.get('template_data')))
-
-                conn.commit()
-
-    
-
-        def delete_print_layout(self, layout_id: int):
-
-            """Удаляет макет печати по ID."""
-
-            with self.get_db_connection() as conn:
-
-                with conn.cursor() as cur:
-
-                    cur.execute("DELETE FROM print_layouts WHERE id = %s", (layout_id,))
-
-                conn.commit()
+    def process_local_clients_import(self, df: pd.DataFrame):
+        """Обрабатывает импорт локальных клиентов из DataFrame."""
+        with self.get_db_connection() as conn:
+            # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
+            # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
+            df = df.where(pd.notna(df), None)
+
+            # --- НОВАЯ ЛОГИКА: Разделяем на вставку и обновление для детального логирования ---
+            with conn.cursor() as cur:
+                # Разделяем данные на те, что с ID (для обновления) и без (для вставки)
+                update_df = df[pd.to_numeric(df['id'], errors='coerce').notna()].copy()
+                insert_df = df[pd.to_numeric(df['id'], errors='coerce').isna()].copy()
+
+                # Обновляем существующие записи
+                if not update_df.empty:
+                    update_df['id'] = update_df['id'].astype(int) # Приводим ID к целочисленному типу
+                    update_tuples = [tuple(x) for x in update_df[['name', 'inn', 'id']].to_numpy()]
+                    update_query = "UPDATE ap_clients SET name=%s, inn=%s WHERE id=%s"
+                    logger.info(f"Подготовлено к обновлению {len(update_tuples)} записей. Первые 5: {update_tuples[:5]}")
+                    cur.executemany(update_query, update_tuples)
+                    logger.info(f"Выполнен executemany для обновления {cur.rowcount} записей.")
+
+                # Вставляем новые записи
+                if not insert_df.empty:
+                    # Для вставки убираем столбец 'id', так как он будет сгенерирован автоматически
+                    insert_tuples = [tuple(x) for x in insert_df[['name', 'inn']].to_numpy()]
+                    insert_query = "INSERT INTO ap_clients (name, inn) VALUES %s"
+                    logger.info(f"Подготовлено к вставке {len(insert_tuples)} новых записей. Первые 5: {insert_tuples[:5]}")
+                    execute_values(cur, insert_query, insert_tuples)
+                    logger.info(f"Выполнен execute_values для вставки {cur.rowcount} новых записей.")
+            conn.commit()
+
+    # --- Методы для макетов печати ---
+
+    def get_print_layouts(self):
+        """Возвращает список макетов печати из БД клиента."""
+        logger.info("Запрос справочника макетов печати из БД клиента.")
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Проверяем, существует ли таблица перед выполнением запроса
+                cur.execute("SELECT to_regclass('public.print_layouts')")
+                if cur.fetchone()[0] is None:
+                    logger.warning("Таблица 'print_layouts' не найдена. Создание таблицы...")
+                    cur.execute("""
+                        CREATE TABLE print_layouts (
+                            id SERIAL PRIMARY KEY,
+                            name TEXT NOT NULL UNIQUE,
+                            layout_type VARCHAR(50),
+                            template_data TEXT
+                        )
+                    """)
+                    conn.commit()
+                    logger.info("Таблица 'print_layouts' успешно создана.")
+                    return [] # Возвращаем пустой список, так как таблица только что создана
+                
+                cur.execute("SELECT id, name, layout_type, template_data FROM print_layouts ORDER BY name")
+                return cur.fetchall()
+
+    def upsert_print_layout(self, layout_data: dict):
+        """Добавляет или обновляет макет печати."""
+        layout_id = layout_data.get('id')
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if layout_id: # Обновление
+                    cur.execute("""
+                        UPDATE print_layouts SET name=%s, layout_type=%s, template_data=%s
+                        WHERE id=%s
+                    """, (layout_data['name'], layout_data.get('layout_type'), layout_data.get('template_data'), layout_id))
+                else: # Вставка
+                    cur.execute("""
+                        INSERT INTO print_layouts (name, layout_type, template_data)
+                        VALUES (%s, %s, %s)
+                    """, (layout_data['name'], layout_data.get('layout_type'), layout_data.get('template_data')))
+            conn.commit()
+
+    def delete_print_layout(self, layout_id: int):
+        """Удаляет макет печати по ID."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM print_layouts WHERE id = %s", (layout_id,))
+            conn.commit()
 
     
