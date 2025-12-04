@@ -1931,63 +1931,6 @@ class AdminWindowQt(QMainWindow):
         self.notifications_table.setColumnWidth(7, 70) # Позиций
         header.setSectionResizeMode(8, QHeaderView.Stretch) # Кодов ДМ (растягивается)
 
-        # Сводка по дням (под таблицей)
-        summary_label = QLabel("Сводка по дням:")
-        layout.addWidget(summary_label)
-        
-        # Визуальная группировка: первая строка — даты, вторая — метрики, далее — данные
-        from datetime import datetime, timedelta
-        today = datetime.now().date()
-        date_labels = []
-        for i in range(4):
-            date_obj = today + timedelta(days=i)
-            date_labels.append(date_obj.strftime('%d.%m.%Y'))
-
-        # Всего 13 колонок: 1 (Клиент) + 4*3
-        self.summary_table = QTableWidget(2, 13)  # 2 строки для заголовков
-        # Первая строка: "Клиент" + даты (объединение по 3 колонки)
-        client_item = QTableWidgetItem("Клиент")
-        client_item.setFlags(client_item.flags() & ~Qt.ItemIsEditable)
-        self.summary_table.setItem(0, 0, client_item)
-        self.summary_table.setSpan(0, 0, 2, 1)  # "Клиент" объединяет 2 строки
-        for i, date in enumerate(date_labels):
-            col = 1 + i*3
-            date_item = QTableWidgetItem(date)
-            date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
-            date_item.setTextAlignment(Qt.AlignCenter)
-            self.summary_table.setItem(0, col, date_item)
-            self.summary_table.setSpan(0, col, 1, 3)  # Дата объединяет 3 колонки
-        # Вторая строка: метрики
-        for i in range(4):
-            col = 1 + i*3
-            for j, metric in enumerate(["Ув", "Поз", "ДМ"]):
-                metric_item = QTableWidgetItem(metric)
-                metric_item.setFlags(metric_item.flags() & ~Qt.ItemIsEditable)
-                metric_item.setTextAlignment(Qt.AlignCenter)
-                self.summary_table.setItem(1, col+j, metric_item)
-
-        # Стилизация и размеры
-        self.summary_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.summary_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.summary_table.setMaximumHeight(170)
-        # ИСПРАВЛЕНИЕ: Скрываем стандартные заголовки (и номера строк, и номера колонок)
-        self.summary_table.verticalHeader().setVisible(False)
-        self.summary_table.horizontalHeader().setVisible(False)
-        # ИСПРАВЛЕНИЕ: Устанавливаем режим растягивания для колонок с данными,
-        # а для клиента задаем фиксированную ширину.
-        self.summary_table.setColumnWidth(0, 200) # Ширина для колонки "Клиент"
-        for i in range(1, 13):
-            self.summary_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
-        self.summary_table.setStyleSheet("""
-            QTableWidget::item:selected {
-                background-color: #ADD8E6;
-            }
-            QTableWidget {
-                gridline-color: #E0E0E0;
-            }
-        """)        # layout.addWidget(self.summary_table)
-        self.summary_table.setVisible(False) # Также скрываем виджет
-
         widget.setLayout(layout)
         return widget
 
@@ -1995,35 +1938,88 @@ class AdminWindowQt(QMainWindow):
         """Создает страницу управления уведомлениями в стиле 'список-детали'."""
         widget = QWidget()
         main_layout = QHBoxLayout(widget)
+        
+        # --- ИЗМЕНЕНИЕ: Создаем вертикальный разделитель для основной области и сводки ---
+        main_splitter = QSplitter(Qt.Vertical)
 
-        # Разделитель для списка (слева) и деталей (справа)
-        splitter = QSplitter(Qt.Horizontal)
+        # --- Верхняя панель: Список и детали ---
+        top_widget = QWidget()
+        top_layout = QHBoxLayout(top_widget)
+        top_layout.setContentsMargins(0,0,0,0)
 
-        # --- Левая панель: Список уведомлений и сводка ---
+        # Горизонтальный разделитель для списка (слева) и деталей (справа)
+        top_splitter = QSplitter(Qt.Horizontal)
+
+        # Левая панель: Список уведомлений
         left_panel = self._build_notifications_list_page()
-        splitter.addWidget(left_panel)
+        top_splitter.addWidget(left_panel)
 
-        # --- Правая панель: Детали уведомления ---
-        # Используем QStackedWidget для переключения между заглушкой и деталями
+        # Правая панель: Детали уведомления
         self.notification_details_stack = QStackedWidget()
-
-        # Виджет-заглушка
         placeholder_widget = QWidget()
         placeholder_layout = QVBoxLayout(placeholder_widget)
         placeholder_label = QLabel("Выберите уведомление для просмотра деталей")
         placeholder_label.setAlignment(Qt.AlignCenter)
         placeholder_layout.addWidget(placeholder_label)
         self.notification_details_stack.addWidget(placeholder_widget) # Индекс 0
-
-        # Виджет с деталями (вкладки)
         details_widget = self._build_notification_details_page()
         self.notification_details_stack.addWidget(details_widget) # Индекс 1
+        top_splitter.addWidget(self.notification_details_stack)
+        
+        top_splitter.setSizes([800, 400]) # Пропорции для списка и деталей
+        top_layout.addWidget(top_splitter)
 
-        splitter.addWidget(self.notification_details_stack)
-        # --- ИЗМЕНЕНИЕ: Устанавливаем пропорции 2:1, как в заказах ---
-        splitter.setSizes([800, 400])
+        # --- Нижняя панель: Сводка по дням ---
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        
+        summary_label = QLabel("Сводка по дням:")
+        bottom_layout.addWidget(summary_label)
 
-        main_layout.addWidget(splitter)
+        # --- ИЗМЕНЕНИЕ: Логика создания таблицы сводки перенесена сюда ---
+        from datetime import datetime, timedelta
+        today = datetime.now().date()
+        date_labels = [ (today + timedelta(days=i)).strftime('%d.%m.%Y') for i in range(4) ]
+
+        self.summary_table = QTableWidget(2, 13)
+        client_item = QTableWidgetItem("Клиент")
+        client_item.setFlags(client_item.flags() & ~Qt.ItemIsEditable)
+        self.summary_table.setItem(0, 0, client_item)
+        self.summary_table.setSpan(0, 0, 2, 1)
+
+        for i, date in enumerate(date_labels):
+            col = 1 + i * 3
+            date_item = QTableWidgetItem(date)
+            date_item.setFlags(date_item.flags() & ~Qt.ItemIsEditable)
+            date_item.setTextAlignment(Qt.AlignCenter)
+            self.summary_table.setItem(0, col, date_item)
+            self.summary_table.setSpan(0, col, 1, 3)
+
+        for i in range(4):
+            col = 1 + i * 3
+            for j, metric in enumerate(["Ув", "Поз", "ДМ"]):
+                metric_item = QTableWidgetItem(metric)
+                metric_item.setFlags(metric_item.flags() & ~Qt.ItemIsEditable)
+                metric_item.setTextAlignment(Qt.AlignCenter)
+                self.summary_table.setItem(1, col + j, metric_item)
+
+        self.summary_table.verticalHeader().setVisible(False)
+        self.summary_table.horizontalHeader().setVisible(False)
+        self.summary_table.setColumnWidth(0, 200)
+        for i in range(1, 13):
+            self.summary_table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
+        self.summary_table.setStyleSheet("""
+            QTableWidget::item:selected { background-color: #ADD8E6; }
+            QTableWidget { gridline-color: #E0E0E0; }
+        """)
+        bottom_layout.addWidget(self.summary_table)
+
+        # Собираем главный сплиттер
+        main_splitter.addWidget(top_widget)
+        main_splitter.addWidget(bottom_widget)
+        main_splitter.setSizes([600, 200]) # Пропорции для основной области и сводки
+
+        main_layout.addWidget(main_splitter)
         return widget
 
     def _build_notification_details_page(self):
