@@ -357,23 +357,751 @@ class ApiService:
 
         
 
-        final_message = (
+                final_message = (
 
-            f"Запрос на {total_codes} кодов успешно создан в ДМ.Код.\n\n"
+        
 
-            "Пожалуйста, перейдите на сайт ДМ.Код и подпишите созданный запрос с помощью ЭЦП."
+                    f"Запрос на {total_codes} кодов успешно создан в ДМ.Код.\n\n"
 
-        )
+        
 
-        return final_message
+                    "Пожалуйста, перейдите на сайт ДМ.Код и подпишите созданный запрос с помощью ЭЦП."
 
+        
 
+                )
 
-    def get_participants(self):
+        
 
-        """Получает список участников (клиентов) из API."""
+                return final_message
 
-        logger.info("Получение списка участников из API...")
+        
+
+        
+
+        
+
+            def get_codes_full_cycle(self, order_id, post_processing_mode, progress_callback):
+
+        
+
+                """
+
+        
+
+                Выполняет полный цикл: разбивка на тиражи, подготовка JSON, скачивание кодов.
+
+        
+
+                """
+
+        
+
+                if not self.order_service:
+
+        
+
+                    raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+
+        
+
+        
+
+        
+
+                def log(message):
+
+        
+
+                    if progress_callback:
+
+        
+
+                        progress_callback(message)
+
+        
+
+        
+
+        
+
+                log("--- НАЧАЛО ЦИКЛА ПОЛУЧЕНИЯ КОДОВ ---")
+
+        
+
+        
+
+        
+
+                # --- ШАГ 1: РАЗБИВКА НА ТИРАЖИ ---
+
+        
+
+                log("\n--- Шаг 1/3: Создание тиражей ---")
+
+        
+
+                self._split_runs_step(order_id, post_processing_mode, log)
+
+        
+
+        
+
+        
+
+                # --- ШАГ 2: ПОДГОТОВКА JSON ---
+
+        
+
+                log("\n--- Шаг 2/3: Запрос на подготовку JSON ---")
+
+        
+
+                self._prepare_json_step(order_id, log)
+
+        
+
+        
+
+        
+
+                # --- ШАГ 3: СКАЧИВАНИЕ КОДОВ ---
+
+        
+
+                log("\n--- Шаг 3/3: Скачивание кодов ---")
+
+        
+
+                self._download_codes_step(order_id, log)
+
+        
+
+        
+
+        
+
+                self.order_service.update_order_status(order_id, 'Коды скачаны')
+
+        
+
+                log("\n--- ЦИКЛ ПОЛУЧЕНИЯ КОДОВ УСПЕШНО ЗАВЕРШЕН ---")
+
+        
+
+                return "Все коды успешно скачаны и сохранены в базу данных."
+
+        
+
+        
+
+        
+
+            def _split_runs_step(self, order_id, post_processing_mode, log):
+
+        
+
+                """Часть полного цикла: создание тиражей."""
+
+        
+
+                log("Синхронизация активных тиражей из API...")
+
+        
+
+                api_order_id = self.order_service.get_order_by_id(order_id).get('api_order_id')
+
+        
+
+                
+
+        
+
+                api_printruns_response = self.get_printruns(api_order_id)
+
+        
+
+                orders_list = api_printruns_response.get('orders', [])
+
+        
+
+                if not orders_list:
+
+        
+
+                    raise Exception("Ответ API на get_printruns не содержит списка 'orders'.")
+
+        
+
+                
+
+        
+
+                api_printruns = orders_list[0].get('printruns', [])
+
+        
+
+                gtin_to_active_run_id = {p['gtin']: p['id'] for p in api_printruns if p.get('state') == 'ACTIVE'}
+
+        
+
+        
+
+        
+
+                self.order_service.clear_and_sync_printruns(order_id, gtin_to_active_run_id)
+
+        
+
+                log("Синхронизация завершена.")
+
+        
+
+                
+
+        
+
+                details_data = self.order_service.get_details_for_splitting(order_id, post_processing_mode)
+
+        
+
+                if not details_data:
+
+        
+
+                    raise Exception("В заказе нет детализации для создания тиражей.")
+
+        
+
+                details_df = pd.DataFrame(details_data)
+
+        
+
+                log(f"Найдено {len(details_df)} позиций для обработки в локальной БД.")
+
+        
+
+        
+
+        
+
+                order_details_from_api = self.get_order_details(api_order_id)
+
+        
+
+                api_products = order_details_from_api.get('orders', [{}])[0].get('products', [])
+
+        
+
+                if not api_products:
+
+        
+
+                    raise Exception("API не вернуло список продуктов в заказе.")
+
+        
+
+        
+
+        
+
+                gtin_to_api_product_id = {p['gtin']: p['id'] for p in api_products if p.get('state') == 'ACTIVE' and p.get('qty') == p.get('qty_received')}
+
+        
+
+                details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
+
+        
+
+                log("Сопоставление продуктов с API завершено.")
+
+        
+
+        
+
+        
+
+                for i, row in details_df.iterrows():
+
+        
+
+                    if pd.notna(row.get('api_id')):
+
+        
+
+                        log(f"Пропуск GTIN {row['gtin']}, тираж уже существует (ID: {row['api_id']}).")
+
+        
+
+                        continue
+
+        
+
+                    
+
+        
+
+                    if pd.isna(row.get('api_product_id')):
+
+        
+
+                        log(f"Пропуск GTIN {row['gtin']}, не найден активный продукт в API.")
+
+        
+
+                        continue
+
+        
+
+        
+
+        
+
+                    log(f"--- Создаю тираж для GTIN {row['gtin']}...")
+
+        
+
+                    try:
+
+        
+
+                        tirage_payload = {"order_product_id": int(row['api_product_id']), "qty": int(row['dm_quantity'])}
+
+        
+
+                        response_data = self.create_printrun(tirage_payload)
+
+        
+
+                        new_printrun_id = response_data.get('printrun_id')
+
+        
+
+                        if not new_printrun_id:
+
+        
+
+                            raise Exception(f"API не вернуло 'printrun_id' для GTIN {row['gtin']}.")
+
+        
+
+                    except requests.exceptions.HTTPError as e:
+
+        
+
+                        if e.response.status_code == 400:
+
+        
+
+                            raise Exception("API вернуло ошибку 400. Вероятно, система еще обрабатывает предыдущий запрос. Подождите несколько минут и попробуйте снова.")
+
+        
+
+                        else:
+
+        
+
+                            raise
+
+        
+
+        
+
+        
+
+                    if 'id' in row and pd.notna(row['id']):
+
+        
+
+                        self.order_service.update_detail_api_id(row['id'], new_printrun_id)
+
+        
+
+                    else:
+
+        
+
+                        self.order_service.update_details_api_id_by_gtin(order_id, row['gtin'], new_printrun_id)
+
+        
+
+                    log(f"  Успешно создан тираж ID {new_printrun_id} для GTIN {row['gtin']}.")
+
+        
+
+        
+
+        
+
+                    log("  Ожидание готовности API к созданию следующего тиража...")
+
+        
+
+                    max_wait, interval = 180, 5
+
+        
+
+                    start_time = time.time()
+
+        
+
+                    while time.time() - start_time < max_wait:
+
+        
+
+                        runs_resp = self.get_printruns(api_order_id)
+
+        
+
+                        is_awaiting = any(p.get('state') == 'AWAITING' for p in runs_resp.get('orders', [{}])[0].get('printruns', []))
+
+        
+
+                        if not is_awaiting:
+
+        
+
+                            log("  API готово.")
+
+        
+
+                            break
+
+        
+
+                        log(f"  API занято (статус AWAITING). Проверка через {interval} сек...")
+
+        
+
+                        time.sleep(interval)
+
+        
+
+                    else:
+
+        
+
+                        raise Exception("Время ожидания готовности API истекло. Один из тиражей остался в статусе AWAITING.")
+
+        
+
+                
+
+        
+
+                self.order_service.update_order_status(order_id, 'Тиражи созданы')
+
+        
+
+                log("Шаг создания тиражей успешно завершен.")
+
+        
+
+        
+
+        
+
+            def _prepare_json_step(self, order_id, log):
+
+        
+
+                """Часть полного цикла: подготовка JSON."""
+
+        
+
+                unique_printrun_ids = self.order_service.get_unique_printrun_ids(order_id)
+
+        
+
+                if not unique_printrun_ids:
+
+        
+
+                    raise Exception("Не найдено уникальных ID тиражей для запроса JSON.")
+
+        
+
+        
+
+        
+
+                log(f"Найдено {len(unique_printrun_ids)} уникальных тиражей для запроса.")
+
+        
+
+                for i, printrun_id in enumerate(unique_printrun_ids):
+
+        
+
+                    log(f"--- {i+1}/{len(unique_printrun_ids)}: Запрос JSON для тиража ID {printrun_id}...")
+
+        
+
+                    self.create_printrun_json({"printrun_id": printrun_id})
+
+        
+
+                    log(f"  Запрос для тиража {printrun_id} успешно отправлен.")
+
+        
+
+                    time.sleep(0.5)
+
+        
+
+        
+
+        
+
+                log("\nОжидание генерации JSON сервером...")
+
+        
+
+                max_wait, interval = 300, 5
+
+        
+
+                start_time = time.time()
+
+        
+
+                api_order_id = self.order_service.get_order_by_id(order_id).get('api_order_id')
+
+        
+
+                while time.time() - start_time < max_wait:
+
+        
+
+                    runs_resp = self.get_printruns(api_order_id)
+
+        
+
+                    runs_list = runs_resp.get('orders', [{}])[0].get('printruns', [])
+
+        
+
+                    api_runs_status = {p['id']: p.get('json', False) for p in runs_list}
+
+        
+
+                    
+
+        
+
+                    all_ready = True
+
+        
+
+                    for run_id in unique_printrun_ids:
+
+        
+
+                        if not api_runs_status.get(run_id, False):
+
+        
+
+                            all_ready = False
+
+        
+
+                            log(f"  JSON для тиража {run_id} еще не готов.")
+
+        
+
+                            break
+
+        
+
+                    
+
+        
+
+                    if all_ready:
+
+        
+
+                        log("  Все JSON-файлы готовы.")
+
+        
+
+                        break
+
+        
+
+                    
+
+        
+
+                    log(f"  Проверка через {interval} сек...")
+
+        
+
+                    time.sleep(interval)
+
+        
+
+                else:
+
+        
+
+                    raise Exception("Время ожидания готовности JSON истекло.")
+
+        
+
+                
+
+        
+
+                self.order_service.update_order_status(order_id, 'JSON заказан')
+
+        
+
+                log("Шаг подготовки JSON успешно завершен.")
+
+        
+
+        
+
+        
+
+            def _download_codes_step(self, order_id, log):
+
+        
+
+                """Часть полного цикла: скачивание кодов."""
+
+        
+
+                unique_printrun_ids = self.order_service.get_unique_printrun_ids(order_id)
+
+        
+
+                if not unique_printrun_ids:
+
+        
+
+                    raise Exception("Не найдено уникальных ID тиражей для скачивания кодов.")
+
+        
+
+        
+
+        
+
+                log(f"Найдено {len(unique_printrun_ids)} тиражей для скачивания.")
+
+        
+
+                total_codes_downloaded = 0
+
+        
+
+                for i, printrun_id in enumerate(unique_printrun_ids):
+
+        
+
+                    log(f"--- {i+1}/{len(unique_printrun_ids)}: Скачивание кодов для тиража ID {printrun_id}...")
+
+        
+
+                    try:
+
+        
+
+                        codes_json = self.download_printrun_json({"printrun_id": printrun_id})
+
+        
+
+                        if not codes_json or 'codes' not in codes_json:
+
+        
+
+                            log(f"  ВНИМАНИЕ: Для тиража {printrun_id} получен пустой ответ или ответ без ключа 'codes'.")
+
+        
+
+                            continue
+
+        
+
+                        
+
+        
+
+                        num_codes = len(codes_json['codes'])
+
+        
+
+                        total_codes_downloaded += num_codes
+
+        
+
+                        log(f"  Скачано {num_codes} кодов. Сохранение в базу данных...")
+
+        
+
+                        
+
+        
+
+                        self.order_service.save_downloaded_codes(printrun_id, codes_json)
+
+        
+
+                        log("  Коды успешно сохранены.")
+
+        
+
+        
+
+        
+
+                    except Exception as e:
+
+        
+
+                        log(f"  ОШИБКА при скачивании кодов для тиража {printrun_id}: {e}")
+
+        
+
+                        # Продолжаем скачивать остальные, не прерываем весь процесс
+
+        
+
+                        continue
+
+        
+
+                
+
+        
+
+                log(f"\nСкачивание завершено. Всего скачано кодов: {total_codes_downloaded}.")
+
+        
+
+        
+
+        
+
+            # --- Существующие низкоуровневые методы ---
+
+        
+
+        
+
+        
+
+            def get_participants(self):
+
+        
+
+                """Получает список участников (клиентов) из API."""
+
+        
+
+                logger.info("Получение списка участников из API...")
 
         try:
 

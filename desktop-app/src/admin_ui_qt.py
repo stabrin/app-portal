@@ -568,8 +568,14 @@ class ApiIntegrationFrameQt(QWidget):
         QMessageBox.warning(self, "В разработке", "Эта функция еще не реализована.")
 
     def _get_codes_flow(self):
-        # В будущем здесь будет вызов _split_runs_task, _prepare_json_task и _download_codes_task
-        self._show_not_implemented()
+        """Полный цикл получения кодов: тиражи, JSON, скачивание."""
+        self._display_api_response("Получение кодов", "Запуск полного цикла...")
+        self._run_in_thread(
+            self.api_service.get_codes_full_cycle,
+            self.order_id,
+            self.post_processing_mode,
+            self._append_log
+        )
 
     def _split_runs(self):
         self._show_not_implemented()

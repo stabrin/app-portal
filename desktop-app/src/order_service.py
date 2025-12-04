@@ -376,3 +376,60 @@ class OrderService:
             with conn.cursor() as cur:
                 cur.execute("UPDATE orders SET api_status = %s WHERE id = %s", (status, order_id))
             conn.commit()
+
+    def clear_and_sync_printruns(self, order_id: int, gtin_to_run_id: dict):
+        """Очищает старые api_id и синхронизирует новые ID активных тиражей из API."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Очищаем все ID для данного заказа
+                cur.execute("UPDATE dmkod_aggregation_details SET api_id = NULL WHERE order_id = %s", (order_id,))
+                # 2. Обновляем ID для тех, что были найдены в API
+                if gtin_to_run_id:
+                    for gtin, run_id in gtin_to_run_id.items():
+                        cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (run_id, order_id, gtin))
+            conn.commit()
+
+    def get_details_for_splitting(self, order_id: int, post_processing_mode: str):
+        """Возвращает детализацию заказа, сгруппированную или нет, в зависимости от режима постобработки."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if post_processing_mode == "Печать через Bartender":
+                    cur.execute("SELECT id, gtin, dm_quantity, api_id FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
+                else:
+                    cur.execute("""
+                        SELECT gtin, api_id, SUM(dm_quantity) as dm_quantity
+                        FROM dmkod_aggregation_details WHERE order_id = %s
+                        GROUP BY gtin, api_id
+                    """, (order_id,))
+                return cur.fetchall()
+
+    def update_detail_api_id(self, detail_id: int, api_id: int):
+        """Обновляет api_id для одной строки детализации по ее ID."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE id = %s", (api_id, detail_id))
+            conn.commit()
+
+    def update_details_api_id_by_gtin(self, order_id: int, gtin: str, api_id: int):
+        """Обновляет api_id для всех строк с указанным GTIN в рамках заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (api_id, order_id, gtin))
+            conn.commit()
+
+    def get_unique_printrun_ids(self, order_id: int):
+        """Возвращает множество уникальных ID тиражей (api_id) для заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (order_id,))
+                return {item['api_id'] for item in cur.fetchall()}
+
+    def save_downloaded_codes(self, printrun_id: int, codes_json: dict):
+        """Сохраняет скачанные коды (в формате JSON) для соответствующего тиража."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE dmkod_aggregation_details SET api_codes_json = %s WHERE api_id = %s",
+                    (json.dumps(codes_json), printrun_id)
+                )
+            conn.commit()
