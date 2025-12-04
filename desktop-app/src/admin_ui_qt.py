@@ -3351,9 +3351,11 @@ class AdminWindowQt(QMainWindow):
 
     def _refresh_print_layouts(self):
         """Загружает список макетов в таблицу."""
+        logging.debug("Starting refresh of print layouts.")
         try:
             self.print_layouts_table.setRowCount(0)
             layouts = self.catalog_service.get_print_layouts()
+            logging.debug(f"Retrieved {len(layouts)} layouts from catalog_service.")
             self.print_layouts_table.setRowCount(len(layouts))
             for i, layout_data in enumerate(layouts):
                 name = layout_data.get('name', '')
@@ -3367,6 +3369,7 @@ class AdminWindowQt(QMainWindow):
                 self.print_layouts_table.setItem(i, 1, QTableWidgetItem(size_str))
 
         except Exception as e:
+            logging.error(f"Failed to load print layouts: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты печати: {e}")
 
     def _create_new_layout(self):
