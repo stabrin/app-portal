@@ -1578,8 +1578,8 @@ class AdminWindowQt(QMainWindow):
 
         # --- ИСПРАВЛЕНИЕ: Правильно добавляем виджеты в сплиттер и задаем пропорции ---
         top_splitter.addWidget(table_container_widget) # Слева - контейнер с таблицей и фильтрами
-        top_splitter.addWidget(management_stack)       # Справа - панель управления
-        top_splitter.setSizes([700, 350])              # Устанавливаем пропорции ~2/3 к 1/3
+        top_splitter.addWidget(management_stack)       # Справа - панель управления        # --- ИЗМЕНЕНИЕ: Устанавливаем пропорции 2/3 к 1/3 для горизонтального сплиттера ---
+        top_splitter.setSizes([800, 400])              # Пропорция 2:1
         top_layout.addWidget(top_splitter)
 
         # Нижняя панель (статистика)
@@ -1594,8 +1594,8 @@ class AdminWindowQt(QMainWindow):
         stats_layout.addWidget(stats_table)
 
         main_splitter.addWidget(top_widget) # top_widget теперь содержит корректно настроенный top_splitter
-        main_splitter.addWidget(bottom_widget)
-        main_splitter.setSizes([500, 200])
+        main_splitter.addWidget(bottom_widget)        # --- ИЗМЕНЕНИЕ: Устанавливаем пропорции 3/4 к 1/4 для вертикального сплиттера ---
+        main_splitter.setSizes([600, 200])             # Пропорция 3:1
         
         main_layout.addWidget(main_splitter)
 
