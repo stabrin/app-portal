@@ -7,232 +7,672 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import time
+
+import json
+
+
+
 class ApiService:
+
     """
+
     Сервис для инкапсуляции всех взаимодействий с внешним API ДМкод.
+
     """
-    def __init__(self, user_info):
+
+    def __init__(self, user_info, order_service=None):
+
         """
-        Инициализирует сервис с информацией о пользователе, включая токен доступа.
-        :param user_info: Словарь с данными пользователя, включая 'api_access_token'.
+
+        Инициализирует сервис.
+
+        :param user_info: Словарь с данными пользователя.
+
+        :param order_service: Экземпляр OrderService для работы с БД заказов.
+
         """
+
         self.user_info = user_info
-        # --- ИЗМЕНЕНИЕ: Получаем URL из конфигурации клиента, а не из .env ---
+
+        self.order_service = order_service
+
         api_config = self.user_info.get('client_api_config', {})
+
         self.api_base_url = api_config.get('api_base_url')
 
+
+
         if not self.api_base_url:
+
             raise ValueError("URL для подключения к API не найден в конфигурации пользователя.")
 
+
+
     def _get_auth_headers(self):
+
         """Создает заголовок авторизации."""
+
         access_token = self.user_info.get('api_access_token')
+
         if not access_token:
+
             raise ConnectionError("Отсутствует токен доступа к API.")
+
         return {'Authorization': f'Bearer {access_token}'}
 
+
+
     def refresh_token(self):
+
         """Обновляет access и refresh токены, используя текущий refresh токен."""
+
         refresh_token = self.user_info.get('api_refresh_token')
+
         if not refresh_token:
+
             logger.error("Refresh token не найден. Невозможно обновить токен доступа.")
+
             raise ConnectionError("Refresh token отсутствует.")
 
+
+
         logger.info("Токен доступа истек или невалиден. Попытка обновления...")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/user/token/refresh"
+
             response = requests.post(url, json={'refresh': refresh_token})
+
             response.raise_for_status()
+
             
+
             new_tokens = response.json()
+
             self.user_info['api_access_token'] = new_tokens['access']
+
             self.user_info['api_refresh_token'] = new_tokens['refresh']
+
             
+
             logger.info("Токены успешно обновлены.")
+
             return True
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Не удалось обновить токен: {e}", exc_info=True)
-            # Если обновление не удалось, возможно, refresh-токен тоже истек.
-            # В этом случае нужно будет перелогиниться.
+
             raise ConnectionError("Не удалось обновить токен. Требуется повторная авторизация.") from e
 
+
+
     def _api_request(self, method, url, **kwargs):
+
         """Обертка для всех API-запросов с автоматическим обновлением токена."""
+
         try:
+
             headers = self._get_auth_headers()
+
             response = requests.request(method, url, headers=headers, **kwargs)
+
             response.raise_for_status()
+
             return response
+
         except requests.exceptions.HTTPError as e:
+
             if e.response.status_code == 401: # Unauthorized
+
                 self.refresh_token()
+
                 headers = self._get_auth_headers() # Получаем новые заголовки
+
                 return requests.request(method, url, headers=headers, **kwargs)
-            raise # Перебрасываем другие HTTP ошибки
+
+            raise
+
+
+
+    # --- НОВЫЙ ВЫСОКОУРОВНЕВЫЙ МЕТОД ---
+
+    def request_codes_full_cycle(self, order_id, progress_callback):
+
+        """
+
+        Выполняет полную цепочку: создание заказа (если нужно), пауза, создание запроса на коды.
+
+        """
+
+        if not self.order_service:
+
+            raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+
+
+
+        def log(message):
+
+            if progress_callback:
+
+                progress_callback(message)
+
+
+
+        log("Шаг 1/7: Проверка токена API...")
+
+        self.get_participants()
+
+        log("Токен API в порядке.")
+
+
+
+        order_data = self.order_service.get_order_by_id(order_id)
+
+        api_order_id = order_data.get('api_order_id')
+
+
+
+        if not api_order_id:
+
+            log("\nШаг 2-3/7: Создание заказа в API...")
+
+            order_creation_data = self.order_service.get_order_for_api_creation(order_id)
+
+            products_payload = [
+
+                {"gtin": p['gtin'], "code_template": order_creation_data['dm_template'], "qty": int(p['dm_quantity']), "unit_type": "UNIT", "release_method": "IMPORT", "payment_type": 2} 
+
+                for p in order_creation_data['products']
+
+            ]
+
+            api_payload = {
+
+                "participant_id": order_creation_data['client_api_id'], 
+
+                "production_order_id": order_creation_data['notes'] or "", 
+
+                "contact_person": self.user_info['name'], 
+
+                "products": products_payload
+
+            }
+
+            
+
+            log(f"Тело запроса на создание заказа:\n{json.dumps(api_payload, indent=2, ensure_ascii=False)}")
+
+            response_data = self.create_order(api_payload)
+
+            api_order_id = response_data.get('order_id')
+
+            if not api_order_id:
+
+                raise Exception(f"API не вернуло ID заказа: {response_data}")
+
+
+
+            self.order_service.update_order_api_id(order_id, api_order_id)
+
+            log(f"Заказ в API создан с ID: {api_order_id}")
+
+        else:
+
+            log(f"\nШаг 2-3/7: Заказ ID {api_order_id} уже существует.")
+
+
+
+        log(f"\nШаг 4/7: Ожидание активации заказа ID {api_order_id}...")
+
+        max_wait_time, check_interval = 300, 5
+
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait_time:
+
+            details = self.get_order_details(api_order_id)
+
+            orders_list = details.get('orders', [])
+
+            if not orders_list:
+
+                log("Ожидание данных заказа от API...")
+
+                time.sleep(check_interval)
+
+                continue
+
+            
+
+            order_obj = orders_list[0]
+
+            order_active = order_obj.get('state') == 'ACTIVE'
+
+            products_active = all(p.get('state') == 'ACTIVE' for p in order_obj.get('products', []))
+
+
+
+            if order_active and products_active:
+
+                log("Заказ и все продукты активны.")
+
+                break
+
+            
+
+            log(f"Ожидание... (проверка через {check_interval} сек)")
+
+            time.sleep(check_interval)
+
+        else:
+
+            final_details_str = json.dumps(details, indent=2, ensure_ascii=False)
+
+            raise Exception(f"Время ожидания активации заказа истекло. Последний ответ от API:\n{final_details_str}")
+
+
+
+        log(f"\nШаг 5/7: Создание запроса на коды...")
+
+        suborder_req_payload = {"order_id": int(api_order_id)}
+
+        suborder_req_response = self.create_suborder_request(suborder_req_payload)
+
+        log(f"Ответ API: {json.dumps(suborder_req_response, ensure_ascii=False)}")
+
+
+
+        log(f"\nШаг 6/7: Ожидание активного запроса на коды...")
+
+        suborders_to_sign = []
+
+        total_codes = 0
+
+        gtin_summary = {}
+
+        max_wait_time, check_interval = 120, 3
+
+        start_time = time.time()
+
+        while time.time() - start_time < max_wait_time:
+
+            suborders_details = self.get_suborders(api_order_id)
+
+            for order in suborders_details.get('orders', []):
+
+                for suborder in order.get('suborders', []):
+
+                    if suborder.get('state') == 'ACTIVE':
+
+                        suborders_to_sign.append(suborder)
+
+                        for product in suborder.get('suborder_products', []):
+
+                            qty = product.get('qty', 0)
+
+                            gtin = product.get('gtin')
+
+                            total_codes += qty
+
+                            if gtin:
+
+                                gtin_summary[gtin] = gtin_summary.get(gtin, 0) + qty
+
+            if suborders_to_sign:
+
+                break
+
+            log(f"Ожидание... (проверка через {check_interval} сек)")
+
+            time.sleep(check_interval)
+
+        
+
+        if not suborders_to_sign:
+
+            raise Exception(f"Не найдено активных запросов к подписи после их создания. Последний ответ от API: {json.dumps(suborders_details, indent=2, ensure_ascii=False)}")
+
+
+
+        summary_text = f"\n--- Сводка для подписи ---\n"
+
+        summary_text += f"Найдено запросов к подписи: {len(suborders_to_sign)}\n"
+
+        summary_text += f"Общее количество кодов: {total_codes}\n\n"
+
+        summary_text += "Детализация по GTIN:\n"
+
+        for gtin, qty in gtin_summary.items():
+
+            summary_text += f"  - GTIN: {gtin}, Кол-во: {qty}\n"
+
+        log(summary_text)
+
+
+
+        self.order_service.update_order_status(order_id, 'Запрос создан')
+
+        
+
+        final_message = (
+
+            f"Запрос на {total_codes} кодов успешно создан в ДМ.Код.\n\n"
+
+            "Пожалуйста, перейдите на сайт ДМ.Код и подпишите созданный запрос с помощью ЭЦП."
+
+        )
+
+        return final_message
+
+
 
     def get_participants(self):
+
         """Получает список участников (клиентов) из API."""
+
         logger.info("Получение списка участников из API...")
+
         try:
+
             participants_url = f"{self.api_base_url.rstrip('/')}/psp/participants"
+
             response = self._api_request('get', participants_url)
+
             return response.json().get('participants', [])
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Не удалось получить список участников из API: {e}", exc_info=True)
+
             raise
+
+
 
     def create_order(self, payload: dict):
+
         """Создает заказ в API ДМкод."""
+
         logger.info(f"Отправка запроса на создание заказа в API. Payload: {payload}")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/order/create"
+
             response = self._api_request('post', url, json=payload, timeout=30)
+
             logger.info(f"Заказ успешно создан в API. Ответ: {response.json()}")
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при создании заказа в API: {e}", exc_info=True)
+
             raise
+
+
 
     def create_suborder_request(self, payload: dict):
+
         """Создает запрос на коды (suborder) в API ДМкод."""
+
         logger.info(f"Отправка запроса на создание suborder. Payload: {payload}")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/suborders/create"
+
             response = self._api_request('post', url, json=payload, timeout=30)
+
             logger.info(f"Запрос на коды успешно отправлен. Ответ: {response.json()}")
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при создании запроса на коды: {e}", exc_info=True)
+
             raise
+
+
 
     def get_order_details(self, api_order_id: int):
+
         """Получает детали заказа из API."""
+
         logger.info(f"Запрос деталей заказа ID {api_order_id} из API.")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/orders"
-            # GET-запрос с телом в JSON
+
             response = self._api_request('get', url, json={"order_id": api_order_id}, timeout=30)
+
             logger.info(f"Детали заказа {api_order_id} успешно получены.")
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при получении деталей заказа {api_order_id}: {e}", exc_info=True)
+
             raise
+
+
 
     def get_suborders(self, api_order_id: int):
+
         """Получает список подзаказов (запросов на коды) для заказа."""
+
         logger.info(f"Запрос подзаказов для заказа ID {api_order_id} из API.")
+
         try:
-            # Согласно вашему описанию, используется GET-запрос с телом
+
             url = f"{self.api_base_url.rstrip('/')}/psp/suborders"
+
             response = self._api_request('get', url, json={"order_id": api_order_id}, timeout=30)
+
             logger.info(f"Подзаказы для заказа {api_order_id} успешно получены.")
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при получении подзаказов для заказа {api_order_id}: {e}", exc_info=True)
+
             raise
+
+	
 
     def create_printrun(self, payload: dict):
+
         """Создает тираж (printrun) в API."""
+
         logger.info(f"Отправка запроса на создание тиража. Payload: {payload}")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/printrun/create"
+
             response = self._api_request('post', url, json=payload, timeout=30)
+
             logger.info(f"Тираж успешно создан. Ответ: {response.json()}")
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при создании тиража: {e}", exc_info=True)
+
             raise
+
+
 
     def get_printruns(self, order_id: int) -> list:
+
         """
+
         Получает список тиражей для конкретного заказа.
+
         Обращается к эндпоинту psp/printruns.
+
         """
+
         url = f"{self.api_base_url.rstrip('/')}/psp/printruns"
-        payload = {'order_id': int(order_id)} # --- ИСПРАВЛЕНИЕ: Передаем order_id в теле запроса ---
+
+        payload = {'order_id': int(order_id)} 
+
         logging.info(f"Запрос списка тиражей для заказа ID {order_id} из API. Эндпоинт: {url}")
+
         try:
-            # В отличие от других методов, этот эндпоинт может не возвращать 'status': 'ok'
+
             response = self._api_request('get', url, json=payload)
+
             logging.info(f"Список тиражей для заказа {order_id} успешно получен.")
+
             return response.json()
+
         except Exception as e:
+
             logging.error(f"Ошибка при запросе списка тиражей для заказа {order_id}: {e}", exc_info=True)
+
             raise
+
+
 
     def create_printrun_json(self, payload: dict):
+
         """Запрашивает подготовку JSON-файла с кодами для тиража."""
+
         logger.info(f"Отправка запроса на подготовку JSON для тиража. Payload: {payload}")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/printrun/json/create"
+
             response = self._api_request('post', url, json=payload, timeout=30)
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при запросе JSON для тиража: {e}", exc_info=True)
+
             raise
+
+
 
     def download_printrun_json(self, payload: dict):
+
         """Скачивает готовый JSON-файл с кодами для тиража."""
+
         logger.info(f"Отправка запроса на скачивание кодов для тиража. Payload: {payload}")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/printrun/json/download"
+
             response = self._api_request('get', url, json=payload, timeout=60)
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при скачивании кодов для тиража: {e}", exc_info=True)
+
             raise
+
+
 
     def upload_utilisation_data(self, payload: dict):
+
         """
+
         Отправляет сведения об использовании кодов (атрибуция, агрегация).
-        Адаптировано из dmkod-integration-app.
+
         """
+
         logger.info(f"Отправка сведений об использовании. Payload: {payload}")
+
         import json
+
         try:
-            # --- ИСПРАВЛЕНИЕ: Гарантируем, что payload всегда является словарем ---
-            # Если payload - это строка, загружаем ее как JSON.
-            # Это решает проблему "can only concatenate str (not "int") to str" при повторных вызовах.
+
             if isinstance(payload, str):
+
                 payload_dict = json.loads(payload)
+
             else:
+
                 payload_dict = payload
 
-            # --- ИЗМЕНЕНИЕ: Используем единый эндпоинт согласно вашему требованию ---
+
+
             url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload"
-            # Используем параметр `json`, который автоматически кодирует словарь в JSON
-            # и устанавливает правильный заголовок 'Content-Type: application/json'.
+
             response = self._api_request('post', url, json=payload_dict, timeout=240)
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при отправке сведений об использовании: {e}", exc_info=True)
+
             raise
+
+
 
     def get_utilisation_result(self, utilisation_upload_id: int):
+
         """
+
         Получает результат обработки ранее отправленных сведений об использовании.
-        Использует GET-запрос с телом JSON.
+
         """
+
         logger.info(f"Запрос результата для utilisation_upload_id: {utilisation_upload_id}")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/result"
+
             payload = {'utilisation_upload_id': int(utilisation_upload_id)}
+
             response = self._api_request('get', url, json=payload, timeout=60)
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при получении результата для utilisation_upload_id {utilisation_upload_id}: {e}", exc_info=True)
+
             raise
 
+
+
     def create_utilisation_report(self, payload: dict):
+
         """
+
         Отправляет запрос на создание отчета об использовании (нанесении).
+
         """
+
         logger.info(f"Отправка запроса на создание отчета. Payload: {payload}")
+
         try:
+
             url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/report/create"
-            # Увеличиваем таймаут, так как операция может быть долгой
+
             response = self._api_request('post', url, json=payload, timeout=120)
+
             return response.json()
+
         except requests.exceptions.RequestException as e:
+
             logger.error(f"Ошибка при создании отчета об использовании: {e}", exc_info=True)
+
             raise

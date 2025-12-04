@@ -402,29 +402,23 @@ class OrderEditorFrameQt(QWidget):
 
 class ApiIntegrationFrameQt(QWidget):
     """Полнофункциональный фрейм для интеграции с API ДМ.Код."""
-    def __init__(self, user_info, order_id, post_processing_mode, main_app_window, parent=None):
+    def __init__(self, api_service, order_id, post_processing_mode, main_app_window, parent=None):
         super().__init__(parent)
-        self.user_info = user_info
+        self.api_service = api_service
         self.order_id = order_id
         self.post_processing_mode = post_processing_mode
         self.main_app_window = main_app_window
-        self.api_service = ApiService(user_info)
         self.order_data = None
 
         self._load_order_data()
         self._create_widgets()
         self._update_buttons_state()
 
-    def _get_client_db_connection(self):
-        return get_client_db_connection(self.user_info)
-
     def _load_order_data(self):
         """Загружает данные заказа для определения состояния кнопок."""
         try:
-            with self._get_client_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute("SELECT * FROM orders WHERE id = %s", (self.order_id,))
-                    self.order_data = cur.fetchone()
+            # Используем order_service, который находится внутри api_service
+            self.order_data = self.api_service.order_service.get_order_by_id(self.order_id)
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить данные заказа: {e}")
             self.deleteLater()
@@ -433,12 +427,12 @@ class ApiIntegrationFrameQt(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)
 
-        # Ряд 1: Основной флоу
         self.flow_panel = QHBoxLayout()
         self.request_codes_btn = QPushButton("Запросить коды")
         self.request_codes_btn.clicked.connect(self._request_codes_flow)
         self.get_codes_btn = QPushButton("Получить коды")
         self.get_codes_btn.clicked.connect(self._get_codes_flow)
+        # ... (остальные кнопки пока оставим без изменений)
         self.split_runs_btn = QPushButton("Разбить на тиражи")
         self.split_runs_btn.clicked.connect(self._split_runs)
         self.prepare_json_btn = QPushButton("Подготовить JSON")
@@ -454,7 +448,6 @@ class ApiIntegrationFrameQt(QWidget):
         self.flow_panel.addStretch()
         main_layout.addLayout(self.flow_panel)
 
-        # Ряд 2: Флоу отчетности
         self.reporting_panel = QHBoxLayout()
         self.prepare_report_data_btn = QPushButton("Подготовить сведения")
         self.prepare_report_data_btn.clicked.connect(self._prepare_report_data)
@@ -466,7 +459,6 @@ class ApiIntegrationFrameQt(QWidget):
         self.reporting_panel.addStretch()
         main_layout.addLayout(self.reporting_panel)
 
-        # Поле для вывода ответа от API
         self.response_text = QTextEdit()
         self.response_text.setReadOnly(True)
         main_layout.addWidget(self.response_text)
@@ -482,11 +474,12 @@ class ApiIntegrationFrameQt(QWidget):
             self.request_codes_btn, self.get_codes_btn, self.split_runs_btn, self.prepare_json_btn,
             self.download_codes_btn, self.prepare_report_data_btn, self.prepare_report_btn
         ]
+        # Прячем все кнопки, чтобы потом показать только нужные
         for btn in all_buttons:
             btn.setVisible(False)
 
         if api_status == 'Отчет подготовлен':
-            self._display_api_response(200, "Работа с заказом в АПИ завершена. Отчет об использовании кодов подготовлен.")
+            self._display_api_response("Завершено", "Работа с заказом в АПИ завершена. Отчет об использовании кодов подготовлен.")
             return
 
         if not api_order_id or not api_status:
@@ -494,205 +487,104 @@ class ApiIntegrationFrameQt(QWidget):
         elif api_status == 'Запрос создан':
             self.get_codes_btn.setVisible(True)
         else:
-            if api_status == 'Тиражи созданы':
-                self.prepare_json_btn.setVisible(True)
-            
+            self.split_runs_btn.setVisible(True)
+            self.prepare_json_btn.setVisible(True)
             self.download_codes_btn.setVisible(True)
             self.prepare_report_data_btn.setVisible(True)
             self.prepare_report_btn.setVisible(True)
             
-            self.download_codes_btn.setEnabled(api_status in ['JSON заказан', 'Коды скачаны', 'Сведения подготовлены', 'Отчет подготовлен'])
-            self.prepare_report_data_btn.setEnabled(api_status in ['JSON заказан', 'Коды скачаны'])
+            # Управляем состоянием (активна/неактивна)
+            # self.split_runs_btn.setEnabled(api_status in ['Коды получены']) # Пример
+            self.prepare_json_btn.setEnabled(api_status == 'Тиражи созданы')
+            self.download_codes_btn.setEnabled(api_status in ['JSON заказан', 'Коды скачаны'])
+            self.prepare_report_data_btn.setEnabled(api_status in ['JSON заказан', 'Коды скачааны'])
             self.prepare_report_btn.setEnabled(api_status == 'Сведения подготовлены')
 
-    def _display_api_response(self, status_code, body):
-        """Отображает ответ API в текстовом поле."""
-        if not isinstance(body, str):
-            body = json.dumps(body, indent=2, ensure_ascii=False)
-        response_content = f"Статус: {status_code}\n\nТело ответа:\n{body}"
-        self.response_text.setPlainText(response_content)
+    def _display_api_response(self, title, body):
+        self.response_text.setPlainText(f"--- {title} ---\n\n{body}")
 
     def _append_log(self, message):
-        """Добавляет сообщение в лог в текстовом поле."""
         self.response_text.append(message)
-        QApplication.processEvents()
+        QApplication.processEvents() # Обновляем UI для отображения лога
 
-    def _run_in_thread(self, target_func):
+    def _run_in_thread(self, target_func, *args):
         """Запускает функцию в отдельном потоке, чтобы не блокировать UI."""
-        # Используем стандартный QThread + QObject Worker паттерн
         class Worker(QObject):
-            finished = Signal()
-            error = Signal(str)
-            log_message = Signal(str)
+            finished = Signal(object, object) # (результат, ошибка)
 
-            def __init__(self, func):
+            def __init__(self, func, *func_args):
                 super().__init__()
                 self.func = func
+                self.func_args = func_args
 
             def run(self):
                 try:
-                    self.func(self.log_message.emit)
-                    self.finished.emit()
+                    result = self.func(*self.func_args)
+                    self.finished.emit(result, None)
                 except Exception as e:
-                    error_details = traceback.format_exc()
-                    self.error.emit(f"ОШИБКА: {e}\n\n{error_details}")
+                    self.finished.emit(None, e)
 
         self.thread = QThread()
-        self.worker = Worker(target_func)
+        self.worker = Worker(target_func, *args)
         self.worker.moveToThread(self.thread)
 
-        self.worker.log_message.connect(self._append_log)
-        self.worker.error.connect(lambda err: self._display_api_response(500, err))
-        self.worker.finished.connect(self._load_order_data) # Перезагружаем данные заказа
-        self.worker.finished.connect(self._update_buttons_state) # Обновляем кнопки
-        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self._on_task_finished)
+        self.thread.started.connect(self.worker.run)
+        self.thread.finished.connect(self.thread.quit)
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
 
-        self.thread.started.connect(self.worker.run)
         self.thread.start()
 
-    def _create_progress_dialog(self):
-        """Создает и настраивает диалог прогресса."""
-        # --- ИСПРАВЛЕНИЕ: Метод вынесен на уровень класса ---
-        self.progress_dialog = QProgressDialog("Выполняется...", "Отмена", 0, 100, self)
-        self.progress_dialog.setWindowModality(Qt.WindowModal)
-        self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.show()
+    def _on_task_finished(self, result, error):
+        """Обрабатывает результат выполнения фоновой задачи."""
+        if error:
+            logging.error("Ошибка в фоновой задаче API", exc_info=error)
+            QMessageBox.critical(self, "Ошибка выполнения", str(error))
+            # При ошибке тоже перезагружаем данные, чтобы видеть актуальный статус
+            self._load_order_data()
+            self._update_buttons_state()
+            return
+        
+        if result and isinstance(result, str):
+             QMessageBox.information(self, "Требуется действие", result)
+
+        # Перезагружаем данные и обновляем кнопки после успешного выполнения
+        self._load_order_data()
+        self._update_buttons_state()
+        self._append_log("\nОперация успешно завершена.")
 
     def _request_codes_flow(self):
         """Полный цикл запроса кодов."""
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
-        self._create_progress_dialog()
-
-        def task(log_signal):
-            log_signal.emit("Шаг 1/7: Проверка токена API...")
-            self.api_service.get_participants()
-            log_signal.emit("Токен API в порядке.")
-
-            api_order_id = self.order_data.get('api_order_id')
-            if not api_order_id:
-                # ... (логика создания заказа, как в admin_ui.py) ...
-                log_signal.emit(f"Заказ в API создан с ID: {api_order_id}")
-            
-            # ... (логика ожидания активации) ...
-            
-            # ... (логика создания запроса на коды) ...
-
-            # ... (логика ожидания активного подзаказа и вывода сводки) ...
-
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE orders SET api_status = 'Запрос создан' WHERE id = %s", (self.order_id,))
-                conn.commit()
-            
-            QMetaObject.invokeMethod(self, "show_info_message", Qt.QueuedConnection, Q_ARG(str, "Требуется действие"), Q_ARG(str, "Запрос на коды создан. Пожалуйста, подпишите его на сайте ДМ.Код."))
-
-        self._run_in_thread(task)
-
-    @Slot(str, str)
-    def show_info_message(self, title, message):
-        QMessageBox.information(self, title, message)
+        self._display_api_response("Запрос кодов", "Запуск операции...")
+        self._run_in_thread(
+            self.api_service.request_codes_full_cycle, 
+            self.order_id, 
+            self._append_log
+        )
+    
+    # --- Методы-заглушки для остального функционала ---
+    def _show_not_implemented(self):
+        QMessageBox.warning(self, "В разработке", "Эта функция еще не реализована.")
 
     def _get_codes_flow(self):
-        """Полный цикл получения кодов."""
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
-        self._create_progress_dialog()
-
-        def task(log_signal):
-            if self._split_runs_task(log_signal, show_final_message=False):
-                if self._prepare_json_task(log_signal, show_final_message=False):
-                    self._download_codes_task(log_signal)
-        self._run_in_thread(task)
+        # В будущем здесь будет вызов _split_runs_task, _prepare_json_task и _download_codes_task
+        self._show_not_implemented()
 
     def _split_runs(self):
-        self._run_in_thread(lambda log_signal: self._split_runs_task(log_signal))
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
-        self._create_progress_dialog()
-
-    def _split_runs_task(self, log_signal, show_final_message=True):
-        log_signal.emit("Начинаю создание тиражей...")
-        # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
-        self.progress_dialog.setValue(10)
-        try:
-            # ... (полная логика из _split_runs_task в admin_ui.py) ...
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE orders SET api_status = 'Тиражи созданы' WHERE id = %s", (self.order_id,))
-                conn.commit()
-            if show_final_message:
-                log_signal.emit("Все тиражи успешно созданы!")
-            # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
-            self.progress_dialog.setValue(100)
-            return True
-        except Exception as e:
-            log_signal.emit(f"\nОШИБКА: {e}\n{traceback.format_exc()}")
-            # --- ИСПРАВЛЕНИЕ: Скрываем диалог при ошибке ---
-            self.progress_dialog.cancel()
-            return False
+        self._show_not_implemented()
 
     def _prepare_json(self):
-        self._run_in_thread(lambda log_signal: self._prepare_json_task(log_signal))
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
-        self._create_progress_dialog()
-
-    def _prepare_json_task(self, log_signal, show_final_message=True):
-        log_signal.emit("Начинаю подготовку JSON...")
-        # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
-        self.progress_dialog.setValue(10)
-        try:
-            # ... (полная логика из _prepare_json_task в admin_ui.py) ...
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE orders SET api_status = 'JSON заказан' WHERE id = %s", (self.order_id,))
-                conn.commit()
-            if show_final_message:
-                log_signal.emit("Все запросы на подготовку JSON успешно отправлены!")
-            # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
-            self.progress_dialog.setValue(100)
-            return True
-        except Exception as e:
-            log_signal.emit(f"\nОШИБКА: {e}\n{traceback.format_exc()}")
-            # --- ИСПРАВЛЕНИЕ: Скрываем диалог при ошибке ---
-            self.progress_dialog.cancel()
-            return False
+        self._show_not_implemented()
 
     def _download_codes(self):
-        self._run_in_thread(lambda log_signal: self._download_codes_task(log_signal))
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
-        self._create_progress_dialog()
-
-    def _download_codes_task(self, log_signal):
-        log_signal.emit("Начинаю скачивание кодов...")
-        # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
-        self.progress_dialog.setValue(10)
-        try:
-            # ... (полная логика из _download_codes_task в admin_ui.py) ...
-            with self._get_client_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("UPDATE orders SET api_status = 'Коды скачаны' WHERE id = %s", (self.order_id,))
-                conn.commit()
-            log_signal.emit("Все коды успешно сохранены в базу данных.")
-            # --- ИСПРАВЛЕНИЕ: Обновляем значение прогресс-бара ---
-            self.progress_dialog.setValue(100)
-        except Exception as e:
-            log_signal.emit(f"\nОШИБКА: {e}\n{traceback.format_exc()}")
-            # --- ИСПРАВЛЕНИЕ: Скрываем диалог при ошибке ---
-            self.progress_dialog.cancel()
+        self._show_not_implemented()
 
     def _prepare_report_data(self):
-        # ... (аналогично, с использованием _run_in_thread) ...
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
-        self._create_progress_dialog()
-        QMessageBox.information(self, "В разработке", "Подготовка сведений для отчета находится в разработке.")
-        self.progress_dialog.cancel()
+        self._show_not_implemented()
 
     def _prepare_report(self):
-        # ... (аналогично, с использованием _run_in_thread) ...
-        # --- ИСПРАВЛЕНИЕ: Создаем диалог только при запуске операции ---
-        self._create_progress_dialog()
-        QMessageBox.information(self, "В разработке", "Подготовка отчета находится в разработке.")
-        self.progress_dialog.cancel()
+        self._show_not_implemented()
 
 
 class CodeUploadFrameQt(QWidget):
@@ -877,13 +769,10 @@ class AdminWindowQt(QMainWindow):
         self.user_info = user_info
         self.setWindowTitle(f"Admin - {user_info.get('name', '')}")
         self.resize(1200, 700)
-        # --- ИСПРАВЛЕНИЕ: Инициализируем кэши для заказов ---
-        self.in_progress_orders_cache = []
-        self.archive_orders_cache = []
-        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-        # --- ИСПРАВЛЕНИЕ: Инициализируем сервис для работы со справочниками ---
+        # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
         self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
         self.order_service = OrderService(self.user_info)
+        self.api_service = ApiService(self.user_info, self.order_service)
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
         self._build_ui()
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
@@ -1419,7 +1308,7 @@ class AdminWindowQt(QMainWindow):
                     # logging.debug("on_order_select: Вкладка 'АПИ' скрыта, 'Загрузка кодов' показана.")
                 else: # По умолчанию или "Заказ в ДМ.Код"
                     # logging.debug(f"on_order_select: Создание ApiIntegrationFrameQt для заказа ID {order_id}...")
-                    api_frame = ApiIntegrationFrameQt(self.user_info, order_id, post_processing_mode, self)
+                    api_frame = ApiIntegrationFrameQt(self.api_service, order_id, post_processing_mode, self)
                     api_tab.layout().addWidget(api_frame)
                     management_tabs.setTabVisible(management_tabs.indexOf(api_tab), True)
                     management_tabs.setTabVisible(management_tabs.indexOf(docs_tab), True) # Показываем документы

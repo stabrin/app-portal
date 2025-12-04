@@ -341,3 +341,38 @@ class OrderService:
         report_name = re.sub(r'[^\w]', '_', order_info.get('notes', '') if order_info else '').strip('_')
         
         return df, report_name
+
+    # --- Новые методы для поддержки ApiService ---
+    def get_order_by_id(self, order_id: int):
+        """Возвращает основные данные заказа по его ID."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM orders WHERE id = %s", (order_id,))
+                return cur.fetchone()
+
+    def get_order_for_api_creation(self, order_id: int):
+        """Возвращает данные, необходимые для создания заказа в API ДМ.Код."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT o.notes, pg.dm_template, o.client_api_id FROM orders o JOIN dmkod_product_groups pg ON o.product_group_id = pg.id WHERE o.id = %s", (order_id,))
+                order_info = cur.fetchone()
+                cur.execute("SELECT gtin, dm_quantity FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
+                products_data = cur.fetchall()
+        
+        products_df = pd.DataFrame(products_data).groupby('gtin').agg(dm_quantity=('dm_quantity', 'sum')).reset_index()
+        order_info['products'] = products_df.to_dict('records')
+        return order_info
+
+    def update_order_api_id(self, order_id: int, api_order_id: int):
+        """Обновляет api_order_id для заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE orders SET api_order_id = %s WHERE id = %s", (api_order_id, order_id))
+            conn.commit()
+
+    def update_order_status(self, order_id: int, status: str):
+        """Обновляет текстовый статус (api_status) для заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE orders SET api_status = %s WHERE id = %s", (status, order_id))
+            conn.commit()
