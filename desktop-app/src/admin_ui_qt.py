@@ -529,6 +529,36 @@ class TaskEditorFrameQt(QWidget):
 
         main_layout.addLayout(form_layout)
 
+        # --- NEW MARKING SETTINGS ---
+        if self.task_data.get('type') == 'marking':
+            self.marking_settings_group = QGroupBox("Параметры маркировки")
+            marking_layout = QFormLayout(self.marking_settings_group)
+
+            # Aggregation Type
+            self.aggregation_type_combo = QComboBox()
+            self.aggregation_type_combo.addItems(["Без агрегации", "Отрывающий", "Закрывающий"])
+            marking_layout.addRow("Тип агрегации:", self.aggregation_type_combo)
+
+            # Employee Count
+            self.employee_count_spinbox = QSpinBox()
+            self.employee_count_spinbox.setRange(1, 100)
+            self.employee_count_spinbox.setValue(3) # Default
+            marking_layout.addRow("Количество сотрудников:", self.employee_count_spinbox)
+
+            # SSCC Source
+            self.sscc_source_label = QLabel("Способ получения SSCC:")
+            self.sscc_source_combo = QComboBox()
+            self.sscc_source_combo.addItems(["Генерируем сами", "Предоставляет клиент"])
+            marking_layout.addRow(self.sscc_source_label, self.sscc_source_combo)
+
+            main_layout.addWidget(self.marking_settings_group)
+
+            # Connect signal for dynamic visibility
+            self.aggregation_type_combo.currentTextChanged.connect(self._on_aggregation_type_changed)
+        else:
+            self.marking_settings_group = None
+        # --- END NEW MARKING SETTINGS ---
+
         # Редактор JSON
         main_layout.addWidget(QLabel("Параметры (settings_json):"))
         self.settings_json_edit = QTextEdit()
@@ -554,6 +584,12 @@ class TaskEditorFrameQt(QWidget):
 
         main_layout.addLayout(buttons_layout)
 
+    def _on_aggregation_type_changed(self, text):
+        if self.marking_settings_group:
+            is_sscc_visible = (text != "Без агрегации")
+            self.sscc_source_label.setVisible(is_sscc_visible)
+            self.sscc_source_combo.setVisible(is_sscc_visible)
+
     def _load_task_details(self):
         """Загружает детали задачи в виджеты."""
         settings_json = self.task_data.get('settings_json', {})
@@ -564,6 +600,15 @@ class TaskEditorFrameQt(QWidget):
                 settings_json = {}
         
         self.settings_json_edit.setText(json.dumps(settings_json, indent=4, ensure_ascii=False))
+
+        # --- NEW: Load marking settings ---
+        if self.marking_settings_group:
+            self.aggregation_type_combo.setCurrentText(settings_json.get('aggregation_type', 'Без агрегации'))
+            self.employee_count_spinbox.setValue(settings_json.get('employee_count', 3))
+            self.sscc_source_combo.setCurrentText(settings_json.get('sscc_source', 'Генерируем сами'))
+            # Trigger initial visibility update
+            self._on_aggregation_type_changed(self.aggregation_type_combo.currentText())
+        # --- END NEW ---
         
         # Обновляем состояние кнопок в зависимости от статуса
         status = self.task_data.get('status')
@@ -589,7 +634,18 @@ class TaskEditorFrameQt(QWidget):
         # 2. Сохранение JSON
         try:
             settings_text = self.settings_json_edit.toPlainText()
-            settings_data = json.loads(settings_text)
+            settings_data = json.loads(settings_text) if settings_text else {}
+
+            # --- NEW: Update settings from widgets if they exist ---
+            if self.marking_settings_group:
+                settings_data['aggregation_type'] = self.aggregation_type_combo.currentText()
+                settings_data['employee_count'] = self.employee_count_spinbox.value()
+                if self.aggregation_type_combo.currentText() != 'Без агрегации':
+                    settings_data['sscc_source'] = self.sscc_source_combo.currentText()
+                elif 'sscc_source' in settings_data:
+                    del settings_data['sscc_source'] # Clean up if not applicable
+            # --- END NEW ---
+
             self.task_service.update_task_settings(task_id, settings_data)
             QMessageBox.information(self, "Успех", "Настройки задачи сохранены.")
         except json.JSONDecodeError:
