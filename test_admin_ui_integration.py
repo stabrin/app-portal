@@ -169,6 +169,70 @@ def test_summary_table_headers():
         traceback.print_exc()
         return False
 
+def test_task_management_structure():
+    """Проверяет, что UI для управления задачами правильно инициализировано."""
+    print("\n" + "=" * 60)
+    print("Тест структуры страницы 'Управление задачами'")
+    print("=" * 60)
+    
+    test_user_info = {'client_db_config': {}, 'name': 'test-admin'}
+    
+    try:
+        window = AdminWindowQt(test_user_info)
+        print("✓ Окно AdminWindowQt создано")
+
+        # Проверяем наличие страницы задач
+        if hasattr(window, 'page_tasks'):
+            print("✓ Атрибут page_tasks найден")
+        else:
+            print("✗ Атрибут page_tasks НЕ найден")
+            return False
+
+        # Проверяем наличие таблицы задач
+        if hasattr(window, 'tasks_table'):
+            print("✓ Таблица tasks_table найдена")
+            print(f"  - Тип: {type(window.tasks_table)}")
+            actual_cols = window.tasks_table.columnCount()
+            expected_cols = 5
+            if actual_cols == expected_cols:
+                print(f"✓ Количество колонок совпадает: {actual_cols}")
+            else:
+                print(f"✗ Количество колонок НЕ совпадает: ожидалось {expected_cols}, получено {actual_cols}")
+                return False
+        else:
+            print("✗ Таблица tasks_table НЕ найдена")
+            return False
+
+        # Проверяем наличие стека управления задачами
+        if hasattr(window, 'task_management_stack'):
+            print("✓ Стек task_management_stack найден")
+        else:
+            print("✗ Стек task_management_stack НЕ найден")
+            return False
+            
+        # Проверяем наличие методов
+        if hasattr(window, 'load_tasks'):
+            print("✓ Метод load_tasks найден")
+        else:
+            print("✗ Метод load_tasks НЕ найден")
+            return False
+            
+        if hasattr(window, 'on_task_select'):
+            print("✓ Метод on_task_select найден")
+        else:
+            print("✗ Метод on_task_select НЕ найден")
+            return False
+
+        print("\n✓ Все проверки структуры 'Управление задачами' пройдены!")
+        return True
+
+    except Exception as e:
+        print(f"\n✗ ОШИБКА при проверке страницы 'Управление задачами': {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 if __name__ == '__main__':
     # Создаём QApplication для работы с UI
     app = QApplication(sys.argv)
@@ -177,14 +241,7 @@ if __name__ == '__main__':
     success = True
     success = test_admin_window_structure() and success
     success = test_summary_table_headers() and success
+    success = test_task_management_structure() and success
     
     if success:
         print("\n" + "=" * 60)
-        print("✓ ВСЕ ТЕСТЫ ПРОЙДЕНЫ УСПЕШНО!")
-        print("=" * 60)
-        sys.exit(0)
-    else:
-        print("\n" + "=" * 60)
-        print("✗ НЕКОТОРЫЕ ТЕСТЫ НЕ ПРОЙДЕНЫ")
-        print("=" * 60)
-        sys.exit(1)

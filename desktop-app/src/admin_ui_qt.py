@@ -26,6 +26,7 @@ from psycopg2 import sql
 from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добавляем импорт RealDictCursor
 from .sscc_service import generate_sscc, read_and_increment_counter # НОВОЕ: Импорт для генерации SSCC
 from .order_service import OrderService # НОВЫЙ СЕРВИС
+from .task_service import TaskService # НОВЫЙ СЕРВИС
 import base64
 import os
 import re # ИСПРАВЛЕНИЕ: Добавляем импорт модуля re
@@ -440,6 +441,128 @@ class OrderEditorFrameQt(QWidget):
                 QMessageBox.information(self, "Успех", f"Отчет декларанта успешно сохранен в файл:\n{filepath}")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сформировать отчет: {e}")
+
+
+# --- НОВЫЙ БЛОК: Фрейм для редактирования задачи ---
+class TaskEditorFrameQt(QWidget):
+    """Фрейм для просмотра и редактирования производственной задачи."""
+    def __init__(self, task_service, task_data, main_app_window, parent=None):
+        super().__init__(parent)
+        self.task_service = task_service
+        self.task_data = task_data
+        self.main_app_window = main_app_window
+
+        self._create_widgets()
+        self._load_task_details()
+
+    def _create_widgets(self):
+        main_layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.id_label = QLabel(str(self.task_data.get('id')))
+        self.order_id_label = QLabel(str(self.task_data.get('order_id')))
+        self.type_label = QLabel(self.task_data.get('type'))
+        self.created_at_label = QLabel(str(self.task_data.get('created_at')))
+
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(['new', 'in_progress', 'completed', 'error'])
+        self.status_combo.setCurrentText(self.task_data.get('status'))
+
+        form_layout.addRow("ID:", self.id_label)
+        form_layout.addRow("ID Заказа:", self.order_id_label)
+        form_layout.addRow("Тип:", self.type_label)
+        form_layout.addRow("Статус:", self.status_combo)
+        form_layout.addRow("Дата создания:", self.created_at_label)
+
+        main_layout.addLayout(form_layout)
+
+        # Редактор JSON
+        main_layout.addWidget(QLabel("Параметры (settings_json):"))
+        self.settings_json_edit = QTextEdit()
+        self.settings_json_edit.setAcceptRichText(False)
+        main_layout.addWidget(self.settings_json_edit)
+
+        # Кнопки управления
+        buttons_layout = QHBoxLayout()
+        btn_save = QPushButton("Сохранить")
+        btn_save.clicked.connect(self._save_changes)
+        
+        # --- ИЗМЕНЕНИЕ: Добавляем кнопки управления статусом ---
+        self.btn_take_in_work = QPushButton("Взять в работу")
+        self.btn_take_in_work.clicked.connect(lambda: self._update_status('in_progress'))
+        
+        self.btn_complete = QPushButton("Завершить")
+        self.btn_complete.clicked.connect(lambda: self._update_status('completed'))
+
+        buttons_layout.addWidget(btn_save)
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.btn_take_in_work)
+        buttons_layout.addWidget(self.btn_complete)
+
+        main_layout.addLayout(buttons_layout)
+
+    def _load_task_details(self):
+        """Загружает детали задачи в виджеты."""
+        settings_json = self.task_data.get('settings_json', {})
+        if isinstance(settings_json, str):
+            try:
+                settings_json = json.loads(settings_json)
+            except json.JSONDecodeError:
+                settings_json = {}
+        
+        self.settings_json_edit.setText(json.dumps(settings_json, indent=4, ensure_ascii=False))
+        
+        # Обновляем состояние кнопок в зависимости от статуса
+        status = self.task_data.get('status')
+        self.btn_take_in_work.setEnabled(status == 'new')
+        self.btn_complete.setEnabled(status == 'in_progress')
+
+
+    def _save_changes(self):
+        """Сохраняет изменения статуса и JSON-настроек."""
+        task_id = self.task_data['id']
+        
+        # 1. Сохранение статуса
+        new_status = self.status_combo.currentText()
+        if new_status != self.task_data.get('status'):
+            try:
+                self.task_service.update_task_status(task_id, new_status)
+                self.task_data['status'] = new_status # Обновляем локальные данные
+                QMessageBox.information(self, "Успех", "Статус задачи обновлен.")
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось обновить статус: {e}")
+                return
+
+        # 2. Сохранение JSON
+        try:
+            settings_text = self.settings_json_edit.toPlainText()
+            settings_data = json.loads(settings_text)
+            self.task_service.update_task_settings(task_id, settings_data)
+            QMessageBox.information(self, "Успех", "Настройки задачи сохранены.")
+        except json.JSONDecodeError:
+            QMessageBox.critical(self, "Ошибка", "Некорректный формат JSON в настройках.")
+            return
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить настройки: {e}")
+
+        # Обновляем всю страницу задач
+        self.main_app_window.load_tasks()
+        # Перезагружаем детали в панели
+        self._load_task_details()
+
+
+    def _update_status(self, new_status):
+        """Обработчик для кнопок быстрой смены статуса."""
+        task_id = self.task_data['id']
+        try:
+            self.task_service.update_task_status(task_id, new_status)
+            self.task_data['status'] = new_status
+            self.status_combo.setCurrentText(new_status)
+            QMessageBox.information(self, "Успех", f"Статус задачи обновлен на '{new_status}'.")
+            self.main_app_window.load_tasks()
+            self._load_task_details() # Обновляем состояние кнопок
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось обновить статус: {e}")
 
 
 class ApiIntegrationFrameQt(QWidget):
@@ -1310,6 +1433,7 @@ class AdminWindowQt(QMainWindow):
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
         self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
         self.order_service = OrderService(self.user_info)
+        self.task_service = TaskService(self.user_info) # НОВЫЙ СЕРВИС
         # --- ИЗМЕНЕНИЕ: Передаем обработчик для повторной аутентификации ---
         self.api_service = ApiService(self.user_info, self.order_service, reauth_handler=self._reauthenticate_api)
         # --- КОНЕЦ ИЗМЕНЕНИЯ ---
@@ -1401,6 +1525,10 @@ class AdminWindowQt(QMainWindow):
         self.page_orders = self._build_orders_page()
         self.content_stack.addWidget(self.page_orders)
 
+        # НОВАЯ СТРАНИЦА: Управление задачами
+        self.page_tasks = self._build_tasks_page()
+        self.content_stack.addWidget(self.page_tasks)
+
         # Страница 3: Конфигурация складов
         self.page_workplaces = self._build_workplaces_page()
         self.content_stack.addWidget(self.page_workplaces)
@@ -1425,10 +1553,11 @@ class AdminWindowQt(QMainWindow):
             'welcome': 0,
             'notifications': 1,
             'orders': 2,
-            'workplaces': 3,
-            'catalogs': 4,
-            'print_management': 5,
-            'placeholder': 6,
+            'tasks': 3, # НОВЫЙ ИНДЕКС
+            'workplaces': 4,
+            'catalogs': 5,
+            'print_management': 6,
+            'placeholder': 7,
         }
 
         # Собираем основной layout
@@ -1583,6 +1712,12 @@ class AdminWindowQt(QMainWindow):
             except Exception:
                 logging.exception("Error loading orders on menu click")
             self.content_stack.setCurrentIndex(self.stack_indices['orders'])
+        elif text == "Управление задачами":
+            try:
+                self.load_tasks()
+            except Exception:
+                logging.exception("Error loading tasks on menu click")
+            self.content_stack.setCurrentIndex(self.stack_indices['tasks'])
         elif text == "Сохранить INI":
             self._save_config_files() # Сразу вызываем сохранение
         elif text == "Конфигурация складов":
@@ -1939,6 +2074,112 @@ class AdminWindowQt(QMainWindow):
 
         self.load_notification_files(notification_id, target_table=files_table)
         return frame
+
+    def _build_tasks_page(self):
+        """Создает страницу для управления задачами."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        view_widget, self.tasks_table, self.task_management_stack = self._create_tasks_view()
+        
+        layout.addWidget(view_widget)
+        return widget
+
+    def _create_tasks_view(self):
+        """Создает UI для вкладки задач."""
+        view_widget = QWidget()
+        main_layout = QHBoxLayout(view_widget)
+        splitter = QSplitter(Qt.Horizontal)
+
+        # Левая часть: таблица задач
+        table_widget = QTableWidget(0, 5)
+        table_widget.setHorizontalHeaderLabels(["ID", "ID Заказа", "Тип", "Статус", "Дата создания"])
+        table_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table_widget.setSelectionMode(QAbstractItemView.SingleSelection)
+        table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table_widget.setStyleSheet("QTableWidget::item:selected { background-color: #ADD8E6; }")
+        table_widget.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        
+        # Правая часть: панель управления
+        management_stack = QStackedWidget()
+        placeholder_label = QLabel("Выберите задачу для управления")
+        placeholder_label.setAlignment(Qt.AlignCenter)
+        management_stack.addWidget(placeholder_label) # Индекс 0
+        
+        # Виджет-контейнер, в который будет добавляться TaskEditorFrameQt
+        editor_container = QWidget()
+        editor_container.setLayout(QVBoxLayout())
+        management_stack.addWidget(editor_container) # Индекс 1
+
+        splitter.addWidget(table_widget)
+        splitter.addWidget(management_stack)
+        splitter.setSizes([700, 500])
+        main_layout.addWidget(splitter)
+        
+        table_widget.itemSelectionChanged.connect(self.on_task_select)
+
+        return view_widget, table_widget, management_stack
+
+    def load_tasks(self):
+        """Загружает задачи в таблицу."""
+        self.tasks_table.setRowCount(0)
+        try:
+            tasks = self.task_service.get_tasks()
+            for task in tasks:
+                row = self.tasks_table.rowCount()
+                self.tasks_table.insertRow(row)
+                
+                items_to_add = [
+                    str(task.get('id', '')),
+                    str(task.get('order_id', '')),
+                    task.get('type', ''),
+                    task.get('status', ''),
+                    str(task.get('created_at', ''))
+                ]
+
+                bg_color = QColor("white")
+                status = task.get('status')
+                if status == 'new': bg_color = QColor("#FFFFE0") # Light Yellow
+                elif status == 'in_progress': bg_color = QColor("#ADD8E6") # Light Blue
+                elif status == 'completed': bg_color = QColor("#90EE90") # Light Green
+                elif status == 'error': bg_color = QColor("#FFB6C1") # Light Pink
+
+                for col, text in enumerate(items_to_add):
+                    item = QTableWidgetItem(text)
+                    item.setBackground(bg_color)
+                    if col == 0:
+                        item.setData(Qt.UserRole, task) # Сохраняем все данные задачи
+                    self.tasks_table.setItem(row, col, item)
+
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить задачи: {e}")
+
+    def on_task_select(self):
+        """Обработчик выбора задачи в таблице."""
+        selected_items = self.tasks_table.selectedItems()
+        if not selected_items:
+            self.task_management_stack.setCurrentIndex(0)
+            return
+
+        task_data = selected_items[0].data(Qt.UserRole)
+        if not task_data:
+            self.task_management_stack.setCurrentIndex(0)
+            return
+            
+        # Очищаем контейнер от старого виджета
+        editor_container = self.task_management_stack.widget(1)
+        layout = editor_container.layout()
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+        # Создаем и добавляем новый фрейм редактора
+        editor_frame = TaskEditorFrameQt(self.task_service, task_data, self)
+        layout.addWidget(editor_frame)
+        
+        self.task_management_stack.setCurrentIndex(1)
 
     def _load_order_statistics(self):
         """Загружает и отображает статистику по активным заказам."""
