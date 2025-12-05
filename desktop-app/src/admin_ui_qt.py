@@ -1976,14 +1976,18 @@ class AdminWindowQt(QMainWindow):
         table = self.archive_orders_table if is_archive else self.in_progress_orders_table
         management_stack = self.archive_management_stack if is_archive else self.in_progress_management_stack
 
-        selected_items = table.selectedItems()
-        if not selected_items:
-            # logging.debug("on_order_select: Заказ не выбран (selectedItems пуст). Показываем заглушку.")
+        current_row = table.currentRow()
+        if current_row < 0:
             management_stack.setCurrentIndex(0) # Показываем заглушку
             return
 
+        item = table.item(current_row, 0)
+        if not item:
+            management_stack.setCurrentIndex(0)
+            return
+
         # Получаем данные заказа, сохраненные ранее
-        order_data = selected_items[0].data(Qt.UserRole)
+        order_data = item.data(Qt.UserRole)
         if not order_data:
             management_stack.setCurrentIndex(0)
             # logging.debug("on_order_select: Данные заказа (UserRole) не найдены. Показываем заглушку.")
@@ -2200,12 +2204,17 @@ class AdminWindowQt(QMainWindow):
 
     def on_task_select(self):
         """Обработчик выбора задачи в таблице."""
-        selected_items = self.tasks_table.selectedItems()
-        if not selected_items:
+        current_row = self.tasks_table.currentRow()
+        if current_row < 0:
             self.task_management_stack.setCurrentIndex(0)
             return
 
-        task_data = selected_items[0].data(Qt.UserRole)
+        item = self.tasks_table.item(current_row, 0)
+        if not item:
+            self.task_management_stack.setCurrentIndex(0)
+            return
+
+        task_data = item.data(Qt.UserRole)
         if not task_data:
             self.task_management_stack.setCurrentIndex(0)
             return
