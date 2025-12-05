@@ -116,13 +116,14 @@ class SsccGeneratorWorker(QObject):
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
 class OrderEditorFrameQt(QWidget):
     """Полнофункциональный фрейм для редактирования заказа."""
-    def __init__(self, order_service, order_id, scenario_data, main_app_window, parent=None, is_archive=False):
+    def __init__(self, order_service, order_id, scenario_data, main_app_window, parent=None, is_archive=False, show_create_task_button=False):
         super().__init__(parent)
         self.order_service = order_service
         self.order_id = order_id
         self.scenario_data = scenario_data
         self.main_app_window = main_app_window
         self.is_archive = is_archive
+        self.show_create_task_button = show_create_task_button
 
         self._create_widgets()
         self._load_details()
@@ -154,6 +155,13 @@ class OrderEditorFrameQt(QWidget):
             # --- Ряд 1: Основные операции ---
             controls_frame_1 = QHBoxLayout()
             
+            # --- НОВЫЙ БЛОК: Кнопка создания задачи ---
+            if self.show_create_task_button:
+                btn_create_task = QPushButton("Создать задачу")
+                btn_create_task.clicked.connect(self._create_production_task)
+                controls_frame_1.addWidget(btn_create_task)
+                controls_frame_1.addStretch(1) # Добавляем разделитель
+
             # --- ИЗМЕНЕНИЕ: Поле для комментария (номер контейнера) ---
             self.comment_label = QLabel("Комментарий (контейнер):")
             self.comment_edit = QLineEdit()
@@ -211,6 +219,11 @@ class OrderEditorFrameQt(QWidget):
             btn_archive.clicked.connect(self._move_to_archive)
             archive_layout.addWidget(btn_archive)
             main_layout.addLayout(archive_layout)
+
+    def _create_production_task(self):
+        """Создает производственную задачу."""
+        QMessageBox.information(self, "В разработке", "Создание производственной задачи находится в разработке.")
+
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
@@ -1812,6 +1825,8 @@ class AdminWindowQt(QMainWindow):
             scenario_data = result['scenario_data'] if result else {}
             dm_source = scenario_data.get('dm_source')
             post_processing_mode = scenario_data.get('post_processing')
+            scenario_type = scenario_data.get('type')
+            show_create_task = (scenario_type == 'Ручная агрегация' or post_processing_mode == 'Собственный алгоритм')
             # logging.debug(f"on_order_select: Данные сценария получены. dm_source: '{dm_source}', post_processing: '{post_processing_mode}'.")
 
             # 2. Очищаем вкладки от старых виджетов
@@ -1836,7 +1851,7 @@ class AdminWindowQt(QMainWindow):
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
             # --- ИЗМЕНЕНИЕ: Передаем сервис заказов и флаг is_archive в редактор ---
-            editor_frame = OrderEditorFrameQt(self.order_service, order_id, scenario_data, self, is_archive=is_archive)
+            editor_frame = OrderEditorFrameQt(self.order_service, order_id, scenario_data, self, is_archive=is_archive, show_create_task_button=show_create_task)
             edit_tab.layout().addWidget(editor_frame)
 
             # --- ИЗМЕНЕНИЕ: Создаем и заполняем вкладку "Документы" ---
