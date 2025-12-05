@@ -703,42 +703,138 @@ class CodeUploadFrameQt(QWidget):
 
 
 class ScenarioEditorDialog(QDialog):
-    """Специализированный диалог для редактирования сценария."""
+    """Специализированный диалог для редактирования сценария, перенесенный из Tkinter."""
     def __init__(self, parent, item_data=None):
         super().__init__(parent)
-        self.setWindowTitle("Редактор сценария")
+        self.setWindowTitle("Редактор сценария маркировки")
         self.setMinimumWidth(500)
         self.result = None
-        self.item_data = item_data or {}
-        self.scenario_data = self.item_data.get('scenario_data', {})
         
-        layout = QVBoxLayout(self)
-        form_layout = QFormLayout()
+        # Глубокое копирование, чтобы избежать изменения исходных данных до сохранения
+        self.item_data = copy.deepcopy(item_data) if item_data else {}
+        self.scenario_data = self.item_data.get('scenario_data', {})
+        self.widgets = {} # Словарь для хранения виджетов
 
+        self._build_ui()
+        self._on_type_change() # Настраиваем видимость при инициализации
+        self._on_options_change() # И еще раз для вложенных опций
+
+    def _build_ui(self):
+        main_layout = QVBoxLayout(self)
+
+        # 1. Название сценария
+        form_layout = QFormLayout()
         self.name_edit = QLineEdit(self.item_data.get('name', ''))
         form_layout.addRow("Название сценария:", self.name_edit)
 
+        # 2. Тип сценария
         self.type_combo = QComboBox()
         self.type_combo.addItems(['Маркировка', 'Ручная агрегация'])
         self.type_combo.setCurrentText(self.scenario_data.get('type', 'Маркировка'))
+        self.type_combo.currentTextChanged.connect(self._on_type_change)
         form_layout.addRow("Тип сценария:", self.type_combo)
+        
+        main_layout.addLayout(form_layout)
 
-        # Опции для "Маркировка"
-        self.dm_source_combo = QComboBox()
-        self.dm_source_combo.addItems(['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'])
-        self.dm_source_combo.setCurrentText(self.scenario_data.get('dm_source', 'Заказ в ДМ.Код'))
-        form_layout.addRow("Источник кодов ДМ:", self.dm_source_combo)
+        # 3. Контейнеры для опций
+        self.marking_frame = QGroupBox("Опции маркировки")
+        self.aggregation_frame = QGroupBox("Опции ручной агрегации")
 
-        self.post_processing_combo = QComboBox()
-        self.post_processing_combo.addItems(['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'])
-        self.post_processing_combo.setCurrentText(self.scenario_data.get('post_processing', 'Печать через Bartender'))
-        form_layout.addRow("Постобработка:", self.post_processing_combo)
-
-        layout.addLayout(form_layout)
+        self._create_marking_widgets(self.marking_frame)
+        self._create_manual_aggregation_widgets(self.aggregation_frame)
+        
+        main_layout.addWidget(self.marking_frame)
+        main_layout.addWidget(self.aggregation_frame)
+        
+        # Кнопки
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        main_layout.addWidget(button_box)
+
+    def _create_marking_widgets(self, parent):
+        layout = QFormLayout(parent)
+        
+        # Источник кодов ДМ
+        self.widgets['dm_source'] = QComboBox()
+        self.widgets['dm_source'].addItems(['Заказ в ДМ.Код', 'Файлы клиента (csv, txt)', 'Внешняя система (1С)', 'Без кодов ДМ'])
+        self.widgets['dm_source'].setCurrentText(self.scenario_data.get('dm_source', 'Заказ в ДМ.Код'))
+        layout.addRow("Источник кодов ДМ:", self.widgets['dm_source'])
+
+        # Нужна агрегация
+        self.widgets['aggregation_needed'] = QCheckBox()
+        self.widgets['aggregation_needed'].setChecked(self.scenario_data.get('aggregation_needed', False))
+        self.widgets['aggregation_needed'].stateChanged.connect(self._on_options_change)
+        layout.addRow("Нужна агрегация:", self.widgets['aggregation_needed'])
+
+        # Источник кодов SSCC
+        self.widgets['sscc_source_label'] = QLabel("Источник кодов SSCC:")
+        self.widgets['sscc_source'] = QComboBox()
+        self.widgets['sscc_source'].addItems(['Генерировать самостоятельно', 'Предоставит клиент'])
+        self.widgets['sscc_source'].setCurrentText(self.scenario_data.get('sscc_source', 'Генерировать самостоятельно'))
+        layout.addRow(self.widgets['sscc_source_label'], self.widgets['sscc_source'])
+
+        # Постобработка
+        self.widgets['post_processing'] = QComboBox()
+        self.widgets['post_processing'].addItems(['Печать через Bartender', 'Внешнее ПО', 'Собственный алгоритм'])
+        self.widgets['post_processing'].setCurrentText(self.scenario_data.get('post_processing', 'Печать через Bartender'))
+        self.widgets['post_processing'].currentTextChanged.connect(self._on_options_change)
+        layout.addRow("Постобработка:", self.widgets['post_processing'])
+
+        # Дополнительные опции для "Собственный алгоритм"
+        self.custom_algo_frame = QWidget()
+        custom_algo_layout = QVBoxLayout(self.custom_algo_frame)
+        custom_algo_layout.setContentsMargins(0,0,0,0)
+        self.widgets['clarify_prod_date'] = QCheckBox("Уточнить дату производства")
+        self.widgets['clarify_prod_date'].setChecked(self.scenario_data.get('clarify_prod_date', False))
+        self.widgets['clarify_prod_country'] = QCheckBox("Уточнить страну производства")
+        self.widgets['clarify_prod_country'].setChecked(self.scenario_data.get('clarify_prod_country', False))
+        custom_algo_layout.addWidget(self.widgets['clarify_prod_date'])
+        custom_algo_layout.addWidget(self.widgets['clarify_prod_country'])
+        layout.addRow(self.custom_algo_frame)
+
+    def _create_manual_aggregation_widgets(self, parent):
+        layout = QFormLayout(parent)
+        
+        # Варианты агрегации
+        self.widgets['manual_agg_variant'] = QComboBox()
+        self.widgets['manual_agg_variant'].addItems(['Агрегация в набор', 'Агрегация в короб', 'Агрегация в набор а затем в короб'])
+        self.widgets['manual_agg_variant'].setCurrentText(self.scenario_data.get('manual_agg_variant', 'Агрегация в набор'))
+        self.widgets['manual_agg_variant'].currentTextChanged.connect(self._on_options_change)
+        layout.addRow("Варианты агрегации:", self.widgets['manual_agg_variant'])
+        
+        # Дополнительные опции
+        self.manual_agg_options_frame = QWidget()
+        manual_options_layout = QVBoxLayout(self.manual_agg_options_frame)
+        manual_options_layout.setContentsMargins(0,0,0,0)
+        self.widgets['manual_clarify_prod_date'] = QCheckBox("Уточнить дату производства")
+        self.widgets['manual_clarify_prod_date'].setChecked(self.scenario_data.get('clarify_prod_date', False))
+        self.widgets['manual_clarify_prod_country'] = QCheckBox("Уточнить страну производства")
+        self.widgets['manual_clarify_prod_country'].setChecked(self.scenario_data.get('clarify_prod_country', False))
+        manual_options_layout.addWidget(self.widgets['manual_clarify_prod_date'])
+        manual_options_layout.addWidget(self.widgets['manual_clarify_prod_country'])
+        layout.addRow(self.manual_agg_options_frame)
+
+    def _on_type_change(self):
+        """Показывает/скрывает фреймы в зависимости от типа сценария."""
+        selected_type = self.type_combo.currentText()
+        is_marking = (selected_type == 'Маркировка')
+        self.marking_frame.setVisible(is_marking)
+        self.aggregation_frame.setVisible(not is_marking)
+
+    def _on_options_change(self):
+        """Показывает/скрывает доп. опции в зависимости от выбора."""
+        # Для вкладки "Маркировка"
+        show_sscc = self.widgets['aggregation_needed'].isChecked()
+        self.widgets['sscc_source_label'].setVisible(show_sscc)
+        self.widgets['sscc_source'].setVisible(show_sscc)
+        
+        show_custom_algo = (self.widgets['post_processing'].currentText() == 'Собственный алгоритм')
+        self.custom_algo_frame.setVisible(show_custom_algo)
+
+        # Для вкладки "Ручная агрегация"
+        show_manual_options = (self.widgets['manual_agg_variant'].currentText() == 'Агрегация в набор а затем в короб')
+        self.manual_agg_options_frame.setVisible(show_manual_options)
 
     def accept(self):
         name = self.name_edit.text().strip()
@@ -746,11 +842,22 @@ class ScenarioEditorDialog(QDialog):
             QMessageBox.warning(self, "Внимание", "Название сценария не может быть пустым.")
             return
 
-        scenario_data = {
-            'type': self.type_combo.currentText(),
-            'dm_source': self.dm_source_combo.currentText(),
-            'post_processing': self.post_processing_combo.currentText()
-        }
+        scenario_data = {'type': self.type_combo.currentText()}
+
+        if scenario_data['type'] == 'Маркировка':
+            scenario_data['dm_source'] = self.widgets['dm_source'].currentText()
+            scenario_data['aggregation_needed'] = self.widgets['aggregation_needed'].isChecked()
+            if scenario_data['aggregation_needed']:
+                scenario_data['sscc_source'] = self.widgets['sscc_source'].currentText()
+            scenario_data['post_processing'] = self.widgets['post_processing'].currentText()
+            scenario_data['clarify_prod_date'] = self.widgets['clarify_prod_date'].isChecked()
+            scenario_data['clarify_prod_country'] = self.widgets['clarify_prod_country'].isChecked()
+
+        elif scenario_data['type'] == 'Ручная агрегация':
+            scenario_data['manual_agg_variant'] = self.widgets['manual_agg_variant'].currentText()
+            scenario_data['clarify_prod_date'] = self.widgets['manual_clarify_prod_date'].isChecked()
+            scenario_data['clarify_prod_country'] = self.widgets['manual_clarify_prod_country'].isChecked()
+
         self.result = {
             'id': self.item_data.get('id'),
             'name': name,
