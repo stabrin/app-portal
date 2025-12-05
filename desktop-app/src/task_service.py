@@ -16,14 +16,30 @@ class TaskService:
 
     def get_tasks(self, status=None):
         """
-        Получает список всех задач, опционально фильтруя по статусу.
+        Получает список всех задач, опционально фильтруя по статусу,
+        включая имя клиента из связанного заказа.
         """
         with self._get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                query = """
+                    SELECT
+                        pt.id,
+                        pt.order_id,
+                        o.client_name,
+                        pt.task_type AS type,
+                        pt.status,
+                        pt.created_at,
+                        pt.settings_json
+                    FROM
+                        production_tasks pt
+                    JOIN
+                        orders o ON pt.order_id = o.id
+                """
                 if status:
-                    cur.execute("SELECT * FROM production_tasks WHERE status = %s ORDER BY created_at DESC", (status,))
+                    query += " WHERE pt.status = %s"
+                    cur.execute(query + " ORDER BY pt.created_at DESC", (status,))
                 else:
-                    cur.execute("SELECT * FROM production_tasks ORDER BY created_at DESC")
+                    cur.execute(query + " ORDER BY pt.created_at DESC")
                 return cur.fetchall()
 
     def get_task(self, task_id):

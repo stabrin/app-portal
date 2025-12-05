@@ -2116,12 +2116,13 @@ class AdminWindowQt(QMainWindow):
 
         # Левая часть: таблица задач
         table_widget = QTableWidget(0, 5)
-        table_widget.setHorizontalHeaderLabels(["ID", "ID Заказа", "Тип", "Статус", "Дата создания"])
+        table_widget.setHorizontalHeaderLabels(["ID", "Клиент / Заказ №", "Тип", "Статус", "Дата создания"]) # Updated headers
+        table_widget.setColumnHidden(0, True) # Hide ID column
         table_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         table_widget.setSelectionMode(QAbstractItemView.SingleSelection)
         table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table_widget.setStyleSheet("QTableWidget::item:selected { background-color: #ADD8E6; }")
-        table_widget.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch) # Stretch Client/Order column
         
         # Правая часть: панель управления
         management_stack = QStackedWidget()
@@ -2152,12 +2153,16 @@ class AdminWindowQt(QMainWindow):
                 row = self.tasks_table.rowCount()
                 self.tasks_table.insertRow(row)
                 
+                # Format created_at date
+                created_at_dt = task.get('created_at')
+                formatted_created_at = created_at_dt.strftime("%d.%m.%Y") if created_at_dt else ""
+
                 items_to_add = [
-                    str(task.get('id', '')),
-                    str(task.get('order_id', '')),
+                    str(task.get('id', '')), # Keep ID in the list, but it will be hidden
+                    f"{task.get('client_name', '')} / Заказ № {task.get('order_id', '')}",
                     task.get('type', ''),
                     task.get('status', ''),
-                    str(task.get('created_at', ''))
+                    formatted_created_at
                 ]
 
                 bg_color = QColor("white")
@@ -2171,7 +2176,7 @@ class AdminWindowQt(QMainWindow):
                     item = QTableWidgetItem(text)
                     item.setBackground(bg_color)
                     if col == 0:
-                        item.setData(Qt.UserRole, task) # Сохраняем все данные задачи
+                        item.setData(Qt.UserRole, task) # Stores task data
                     self.tasks_table.setItem(row, col, item)
 
         except Exception as e:
