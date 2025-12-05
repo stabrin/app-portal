@@ -498,21 +498,8 @@ class TaskEditorFrameQt(QWidget):
         main_layout = QVBoxLayout(self)
         form_layout = QFormLayout()
 
-        self.id_label = QLabel(str(self.task_data.get('id', ''))) # Added default empty string
+        # Поля ID, Заказ, Тип, Дата создания удалены, т.к. они есть в таблице
         
-        # Combine client_name and order_id for display
-        client_name_for_display = self.task_data.get('client_name', '')
-        order_id_for_display = self.task_data.get('order_id', '')
-        self.order_id_label = QLabel(f"{client_name_for_display} / Заказ № {order_id_for_display}")
-        
-        # Use 'type' which is aliased to 'task_type'
-        self.type_label = QLabel(str(self.task_data.get('type', ''))) 
-        
-        # Format created_at date for display in the panel
-        created_at_dt = self.task_data.get('created_at')
-        formatted_created_at = created_at_dt.strftime("%d.%m.%Y %H:%M:%S") if created_at_dt else "" # Added time for more detail
-        self.created_at_label = QLabel(formatted_created_at)
-
         self.status_combo = QComboBox()
         self.status_combo.addItems(['new', 'in_progress', 'completed', 'error'])
         current_status = self.task_data.get('status')
@@ -521,11 +508,7 @@ class TaskEditorFrameQt(QWidget):
         else: # Set to default if status is unexpected
             self.status_combo.setCurrentIndex(0) # 'new'
 
-        form_layout.addRow("ID:", self.id_label)
-        form_layout.addRow("Заказ:", self.order_id_label) # Changed label to "Заказ"
-        form_layout.addRow("Тип:", self.type_label)
         form_layout.addRow("Статус:", self.status_combo)
-        form_layout.addRow("Дата создания:", self.created_at_label)
 
         main_layout.addLayout(form_layout)
 
