@@ -435,6 +435,29 @@ def update_client_db_schema(conn):
             FOR EACH ROW
             EXECUTE PROCEDURE trigger_set_timestamp();
         """),
+
+        # --- НОВЫЙ БЛОК: Таблица и триггер для производственных задач ---
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS production_tasks (
+                id SERIAL PRIMARY KEY,
+                order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+                task_type VARCHAR(50) NOT NULL,
+                status VARCHAR(50) NOT NULL DEFAULT 'new',
+                settings_json JSONB,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE,
+                assigned_to_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                result_data JSONB
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE production_tasks IS 'Задачи для производственных сценариев (ручная агрегация, свой алгоритм)';"),
+        sql.SQL("DROP TRIGGER IF EXISTS update_production_tasks_updated_at ON production_tasks;"),
+        sql.SQL("""
+            CREATE TRIGGER update_production_tasks_updated_at
+            BEFORE UPDATE ON production_tasks
+            FOR EACH ROW
+            EXECUTE PROCEDURE trigger_set_timestamp();
+        """),
     ]
     
     # --- НОВЫЙ БЛОК: Добавляем значения по умолчанию для SSCC в ap_settings ---
