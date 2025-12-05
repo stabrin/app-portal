@@ -55,7 +55,7 @@ class TaskService:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    INSERT INTO production_tasks (order_id, type, status, settings_json)
+                    INSERT INTO production_tasks (order_id, task_type, status, settings_json)
                     VALUES (%s, %s, 'new', %s)
                     RETURNING id;
                     """,
