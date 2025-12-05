@@ -528,6 +528,14 @@ class TaskEditorFrameQt(QWidget):
             self.employee_count_spinbox.setValue(3) # Default
             marking_layout.addRow("Количество сотрудников:", self.employee_count_spinbox)
 
+            # --- NEW FIELD: Nesting Level ---
+            self.nesting_level_label = QLabel("Уровень вложений:")
+            self.nesting_level_spinbox = QSpinBox()
+            self.nesting_level_spinbox.setRange(1, 10)
+            self.nesting_level_spinbox.setValue(1) # Default
+            marking_layout.addRow(self.nesting_level_label, self.nesting_level_spinbox)
+            # --- END NEW FIELD ---
+
             # SSCC Source
             self.sscc_source_label = QLabel("Способ получения SSCC:")
             self.sscc_source_combo = QComboBox()
@@ -569,9 +577,13 @@ class TaskEditorFrameQt(QWidget):
 
     def _on_aggregation_type_changed(self, text):
         if self.marking_settings_group:
-            is_sscc_visible = (text != "Без агрегации")
-            self.sscc_source_label.setVisible(is_sscc_visible)
-            self.sscc_source_combo.setVisible(is_sscc_visible)
+            is_aggregation_enabled = (text != "Без агрегации")
+            # SSCC widgets
+            self.sscc_source_label.setVisible(is_aggregation_enabled)
+            self.sscc_source_combo.setVisible(is_aggregation_enabled)
+            # Nesting level widgets
+            self.nesting_level_label.setVisible(is_aggregation_enabled)
+            self.nesting_level_spinbox.setVisible(is_aggregation_enabled)
 
     def _load_task_details(self):
         """Загружает детали задачи в виджеты."""
@@ -588,6 +600,7 @@ class TaskEditorFrameQt(QWidget):
         if self.marking_settings_group:
             self.aggregation_type_combo.setCurrentText(settings_json.get('aggregation_type', 'Без агрегации'))
             self.employee_count_spinbox.setValue(settings_json.get('employee_count', 3))
+            self.nesting_level_spinbox.setValue(settings_json.get('nesting_level', 1))
             self.sscc_source_combo.setCurrentText(settings_json.get('sscc_source', 'Генерируем сами'))
             # Trigger initial visibility update
             self._on_aggregation_type_changed(self.aggregation_type_combo.currentText())
@@ -624,9 +637,14 @@ class TaskEditorFrameQt(QWidget):
                 settings_data['aggregation_type'] = self.aggregation_type_combo.currentText()
                 settings_data['employee_count'] = self.employee_count_spinbox.value()
                 if self.aggregation_type_combo.currentText() != 'Без агрегации':
+                    settings_data['nesting_level'] = self.nesting_level_spinbox.value()
                     settings_data['sscc_source'] = self.sscc_source_combo.currentText()
-                elif 'sscc_source' in settings_data:
-                    del settings_data['sscc_source'] # Clean up if not applicable
+                else:
+                    # Clean up keys that are not applicable
+                    if 'nesting_level' in settings_data:
+                        del settings_data['nesting_level']
+                    if 'sscc_source' in settings_data:
+                        del settings_data['sscc_source']
             # --- END NEW ---
 
             self.task_service.update_task_settings(task_id, settings_data)
