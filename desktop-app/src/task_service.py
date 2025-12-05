@@ -48,3 +48,20 @@ class TaskService:
                 cur.execute("UPDATE production_tasks SET settings_json = %s WHERE id = %s", (json.dumps(settings), task_id))
             conn.commit()
             logging.info(f"Настройки задачи #{task_id} обновлены.")
+
+    def create_task(self, order_id, task_type, settings):
+        """Создает новую производственную задачу."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO production_tasks (order_id, type, status, settings_json)
+                    VALUES (%s, %s, 'new', %s)
+                    RETURNING id;
+                    """,
+                    (order_id, task_type, json.dumps(settings))
+                )
+                new_id = cur.fetchone()[0]
+            conn.commit()
+            logging.info(f"Создана новая задача #{new_id} для заказа #{order_id}.")
+            return new_id

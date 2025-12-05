@@ -223,9 +223,88 @@ class OrderEditorFrameQt(QWidget):
             bottom_buttons_layout.addWidget(btn_archive)
             
             main_layout.addLayout(bottom_buttons_layout)
+class LentaUploadDialog(QDialog):
+# ... (rest of LentaUploadDialog class) ...
+
+# --- НОВЫЙ КЛАСС: Диалог для создания задачи ---
+class CreateTaskDialog(QDialog):
+    """Диалог для создания новой производственной задачи."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Создать новую задачу")
+        self.setMinimumWidth(400)
+        self.result = None
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.task_type_combo = QComboBox()
+        # TODO: В будущем можно загружать типы из справочника
+        self.task_type_combo.addItems(["manual_aggregation", "custom_processing"])
+        form_layout.addRow("Тип задачи:", self.task_type_combo)
+
+        self.settings_edit = QTextEdit()
+        self.settings_edit.setPlaceholderText("Введите параметры в формате JSON...")
+        # Предзаполняем базовой структурой
+        self.settings_edit.setText("{
+    
+}")
+        form_layout.addRow("Параметры (JSON):", self.settings_edit)
+
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def accept(self):
+        """Проверяет JSON и сохраняет результат."""
+        try:
+            settings_text = self.settings_edit.toPlainText()
+            # Если текст пустой, считаем его пустым объектом JSON
+            if not settings_text.strip():
+                settings_data = {}
+            else:
+                settings_data = json.loads(settings_text)
+            
+            self.result = {
+                "type": self.task_type_combo.currentText(),
+                "settings": settings_data
+            }
+            super().accept()
+        except json.JSONDecodeError:
+            QMessageBox.critical(self, "Ошибка", "Некорректный формат JSON в параметрах.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Произошла непредвиденная ошибка: {e}")
+
+# ... (inside OrderEditorFrameQt class) ...
     def _create_production_task(self):
         """Создает производственную задачу."""
-        QMessageBox.information(self, "В разработке", "Создание производственной задачи находится в разработке.")
+        dialog = CreateTaskDialog(self)
+        if dialog.exec():
+            result = dialog.result
+            if result:
+                try:
+                    task_type = result['type']
+                    settings = result['settings']
+                    
+                    # Вызываем метод сервиса через главное окно
+                    new_task_id = self.main_app_window.task_service.create_task(
+                        self.order_id,
+                        task_type,
+                        settings
+                    )
+                    
+                    QMessageBox.information(self, "Успех", f"Задача #{new_task_id} успешно создана.")
+                    
+                    # Переключаемся на страницу задач
+                    self.main_app_window.menu_tree.setCurrentItem(self.main_app_window.menu_items['tasks'])
+                    self.main_app_window._on_menu_clicked(self.main_app_window.menu_items['tasks'], 0)
+
+                except Exception as e:
+                    logging.error(f"Ошибка при создании задачи: {e}", exc_info=True)
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось создать задачу: {e}")
 
     def _load_details(self):
         self.details_table.setRowCount(0)
