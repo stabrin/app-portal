@@ -151,75 +151,77 @@ class OrderEditorFrameQt(QWidget):
             self.details_table.setEditTriggers(QAbstractItemView.NoEditTriggers) # Запрещаем редактирование
             main_layout.addWidget(self.details_table)
 
-        else: # --- Старая логика для неархивных заказов ---
-            # --- Ряд 1: Основные операции ---
-            controls_frame_1 = QHBoxLayout()
-            
-            # --- НОВЫЙ БЛОК: Кнопка создания задачи ---
-            if self.show_create_task_button:
-                btn_create_task = QPushButton("Создать задачу")
-                btn_create_task.clicked.connect(self._create_production_task)
-                controls_frame_1.addWidget(btn_create_task)
-                controls_frame_1.addStretch(1) # Добавляем разделитель
-
-            # --- ИЗМЕНЕНИЕ: Поле для комментария (номер контейнера) ---
-            self.comment_label = QLabel("Комментарий (контейнер):")
-            self.comment_edit = QLineEdit()
-            
-            btn_save = QPushButton("Сохранить")
-            btn_save.clicked.connect(self._save_changes)
-
-            controls_frame_1.addWidget(self.comment_label)
-            controls_frame_1.addWidget(self.comment_edit, 1) # Растягиваем поле ввода
-            controls_frame_1.addWidget(btn_save)
-            
-            main_layout.addLayout(controls_frame_1)
-
-            # --- Ряд 2: Операции с товарами и Bartender ---
-            controls_frame_2 = QHBoxLayout()
-            btn_export_prod = QPushButton("Экспорт товаров")
-            btn_export_prod.clicked.connect(self._export_products_to_excel)
-            btn_import_prod = QPushButton("Импорт товаров")
-            btn_import_prod.clicked.connect(self._import_products_from_excel)
-            btn_create_view = QPushButton("Создать View")
-            btn_create_view.clicked.connect(self._create_bartender_view)
-            controls_frame_2.addWidget(btn_export_prod)
-            controls_frame_2.addWidget(btn_import_prod)
-            controls_frame_2.addWidget(btn_create_view)
-            controls_frame_2.addStretch()
-            main_layout.addLayout(controls_frame_2)
-
-            # --- Ряд 3: Отчеты и интеграции ---
-            controls_frame_3 = QHBoxLayout()
-            btn_export_delta = QPushButton("Экспорт (Внешнее ПО)")
-            btn_export_delta.clicked.connect(self._export_data_for_external_sw)
-            btn_import_delta = QPushButton("Импорт (Внешнее ПО)")
-            btn_import_delta.clicked.connect(self._import_data_for_external_sw)
-            btn_download_report = QPushButton("Отчет декларанта")
-            btn_download_report.clicked.connect(self._download_declarator_report)
-            controls_frame_3.addWidget(btn_export_delta)
-            controls_frame_3.addWidget(btn_import_delta)
-            controls_frame_3.addWidget(btn_download_report)
-            controls_frame_3.addStretch()
-            main_layout.addLayout(controls_frame_3)
-
-            # --- Таблица детализации ---
-            self.details_table = QTableWidget()
-            self.details_cols = ["id", "gtin", "dm_quantity", "aggregation_level", "production_date", "expiry_date"]
-            self.details_table.setColumnCount(len(self.details_cols))
-            self.details_table.setHorizontalHeaderLabels(["ID", "GTIN", "Кол-во", "Агрегация", "Дата произв.", "Годен до"])
-            self.details_table.setColumnHidden(0, True) # Скрываем ID
-            main_layout.addWidget(self.details_table)
-
-            # --- Кнопка архивации ---
-            archive_layout = QHBoxLayout()
-            archive_layout.addStretch()
-            btn_archive = QPushButton("Перенести в архив")
-            btn_archive.setStyleSheet("background-color: #FFB6C1;") # Light Pink
-            btn_archive.clicked.connect(self._move_to_archive)
-            archive_layout.addWidget(btn_archive)
-            main_layout.addLayout(archive_layout)
-
+                else: # --- Старая логика для неархивных заказов ---
+                    # --- Ряд 1: Основные операции ---
+                    controls_frame_1 = QHBoxLayout()
+                    
+                    # --- ИЗМЕНЕНИЕ: Поле для комментария (номер контейнера) ---
+                    self.comment_label = QLabel("Комментарий (контейнер):")
+                    self.comment_edit = QLineEdit()
+                    
+                    btn_save = QPushButton("Сохранить")
+                    btn_save.clicked.connect(self._save_changes)
+        
+                    controls_frame_1.addWidget(self.comment_label)
+                    controls_frame_1.addWidget(self.comment_edit, 1) # Растягиваем поле ввода
+                    controls_frame_1.addWidget(btn_save)
+                    
+                    main_layout.addLayout(controls_frame_1)
+        
+                    # --- Ряд 2: Операции с товарами и Bartender ---
+                    controls_frame_2 = QHBoxLayout()
+                    btn_export_prod = QPushButton("Экспорт товаров")
+                    btn_export_prod.clicked.connect(self._export_products_to_excel)
+                    btn_import_prod = QPushButton("Импорт товаров")
+                    btn_import_prod.clicked.connect(self._import_products_from_excel)
+                    btn_create_view = QPushButton("Создать View")
+                    btn_create_view.clicked.connect(self._create_bartender_view)
+                    controls_frame_2.addWidget(btn_export_prod)
+                    controls_frame_2.addWidget(btn_import_prod)
+                    controls_frame_2.addWidget(btn_create_view)
+                    controls_frame_2.addStretch()
+                    main_layout.addLayout(controls_frame_2)
+        
+                    # --- Ряд 3: Отчеты и интеграции ---
+                    controls_frame_3 = QHBoxLayout()
+                    btn_export_delta = QPushButton("Экспорт (Внешнее ПО)")
+                    btn_export_delta.clicked.connect(self._export_data_for_external_sw)
+                    btn_import_delta = QPushButton("Импорт (Внешнее ПО)")
+                    btn_import_delta.clicked.connect(self._import_data_for_external_sw)
+                    btn_download_report = QPushButton("Отчет декларанта")
+                    btn_download_report.clicked.connect(self._download_declarator_report)
+                    controls_frame_3.addWidget(btn_export_delta)
+                    controls_frame_3.addWidget(btn_import_delta)
+                    controls_frame_3.addWidget(btn_download_report)
+                    controls_frame_3.addStretch()
+                    main_layout.addLayout(controls_frame_3)
+        
+                    # --- Таблица детализации ---
+                    self.details_table = QTableWidget()
+                    self.details_cols = ["id", "gtin", "dm_quantity", "aggregation_level", "production_date", "expiry_date"]
+                    self.details_table.setColumnCount(len(self.details_cols))
+                    self.details_table.setHorizontalHeaderLabels(["ID", "GTIN", "Кол-во", "Агрегация", "Дата произв.", "Годен до"])
+                    self.details_table.setColumnHidden(0, True) # Скрываем ID
+                    main_layout.addWidget(self.details_table)
+        
+                    # --- Кнопки внизу ---
+                    bottom_buttons_layout = QHBoxLayout()
+                    
+                    # --- НОВЫЙ БЛОК: Кнопка создания задачи ---
+                    if self.show_create_task_button:
+                        btn_create_task = QPushButton("Создать задачу")
+                        btn_create_task.setStyleSheet("background-color: #90EE90;") # Light Green
+                        btn_create_task.clicked.connect(self._create_production_task)
+                        bottom_buttons_layout.addWidget(btn_create_task)
+        
+                    bottom_buttons_layout.addStretch() # Этот разделитель отодвинет кнопку архивации вправо
+                    
+                    btn_archive = QPushButton("Перенести в архив")
+                    btn_archive.setStyleSheet("background-color: #FFB6C1;") # Light Pink
+                    btn_archive.clicked.connect(self._move_to_archive)
+                    bottom_buttons_layout.addWidget(btn_archive)
+                    
+                    main_layout.addLayout(bottom_buttons_layout)
     def _create_production_task(self):
         """Создает производственную задачу."""
         QMessageBox.information(self, "В разработке", "Создание производственной задачи находится в разработке.")
