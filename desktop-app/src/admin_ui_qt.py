@@ -475,6 +475,8 @@ class TaskEditorFrameQt(QWidget):
         self.task_data = task_data
         self.main_app_window = main_app_window
 
+        logging.debug(f"TaskEditorFrameQt.__init__: Received task_data: {self.task_data}") # DEBUG LOG
+
         self._create_widgets()
         self._load_task_details()
 
@@ -2193,6 +2195,8 @@ class AdminWindowQt(QMainWindow):
         if not task_data:
             self.task_management_stack.setCurrentIndex(0)
             return
+        
+        logging.debug(f"AdminWindowQt.on_task_select: task_data retrieved: {task_data}") # DEBUG LOG
             
         # Очищаем контейнер от старого виджета
         editor_container = self.task_management_stack.widget(1)
