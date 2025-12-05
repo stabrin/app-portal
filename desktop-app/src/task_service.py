@@ -49,6 +49,13 @@ class TaskService:
                 cur.execute("SELECT * FROM production_tasks WHERE id = %s", (task_id,))
                 return cur.fetchone()
 
+    def get_task_by_order_id(self, order_id):
+        """Получает детали задачи по ID заказа."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM production_tasks WHERE order_id = %s", (order_id,))
+                return cur.fetchone()
+
     def update_task_status(self, task_id, status):
         """Обновляет статус задачи."""
         with self._get_connection() as conn:

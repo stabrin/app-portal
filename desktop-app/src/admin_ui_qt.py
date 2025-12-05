@@ -225,7 +225,21 @@ class OrderEditorFrameQt(QWidget):
             main_layout.addLayout(bottom_buttons_layout)
 
     def _create_production_task(self):
-        """Создает производственную задачу на основе текущего заказа."""
+        """
+        Создает производственную задачу на основе текущего заказа, 
+        если она еще не существует. В противном случае, просто переключается на нее.
+        """
+        # --- НОВЫЙ БЛОК: Проверка существования задачи ---
+        existing_task = self.main_app_window.task_service.get_task_by_order_id(self.order_id)
+        
+        if existing_task:
+            QMessageBox.information(self, "Задача уже существует", f"Задача для заказа #{self.order_id} уже существует. Переключаемся на нее.")
+            # Переключаемся на страницу задач
+            self.main_app_window.menu_tree.setCurrentItem(self.main_app_window.menu_items['tasks'])
+            self.main_app_window._on_menu_clicked(self.main_app_window.menu_items['tasks'], 0)
+            return
+        # --- КОНЕЦ НОВОГО БЛОКА ---
+
         calculated_task_type = "unknown"
         if self.scenario_data.get('type') == 'Ручная агрегация':
             calculated_task_type = "manual_aggregation"
