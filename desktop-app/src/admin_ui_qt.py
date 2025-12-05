@@ -246,9 +246,9 @@ class CreateTaskDialog(QDialog):
         self.settings_edit = QTextEdit()
         self.settings_edit.setPlaceholderText("Введите параметры в формате JSON...")
         # Предзаполняем базовой структурой
-        self.settings_edit.setText("{
+        self.settings_edit.setText("""{
     
-}")
+}""")
         form_layout.addRow("Параметры (JSON):", self.settings_edit)
 
         layout.addLayout(form_layout)
