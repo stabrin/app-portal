@@ -437,3 +437,60 @@ class OrderService:
                     (json.dumps(codes_json), printrun_id)
                 )
             conn.commit()
+
+    def create_task_from_order(self, order_id):
+        """
+        Создает производственную задачу на основе заказа, если сценарий подходит.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1. Получаем данные заказа и его сценария
+                cur.execute("""
+                    SELECT o.id, s.scenario_data
+                    FROM orders o
+                    JOIN ap_marking_scenarios s ON o.scenario_id = s.id
+                    WHERE o.id = %s
+                """, (order_id,))
+                order_data = cur.fetchone()
+
+                if not order_data:
+                    raise ValueError(f"Заказ с ID {order_id} не найден.")
+
+                scenario_data = order_data['scenario_data']
+                scenario_type = scenario_data.get('type')
+                post_processing = scenario_data.get('post_processing')
+
+                # 2. Проверяем условия и формируем задачу
+                if scenario_type == 'Ручная агрегация':
+                    task_type = 'manual_aggregation'
+                    settings_json = {
+                        'variant': scenario_data.get('manual_agg_variant'),
+                        'clarify_prod_date': scenario_data.get('clarify_prod_date'),
+                        'clarify_prod_country': scenario_data.get('clarify_prod_country')
+                    }
+                elif post_processing == 'Собственный алгоритм':
+                    task_type = 'custom_algorithm'
+                    settings_json = {
+                        'clarify_prod_date': scenario_data.get('clarify_prod_date'),
+                        'clarify_prod_country': scenario_data.get('clarify_prod_country')
+                    }
+                else:
+                    # Если сценарий не подходит, просто возвращаем None
+                    return None
+
+                # 3. Вставляем новую задачу в production_tasks
+                cur.execute("""
+                    INSERT INTO production_tasks (order_id, task_type, settings_json, status)
+                    VALUES (%s, %s, %s, 'new')
+                    RETURNING id;
+                """, (order_id, task_type, json.dumps(settings_json)))
+                
+                task_id = cur.fetchone()['id']
+                logging.info(f"Создана производственная задача #{task_id} для заказа #{order_id} с типом '{task_type}'.")
+                
+                # 4. Обновляем статус заказа
+                cur.execute("UPDATE orders SET status = 'task_created' WHERE id = %s", (order_id,))
+                logging.info(f"Статус заказа #{order_id} обновлен на 'task_created'.")
+
+            conn.commit()
+            return task_id
