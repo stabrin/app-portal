@@ -2307,43 +2307,43 @@ class EmployeePassesViewerDialog(QDialog):
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
 
 
-            try:
+                        try:
 
 
-                barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+                            barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
 
 
-                drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
+                            drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
 
 
-                drawing.add(barcode)
+                            drawing.add(barcode)
 
 
-                pil_image = renderPM.drawToPIL(drawing)
+                            pil_image = renderPM.drawToPIL(drawing)
 
 
-                buffer = io.BytesIO()
+                            buffer = io.BytesIO()
 
 
-                pil_image.save(buffer, format="PNG")
+                            pil_image.save(buffer, format="PNG")
 
 
-                buffer.seek(0)
+                            buffer.seek(0)
 
 
-                barcode_pixmap = QPixmap()
+                            barcode_pixmap = QPixmap()
 
 
-                barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
+                            barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
 
 
-                barcode_x_px = mm_to_px(3, dpi_x)
+                            barcode_x_px = mm_to_px(3, dpi_x)
 
 
-                barcode_y_px = mm_to_px(20, dpi_y)
+                            barcode_y_px = mm_to_px(20, dpi_y)
 
 
-                painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+                            painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
 
 
                         except Exception as e:
