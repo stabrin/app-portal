@@ -2649,25 +2649,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                passes = self.pass_details["passes"]
-
-
-
-
-
-                for i, access_code in enumerate(passes):
-
-
-
-
-
-                    if i > 0:
-
-
-
-
-
-                        printer.newPage()
+                        passes = self.pass_details["passes"]
 
 
 
@@ -2679,49 +2661,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    # --- Рисуем текст ---
-
-
-
-
-
-                    # Координаты в точках
-
-
-
-
-
-                    painter.setFont(font_main)
-
-
-
-
-
-                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
-
-
-
-
-
-                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
-
-
-
-
-
-                    
-
-
-
-
-
-                    painter.setFont(font_small)
-
-
-
-
-
-                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
+                        for i, access_code in enumerate(passes):
 
 
 
@@ -2733,7 +2673,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                # --- Генерируем и рисуем штрихкод ---
+                            if i > 0:
 
 
 
@@ -2745,7 +2685,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                try:
+                                printer.newPage()
 
 
 
@@ -2757,7 +2697,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    # 1. Создаем объект штрихкода
+                
 
 
 
@@ -2769,7 +2709,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+                            # --- Рисуем текст ---
 
 
 
@@ -2781,7 +2721,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    
+                            # Координаты в точках
 
 
 
@@ -2793,7 +2733,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    # 2. Создаем холст для рисования и добавляем штрихкод
+                            painter.setFont(font_main)
 
 
 
@@ -2805,7 +2745,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
+                            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
 
 
 
@@ -2817,7 +2757,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    drawing.add(barcode)
+                            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
 
 
 
@@ -2829,7 +2769,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    
+                            
 
 
 
@@ -2841,7 +2781,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    # 3. Рендерим в PIL Image, а затем в буфер
+                            painter.setFont(font_small)
 
 
 
@@ -2853,7 +2793,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    pil_image = renderPM.drawToPIL(drawing)
+                            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
 
 
 
@@ -2865,7 +2805,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    buffer = io.BytesIO()
+                
 
 
 
@@ -2877,7 +2817,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    pil_image.save(buffer, format="PNG")
+                            # --- Генерируем и рисуем штрихкод ---
 
 
 
@@ -2889,7 +2829,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    buffer.seek(0)
+                            try:
 
 
 
@@ -2901,7 +2841,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    
+                                # 1. Создаем объект штрихкода
 
 
 
@@ -2913,7 +2853,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    # 4. Загружаем в QPixmap
+                                barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
 
 
 
@@ -2925,7 +2865,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    barcode_pixmap = QPixmap()
+                
 
 
 
@@ -2937,7 +2877,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
+                                # 2. Создаем холст для рисования и добавляем штрихкод
 
 
 
@@ -2949,7 +2889,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    
+                                drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
 
 
 
@@ -2961,7 +2901,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    # Размеры и позиция штрихкода в точках
+                                drawing.add(barcode)
 
 
 
@@ -2973,7 +2913,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    barcode_x_px = mm_to_px(3, dpi_x)
+                
 
 
 
@@ -2985,7 +2925,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    barcode_y_px = mm_to_px(20, dpi_y)
+                                # 3. Рендерим в PIL Image, а затем в буфер
 
 
 
@@ -2997,7 +2937,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    
+                                pil_image = renderPM.drawToPIL(drawing)
 
 
 
@@ -3009,7 +2949,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+                                buffer = io.BytesIO()
 
 
 
@@ -3021,7 +2961,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    
+                                pil_image.save(buffer, format="PNG")
 
 
 
@@ -3033,7 +2973,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                except Exception as e:
+                                buffer.seek(0)
 
 
 
@@ -3045,7 +2985,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
+                
 
 
 
@@ -3057,7 +2997,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+                                # 4. Загружаем в QPixmap
 
 
 
@@ -3069,25 +3009,199 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    # --- Пустая область для заметок ---
+                                barcode_pixmap = QPixmap()
 
 
 
 
 
-                    notes_rect_y_px = mm_to_px(33, dpi_y)
+        
 
 
 
 
 
-                    notes_rect_height_px = mm_to_px(5, dpi_y)
+                                barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
 
 
 
 
 
-                    painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+        
+
+
+
+
+
+                                
+
+
+
+
+
+        
+
+
+
+
+
+                                # Размеры и позиция штрихкода в точках
+
+
+
+
+
+        
+
+
+
+
+
+                                barcode_x_px = mm_to_px(3, dpi_x)
+
+
+
+
+
+        
+
+
+
+
+
+                                barcode_y_px = mm_to_px(20, dpi_y)
+
+
+
+
+
+        
+
+
+
+
+
+                
+
+
+
+
+
+        
+
+
+
+
+
+                                painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+
+
+
+
+
+        
+
+
+
+
+
+                
+
+
+
+
+
+        
+
+
+
+
+
+                            except Exception as e:
+
+
+
+
+
+        
+
+
+
+
+
+                                logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
+
+
+
+
+
+        
+
+
+
+
+
+                                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+
+
+
+
+
+        
+
+
+
+
+
+                
+
+
+
+
+
+        
+
+
+
+
+
+                            # --- Пустая область для заметок ---
+
+
+
+
+
+        
+
+
+
+
+
+                            notes_rect_y_px = mm_to_px(33, dpi_y)
+
+
+
+
+
+        
+
+
+
+
+
+                            notes_rect_height_px = mm_to_px(5, dpi_y)
+
+
+
+
+
+        
+
+
+
+
+
+                            painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
 
 
 
