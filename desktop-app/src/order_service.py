@@ -346,6 +346,38 @@ class OrderService:
         
         return df, report_name
 
+    def get_order_summary(self, order_id: int):
+        """
+        Возвращает сводную информацию по заказу: имя клиента, количество товаров, заказанных и полученных кодов.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1. Получаем имя клиента
+                cur.execute("SELECT client_name FROM orders WHERE id = %s", (order_id,))
+                client_name_result = cur.fetchone()
+                if not client_name_result:
+                    raise ValueError(f"Заказ с ID {order_id} не найден.")
+                
+                client_name = client_name_result['client_name']
+
+                # 2. Получаем сводку по кодам
+                summary_query = """
+                WITH codes_count AS (
+                    SELECT COALESCE(SUM(jsonb_array_length(api_codes_json->'codes')), 0) as received_codes
+                    FROM dmkod_aggregation_details
+                    WHERE order_id = %s
+                )
+                SELECT 
+                    COUNT(DISTINCT gtin) as total_products,
+                    SUM(dm_quantity) as ordered_codes,
+                    (SELECT received_codes FROM codes_count) as received_codes
+                FROM dmkod_aggregation_details WHERE order_id = %s;
+                """
+                cur.execute(summary_query, (order_id, order_id))
+                summary = cur.fetchone()
+                summary['client_name'] = client_name
+                return summary
+
     # --- Новые методы для поддержки ApiService ---
     def get_order_by_id(self, order_id: int):
         """Возвращает основные данные заказа по его ID."""
