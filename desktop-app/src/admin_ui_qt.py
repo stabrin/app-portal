@@ -2361,13 +2361,13 @@ class EmployeePassesViewerDialog(QDialog):
             notes_rect_height_px = mm_to_px(5, dpi_y)
 
 
-            painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+                        painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
 
 
-                painter.end()
+                    painter.end()
 
 
-                QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
+                    QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
 
 
 
