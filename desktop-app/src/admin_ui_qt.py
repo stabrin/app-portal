@@ -1225,253 +1225,79 @@ class PrintableObjectItem(QGraphicsRectItem):
 
 
 class LabelEditorDialog(QDialog):
-
-
     """Диалоговое окно для визуального редактора макетов этикеток."""
-
-
     def __init__(self, parent, user_info, catalog_service, layout_data=None):
-
-
         super().__init__(parent)
-
-
         self.user_info = user_info
-
-
         self.catalog_service = catalog_service
-
-
         self.is_new_layout = not bool(layout_data)
-
-
         self.template = json.loads(json.dumps(layout_data or {})) # Глубокая копия
-
-
-
-
-
         title = "Новый макет" if self.is_new_layout else f"Редактор: {self.template.get('name', '')}"
-
-
         self.setWindowTitle(title)
-
-
         self.setMinimumSize(1200, 800)
-
-
-
-
-
         self.canvas_scale = 5
-
-
         self.selected_object_id = None
-
-
-        
-
-
         # --- НОВЫЙ БЛОК: Шаблоны и источники данных ---
-
-
         self.object_templates = {
-
-
             'text': { "type": "text", "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "ap_workplaces.warehouse_name", "font_name": "arial" },
-
-
             'custom_text': { "type": "text", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "", "font_name": "arial" },
-
-
             'qr': { "type": "barcode", "barcode_type": "QR", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "QR: Конфигурация рабочего места" },
-
-
             'sscc': { "type": "barcode", "barcode_type": "SSCC", "x_mm": 10, "y_mm": 10, "width_mm": 50, "height_mm": 20, "data_source": "packages.sscc_code" },
-
-
             'datamatrix': { "type": "barcode", "barcode_type": "DataMatrix", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "items.datamatrix" },
-
-
             'image': { "type": "image", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "" },
-
-
             'text_with_image': { "type": "text_with_image", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 60, "height_mm": 30, "data_source": "", "image_source": "", "font_name": "arial" }
-
-
         }
-
-
         self.available_text_sources = [
-
-
             "ap_workplaces.warehouse_name",
-
-
             "ap_workplaces.workplace_number",
-
-
             "orders.client_name",
-
-
             "packages.sscc_code"
-
-
         ]
-
-
         self.available_qr_sources = [
-
-
             "QR: Конфигурация рабочего места",
-
-
             "QR: Конфигурация сервера"
-
-
         ]
-
-
         self.available_sscc_sources = ["packages.sscc_code"]
-
-
         self.available_datamatrix_sources = ["items.datamatrix"]
-
-
-
-
-
         self._build_editor_ui()
-
-
         self._load_template_to_ui()
-
-
         self._redraw_canvas()
-
-
-
-
-
     def _build_editor_ui(self):
-
-
         main_layout = QHBoxLayout(self)
-
-
         splitter = QSplitter(Qt.Horizontal)
-
-
         main_layout.addWidget(splitter)
-
-
-
-
-
         controls_widget = QWidget()
-
-
         controls_layout = QVBoxLayout(controls_widget)
-
-
         controls_widget.setMaximumWidth(350)
-
-
-
-
-
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-
-
         button_box.accepted.connect(self.accept)
-
-
         button_box.rejected.connect(self.reject)
 
-
-
-
-
         # --- ИЗМЕНЕНИЕ: Добавляем все кнопки для создания объектов ---
-
-
         tools_group = QGroupBox("Инструменты")
-
-
         tools_layout = QVBoxLayout(tools_group)
-
-
         btn_add_text = QPushButton("Добавить Текст (БД)")
-
-
         btn_add_text.clicked.connect(lambda: self._add_object('text'))
-
-
         btn_add_custom_text = QPushButton("Добавить Текст (свой)")
-
-
         btn_add_custom_text.clicked.connect(lambda: self._add_object('custom_text'))
-
-
         btn_add_qr = QPushButton("Добавить QR-код")
-
-
         btn_add_qr.clicked.connect(lambda: self._add_object('qr'))
-
-
         btn_add_sscc = QPushButton("Добавить SSCC")
-
-
         btn_add_sscc.clicked.connect(lambda: self._add_object('sscc'))
-
-
         btn_add_dm = QPushButton("Добавить DataMatrix")
-
-
         btn_add_dm.clicked.connect(lambda: self._add_object('datamatrix'))
-
-
         btn_add_image = QPushButton("Добавить Изображение")
-
-
         btn_add_image.clicked.connect(lambda: self._add_object('image'))
-
-
         btn_add_text_image = QPushButton("Добавить Текст+Картинка")
-
-
         btn_add_text_image.clicked.connect(lambda: self._add_object('text_with_image'))
-
-
-        
-
-
         tools_layout.addWidget(btn_add_text)
-
-
         tools_layout.addWidget(btn_add_custom_text)
-
-
         tools_layout.addWidget(btn_add_qr)
-
-
         tools_layout.addWidget(btn_add_sscc)
-
-
         tools_layout.addWidget(btn_add_dm)
-
-
         tools_layout.addWidget(btn_add_image)
-
-
         tools_layout.addWidget(btn_add_text_image)
-
-
         tools_layout.addStretch()
-
-
-
-
 
         # --- ИЗМЕНЕНИЕ: Создаем все возможные виджеты для панели свойств ---
 
@@ -2274,16 +2100,10 @@ class EmployeePassesViewerDialog(QDialog):
         self.pass_details = None
 
 
-
-
-
         self.setWindowTitle(f"Пропуски для задачи #{task_id}")
 
 
         self.setMinimumSize(600, 400)
-
-
-
 
 
         self._build_ui()
@@ -2299,9 +2119,6 @@ class EmployeePassesViewerDialog(QDialog):
 
 
         main_layout = QVBoxLayout(self)
-
-
-
 
 
         self.table = QTableWidget()
@@ -2322,9 +2139,6 @@ class EmployeePassesViewerDialog(QDialog):
         main_layout.addWidget(self.table)
 
 
-
-
-
         buttons_layout = QHBoxLayout()
 
 
@@ -2338,9 +2152,6 @@ class EmployeePassesViewerDialog(QDialog):
 
 
         btn_close.clicked.connect(self.accept)
-
-
-
 
 
         buttons_layout.addStretch()
@@ -2376,9 +2187,6 @@ class EmployeePassesViewerDialog(QDialog):
                 return
 
 
-
-
-
             self.table.setRowCount(len(self.pass_details["passes"]))
 
 
@@ -2386,9 +2194,6 @@ class EmployeePassesViewerDialog(QDialog):
 
 
                 self.table.setItem(i, 0, QTableWidgetItem(access_code))
-
-
-
 
 
         except Exception as e:
@@ -2403,241 +2208,220 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-        def _print_passes(self):
+    def _print_passes(self):
 
 
+        """Запускает процесс печати пропусков."""
 
 
+        if not self.pass_details or not self.pass_details.get("passes"):
 
-            """Запускает процесс печати пропусков."""
 
+            QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
 
 
+            return
 
 
-            if not self.pass_details or not self.pass_details.get("passes"):
+        printer = QPrinter(QPrinter.HighResolution)
 
 
+        printer.setPageSizeMM(QSize(60, 40))
 
 
+        printer.setPageMargins(2, 2, 2, 2, QPrinter.Millimeter)
 
-                QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
 
+        dialog = QPrintDialog(printer, self)
 
 
+        if dialog.exec() != QDialog.Accepted:
 
 
-                return
+            return
 
 
+        painter = QPainter()
 
 
+        if not painter.begin(printer):
 
-    
 
+            QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
 
 
+            return
 
 
-            printer = QPrinter(QPrinter.HighResolution)
+        dpi_x = printer.resolution()
 
 
+        dpi_y = printer.resolution()
 
 
+        def mm_to_px(mm, dpi):
 
-            printer.setPageSizeMM(QSize(60, 40))
 
+            return (mm / 25.4) * dpi
 
 
+        font_main = QFont("Arial", pointSize=10)
 
 
-            printer.setPageMargins(2, 2, 2, 2, QPrinter.Millimeter)
+        font_small = QFont("Arial", pointSize=8)
 
 
+        client_name = self.pass_details.get('client_name', 'N/A')
 
 
+        container_number = self.pass_details.get('container_number', 'N/A')
 
-    
 
+        print_date = datetime.now().strftime("%d.%m.%Y")
 
 
+        passes = self.pass_details["passes"]
 
 
-            dialog = QPrintDialog(printer, self)
+        for i, access_code in enumerate(passes):
 
 
+            if i > 0:
 
 
+                printer.newPage()
 
-            if dialog.exec() != QDialog.Accepted:
 
+            painter.setFont(font_main)
 
 
+            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
 
 
-                return
+            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
 
 
+            painter.setFont(font_small)
 
 
+            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
 
-    
 
+            try:
 
 
+                barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
 
 
-            painter = QPainter()
+                drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
 
 
+                drawing.add(barcode)
 
 
+                pil_image = renderPM.drawToPIL(drawing)
 
-            if not painter.begin(printer):
 
+                buffer = io.BytesIO()
 
 
+                pil_image.save(buffer, format="PNG")
 
 
-                QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
+                buffer.seek(0)
 
 
+                barcode_pixmap = QPixmap()
 
 
+                barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
 
-                return
 
+                barcode_x_px = mm_to_px(3, dpi_x)
 
 
+                barcode_y_px = mm_to_px(20, dpi_y)
 
 
-            
+                painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
 
 
+            except Exception as e:
 
 
+                logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
 
-            dpi_x = printer.resolution()
 
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
 
 
+            notes_rect_y_px = mm_to_px(33, dpi_y)
 
 
-            dpi_y = printer.resolution()
+            notes_rect_height_px = mm_to_px(5, dpi_y)
 
 
+            painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
 
 
+        painter.end()
 
-            
 
+        QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
 
 
 
 
-            def mm_to_px(mm, dpi):
 
+        
 
 
 
 
-                return (mm / 25.4) * dpi
 
+                dialog = QPrintDialog(printer, self)
 
 
 
 
-    
 
+                if dialog.exec() != QDialog.Accepted:
 
 
 
 
-            font_main = QFont("Arial", pointSize=10)
 
+                    return
 
 
 
 
-            font_small = QFont("Arial", pointSize=8)
 
+        
 
 
 
 
-            
 
+                painter = QPainter()
 
 
 
 
-            client_name = self.pass_details.get('client_name', 'N/A')
 
+                if not painter.begin(printer):
 
 
 
 
-            container_number = self.pass_details.get('container_number', 'N/A')
 
+                    QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
 
 
 
 
-            print_date = datetime.now().strftime("%d.%m.%Y")
 
-
-
-
-
-    
-
-
-
-
-
-            passes = self.pass_details["passes"]
-
-
-
-
-
-            for i, access_code in enumerate(passes):
-
-
-
-
-
-                if i > 0:
-
-
-
-
-
-                    printer.newPage()
-
-
-
-
-
-    
-
-
-
-
-
-                painter.setFont(font_main)
-
-
-
-
-
-                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
-
-
-
-
-
-                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
+                    return
 
 
 
@@ -2649,67 +2433,127 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                painter.setFont(font_small)
+                dpi_x = printer.resolution()
 
 
 
 
 
-                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
+                dpi_y = printer.resolution()
 
 
 
 
 
-    
+                
 
 
 
 
 
-                try:
+                def mm_to_px(mm, dpi):
 
 
 
 
 
-                    barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+                    return (mm / 25.4) * dpi
 
 
 
 
 
-                    drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
+        
 
 
 
 
 
-                    drawing.add(barcode)
+                font_main = QFont("Arial", pointSize=10)
 
 
 
 
 
-                    pil_image = renderPM.drawToPIL(drawing)
+                font_small = QFont("Arial", pointSize=8)
 
 
 
 
 
-                    buffer = io.BytesIO()
+                
 
 
 
 
 
-                    pil_image.save(buffer, format="PNG")
+                client_name = self.pass_details.get('client_name', 'N/A')
 
 
 
 
 
-                    buffer.seek(0)
+                container_number = self.pass_details.get('container_number', 'N/A')
+
+
+
+
+
+                print_date = datetime.now().strftime("%d.%m.%Y")
+
+
+
+
+
+        
+
+
+
+
+
+                passes = self.pass_details["passes"]
+
+
+
+
+
+                for i, access_code in enumerate(passes):
+
+
+
+
+
+                    if i > 0:
+
+
+
+
+
+                        printer.newPage()
+
+
+
+
+
+        
+
+
+
+
+
+                    painter.setFont(font_main)
+
+
+
+
+
+                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
+
+
+
+
+
+                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
 
 
 
@@ -2721,97 +2565,169 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    barcode_pixmap = QPixmap()
+                    painter.setFont(font_small)
 
 
 
 
 
-                    barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
+                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
 
 
 
 
 
-                    
+        
 
 
 
 
 
-                    barcode_x_px = mm_to_px(3, dpi_x)
+                    try:
 
 
 
 
 
-                    barcode_y_px = mm_to_px(20, dpi_y)
+                        barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
 
 
 
 
 
-                    painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+                        drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
 
 
 
 
 
-                except Exception as e:
+                        drawing.add(barcode)
 
 
 
 
 
-                    logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
+                        pil_image = renderPM.drawToPIL(drawing)
 
 
 
 
 
-                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+                        buffer = io.BytesIO()
 
 
 
 
 
-    
+                        pil_image.save(buffer, format="PNG")
 
 
 
 
 
-                notes_rect_y_px = mm_to_px(33, dpi_y)
+                        buffer.seek(0)
 
 
 
 
 
-                notes_rect_height_px = mm_to_px(5, dpi_y)
+                        
 
 
 
 
 
-                painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+                        barcode_pixmap = QPixmap()
 
 
 
 
 
-    
+                        barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
 
 
 
 
 
-            painter.end()
+                        
 
 
 
 
 
-            QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
+                        barcode_x_px = mm_to_px(3, dpi_x)
+
+
+
+
+
+                        barcode_y_px = mm_to_px(20, dpi_y)
+
+
+
+
+
+                        painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+
+
+
+
+
+                    except Exception as e:
+
+
+
+
+
+                        logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
+
+
+
+
+
+                        painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+
+
+
+
+
+        
+
+
+
+
+
+                    notes_rect_y_px = mm_to_px(33, dpi_y)
+
+
+
+
+
+                    notes_rect_height_px = mm_to_px(5, dpi_y)
+
+
+
+
+
+                    painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+
+
+
+
+
+        
+
+
+
+
+
+                painter.end()
+
+
+
+
+
+                QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
 
 
 
