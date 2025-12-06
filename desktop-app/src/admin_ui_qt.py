@@ -2346,19 +2346,19 @@ class EmployeePassesViewerDialog(QDialog):
                 painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
 
 
-            except Exception as e:
+                        except Exception as e:
 
 
-                logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
+                            logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
 
 
-                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+                            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
 
 
-            notes_rect_y_px = mm_to_px(33, dpi_y)
+                        notes_rect_y_px = mm_to_px(33, dpi_y)
 
 
-            notes_rect_height_px = mm_to_px(5, dpi_y)
+                        notes_rect_height_px = mm_to_px(5, dpi_y)
 
 
                         painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
