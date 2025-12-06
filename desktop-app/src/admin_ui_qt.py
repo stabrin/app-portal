@@ -966,15 +966,27 @@ class ApiIntegrationFrameQt(QWidget):
 
     def _ask_prepare_report(self, prompt_text):
         """Показывает диалог подтверждения и запускает следующий шаг."""
-        reply = QMessageBox.question(self, "Подтверждение", prompt_text, QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            self._append_log("\nПользователь подтвердил создание отчета. Запускаю...")
-            self._prepare_report_flow()
-        else:
-            self._append_log("\nПользователь отменил создание отчета.")
-            self.api_service.order_service.update_order_status(self.order_id, 'Сведения подготовлены')
-            self._load_order_data()
-            self._update_buttons_state()
+        # --- ИЗМЕНЕНИЕ: Используем немодальный диалог с callback'ом ---
+        # Создаем QMessageBox, но не вызываем exec()
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("Подтверждение")
+        msg_box.setText(prompt_text)
+        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg_box.setDefaultButton(QMessageBox.Yes)
+        # Привязываем обработчик к сигналу buttonClicked
+        msg_box.buttonClicked.connect(self._handle_prepare_report_dialog_result)
+        msg_box.open() # Показываем немодально
+
+    def _handle_prepare_report_dialog_result(self, button):
+        """Обрабатывает результат диалога подтверждения."""
+        if button.text() == "&Yes":
+             self._append_log("\nПользователь подтвердил создание отчета. Запускаю...")
+             self._prepare_report_flow()
+        else: # No или закрытие окна
+             self._append_log("\nПользователь отменил создание отчета.")
+             self.api_service.order_service.update_order_status(self.order_id, 'Сведения подготовлены')
+             self._load_order_data()
+             self._update_buttons_state()
 
     def _prepare_report_flow(self):
         """Запускает полный цикл подготовки отчета о нанесении."""
