@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from .db_connector import get_client_db_connection
 from psycopg2.extras import RealDictCursor
 
@@ -88,3 +89,62 @@ class TaskService:
             conn.commit()
             logging.info(f"Создана новая задача #{new_id} для заказа #{order_id}.")
             return new_id
+
+    def generate_employee_passes(self, task_id, employee_count):
+        """
+        Создает уникальные коды доступа (пропуски) для сотрудников, привязанные к задаче.
+        При повторном вызове перезатирает старые пропуски для данной задачи.
+        """
+        generated_codes = []
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                # 1. Удаляем старые пропуски для этой задачи, чтобы избежать дублей
+                cur.execute("DELETE FROM task_employees WHERE task_id = %s", (task_id,))
+                logging.info(f"Удалены старые пропуски для задачи #{task_id}.")
+
+                # 2. Генерируем и вставляем новые
+                for _ in range(employee_count):
+                    access_code = str(uuid.uuid4())
+                    cur.execute(
+                        """
+                        INSERT INTO task_employees (task_id, access_code)
+                        VALUES (%s, %s)
+                        """,
+                        (task_id, access_code)
+                    )
+                    generated_codes.append(access_code)
+            conn.commit()
+        
+        logging.info(f"Сгенерировано {len(generated_codes)} новых пропусков для задачи #{task_id}.")
+        return generated_codes
+
+    def get_employee_passes_details(self, task_id):
+        """
+        Получает все данные, необходимые для печати пропусков для задачи.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1. Получаем информацию о задаче и связанном заказе
+                cur.execute("""
+                    SELECT
+                        o.client_name,
+                        o.notes AS container_number
+                    FROM production_tasks pt
+                    JOIN orders o ON pt.order_id = o.id
+                    WHERE pt.id = %s
+                """, (task_id,))
+                order_info = cur.fetchone()
+
+                if not order_info:
+                    return None
+
+                # 2. Получаем все коды доступа для этой задачи
+                cur.execute("""
+                    SELECT access_code
+                    FROM task_employees
+                    WHERE task_id = %s
+                """, (task_id,))
+                passes = cur.fetchall()
+                
+                order_info['passes'] = [p['access_code'] for p in passes]
+                return order_info

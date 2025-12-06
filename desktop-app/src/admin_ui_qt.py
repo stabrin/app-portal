@@ -7,12 +7,18 @@ from PySide6.QtWidgets import (
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView,
     QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
 )
-from PySide6.QtCore import Qt, Slot, QDate, QTimer, QThread, Signal, QObject
-from PySide6.QtGui import QColor, QPen, QPainter
+# --- NEW IMPORTS FOR PRINTING ---
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtCore import Qt, Slot, QDate, QTimer, QThread, Signal, QObject, QRectF, QSize
+from PySide6.QtGui import QColor, QPen, QPainter, QFont, QPixmap
 import sys
 import traceback
 import logging
 import json
+from datetime import datetime
+import io
+from pyStrich.code128 import Code128Encoder
+# --- END NEW IMPORTS ---
 
 from dateutil.relativedelta import relativedelta
 import pandas as pd
@@ -526,7 +532,16 @@ class TaskEditorFrameQt(QWidget):
             self.employee_count_spinbox = QSpinBox()
             self.employee_count_spinbox.setRange(1, 100)
             self.employee_count_spinbox.setValue(3) # Default
-            marking_layout.addRow("Количество сотрудников:", self.employee_count_spinbox)
+            
+            # --- NEW: Generate Passes Button ---
+            self.btn_generate_passes = QPushButton("Сгенерировать пропуски")
+            self.btn_generate_passes.clicked.connect(self._generate_employee_passes)
+            
+            employee_layout = QHBoxLayout()
+            employee_layout.addWidget(self.employee_count_spinbox)
+            employee_layout.addWidget(self.btn_generate_passes)
+            marking_layout.addRow("Количество сотрудников:", employee_layout)
+            # --- END NEW ---
 
             # --- NEW FIELD: Nesting Level ---
             self.nesting_level_label = QLabel("Уровень вложений:")
@@ -673,6 +688,26 @@ class TaskEditorFrameQt(QWidget):
             self._load_task_details() # Обновляем состояние кнопок
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось обновить статус: {e}")
+
+    def _generate_employee_passes(self):
+        """Генерирует уникальные коды доступа для сотрудников."""
+        try:
+            task_id = self.task_data['id']
+            employee_count = self.employee_count_spinbox.value()
+
+            # Вызываем сервисный метод
+            generated_codes = self.task_service.generate_employee_passes(task_id, employee_count)
+            
+            QMessageBox.information(self, "Успех", 
+                                    f"Успешно сгенерировано {len(generated_codes)} пропусков для задачи #{task_id}.")
+            
+            # Открываем окно просмотра
+            dialog = EmployeePassesViewerDialog(self, self.task_service, task_id)
+            dialog.exec()
+            
+        except Exception as e:
+            logging.error(f"Ошибка при генерации пропусков: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сгенерировать пропуски: {e}")
 
 
 class ApiIntegrationFrameQt(QWidget):
@@ -1186,345 +1221,1724 @@ class PrintableObjectItem(QGraphicsRectItem):
 
 
 class LabelEditorDialog(QDialog):
+
+
     """Диалоговое окно для визуального редактора макетов этикеток."""
+
+
     def __init__(self, parent, user_info, catalog_service, layout_data=None):
+
+
         super().__init__(parent)
+
+
         self.user_info = user_info
+
+
         self.catalog_service = catalog_service
+
+
         self.is_new_layout = not bool(layout_data)
+
+
         self.template = json.loads(json.dumps(layout_data or {})) # Глубокая копия
 
+
+
+
+
         title = "Новый макет" if self.is_new_layout else f"Редактор: {self.template.get('name', '')}"
+
+
         self.setWindowTitle(title)
+
+
         self.setMinimumSize(1200, 800)
 
+
+
+
+
         self.canvas_scale = 5
+
+
         self.selected_object_id = None
+
+
         
+
+
         # --- НОВЫЙ БЛОК: Шаблоны и источники данных ---
+
+
         self.object_templates = {
+
+
             'text': { "type": "text", "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "ap_workplaces.warehouse_name", "font_name": "arial" },
+
+
             'custom_text': { "type": "text", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "", "font_name": "arial" },
+
+
             'qr': { "type": "barcode", "barcode_type": "QR", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "QR: Конфигурация рабочего места" },
+
+
             'sscc': { "type": "barcode", "barcode_type": "SSCC", "x_mm": 10, "y_mm": 10, "width_mm": 50, "height_mm": 20, "data_source": "packages.sscc_code" },
+
+
             'datamatrix': { "type": "barcode", "barcode_type": "DataMatrix", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "items.datamatrix" },
+
+
             'image': { "type": "image", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "" },
+
+
             'text_with_image': { "type": "text_with_image", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 60, "height_mm": 30, "data_source": "", "image_source": "", "font_name": "arial" }
+
+
         }
+
+
         self.available_text_sources = [
+
+
             "ap_workplaces.warehouse_name",
+
+
             "ap_workplaces.workplace_number",
+
+
             "orders.client_name",
+
+
             "packages.sscc_code"
+
+
         ]
+
+
         self.available_qr_sources = [
+
+
             "QR: Конфигурация рабочего места",
+
+
             "QR: Конфигурация сервера"
+
+
         ]
+
+
         self.available_sscc_sources = ["packages.sscc_code"]
+
+
         self.available_datamatrix_sources = ["items.datamatrix"]
 
+
+
+
+
         self._build_editor_ui()
+
+
         self._load_template_to_ui()
+
+
         self._redraw_canvas()
 
+
+
+
+
     def _build_editor_ui(self):
+
+
         main_layout = QHBoxLayout(self)
+
+
         splitter = QSplitter(Qt.Horizontal)
+
+
         main_layout.addWidget(splitter)
 
+
+
+
+
         controls_widget = QWidget()
+
+
         controls_layout = QVBoxLayout(controls_widget)
+
+
         controls_widget.setMaximumWidth(350)
 
+
+
+
+
         button_box = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+
+
         button_box.accepted.connect(self.accept)
+
+
         button_box.rejected.connect(self.reject)
 
+
+
+
+
         # --- ИЗМЕНЕНИЕ: Добавляем все кнопки для создания объектов ---
+
+
         tools_group = QGroupBox("Инструменты")
+
+
         tools_layout = QVBoxLayout(tools_group)
+
+
         btn_add_text = QPushButton("Добавить Текст (БД)")
+
+
         btn_add_text.clicked.connect(lambda: self._add_object('text'))
+
+
         btn_add_custom_text = QPushButton("Добавить Текст (свой)")
+
+
         btn_add_custom_text.clicked.connect(lambda: self._add_object('custom_text'))
+
+
         btn_add_qr = QPushButton("Добавить QR-код")
+
+
         btn_add_qr.clicked.connect(lambda: self._add_object('qr'))
+
+
         btn_add_sscc = QPushButton("Добавить SSCC")
+
+
         btn_add_sscc.clicked.connect(lambda: self._add_object('sscc'))
+
+
         btn_add_dm = QPushButton("Добавить DataMatrix")
+
+
         btn_add_dm.clicked.connect(lambda: self._add_object('datamatrix'))
+
+
         btn_add_image = QPushButton("Добавить Изображение")
+
+
         btn_add_image.clicked.connect(lambda: self._add_object('image'))
+
+
         btn_add_text_image = QPushButton("Добавить Текст+Картинка")
+
+
         btn_add_text_image.clicked.connect(lambda: self._add_object('text_with_image'))
+
+
         
+
+
         tools_layout.addWidget(btn_add_text)
+
+
         tools_layout.addWidget(btn_add_custom_text)
+
+
         tools_layout.addWidget(btn_add_qr)
+
+
         tools_layout.addWidget(btn_add_sscc)
+
+
         tools_layout.addWidget(btn_add_dm)
+
+
         tools_layout.addWidget(btn_add_image)
+
+
         tools_layout.addWidget(btn_add_text_image)
+
+
         tools_layout.addStretch()
 
+
+
+
+
         # --- ИЗМЕНЕНИЕ: Создаем все возможные виджеты для панели свойств ---
+
+
         props_group = QGroupBox("Свойства объекта")
+
+
         self.props_layout = QFormLayout(props_group)
+
+
         
+
+
         self.prop_x = QLineEdit()
+
+
         self.prop_y = QLineEdit()
+
+
         self.prop_w = QLineEdit()
+
+
         self.prop_h = QLineEdit()
+
+
         
+
+
         self.prop_is_custom_text = QCheckBox("Произвольный текст")
+
+
         
+
+
         # --- ИЗМЕНЕНИЕ: Создаем контейнеры для динамических виджетов ---
+
+
         self.prop_data_source_widget = QWidget()
+
+
         data_source_layout = QHBoxLayout(self.prop_data_source_widget)
+
+
         data_source_layout.setContentsMargins(0, 0, 0, 0)
+
+
         self.prop_data_source_combo = QComboBox()
+
+
         self.prop_data_source_combo.setEditable(False) # По умолчанию нередактируемый
+
+
         self.prop_data_source_entry = QLineEdit()
+
+
         data_source_layout.addWidget(self.prop_data_source_combo)
+
+
         data_source_layout.addWidget(self.prop_data_source_entry)
+
+
         
+
+
         self.prop_image_source_widget = QWidget()
+
+
         image_source_layout = QHBoxLayout(self.prop_image_source_widget)
+
+
         image_source_layout.setContentsMargins(0, 0, 0, 0)
+
+
         self.prop_image_source_combo = QComboBox()
+
+
         self.prop_image_source_combo.setEditable(True) # Можно вписать имя
+
+
         image_source_layout.addWidget(self.prop_image_source_combo)
 
+
+
+
+
         self.props_layout.addRow("X (мм):", self.prop_x)
+
+
         self.props_layout.addRow("Y (мм):", self.prop_y)
+
+
         self.props_layout.addRow("Ширина (мм):", self.prop_w)
+
+
         self.props_layout.addRow("Высота (мм):", self.prop_h)
+
+
         self.props_layout.addRow(self.prop_is_custom_text)
+
+
         self.props_layout.addRow("Источник:", self.prop_data_source_widget)
+
+
         self.props_layout.addRow("Источник картинки:", self.prop_image_source_widget)
+
+
         
+
+
         btn_apply_props = QPushButton("Применить свойства")
+
+
         btn_apply_props.clicked.connect(self._apply_properties)
+
+
         self.props_layout.addWidget(btn_apply_props)
 
+
+
+
+
         controls_layout.addWidget(tools_group)
+
+
         controls_layout.addWidget(props_group)
+
+
         controls_layout.addStretch()
+
+
         controls_layout.addWidget(button_box)
 
+
+
+
+
         canvas_widget = QWidget()
+
+
         canvas_layout = QVBoxLayout(canvas_widget)
+
+
         self.scene = QGraphicsScene()
+
+
         self.scene.selectionChanged.connect(self._on_scene_selection_changed)
+
+
         self.view = QGraphicsView(self.scene)
+
+
         self.view.setRenderHint(QPainter.Antialiasing)
+
+
         canvas_layout.addWidget(self.view)
 
+
+
+
+
         splitter.addWidget(controls_widget)
+
+
         splitter.addWidget(canvas_widget)
+
+
         splitter.setSizes([300, 900])
+
+
         
+
+
         # Коннекторы
+
+
         self.prop_is_custom_text.stateChanged.connect(self._update_properties_panel)
 
 
+
+
+
+
+
+
     def _redraw_canvas(self):
+
+
         self.scene.blockSignals(True)
+
+
         try:
+
+
             self.scene.clear()
+
+
             if not self.template: return
+
+
             
+
+
             width_px = float(self.template['width_mm']) * self.canvas_scale
+
+
             height_px = float(self.template['height_mm']) * self.canvas_scale
+
+
             self.scene.setBackgroundBrush(QColor("lightgrey"))
+
+
             label_rect = self.scene.addRect(0, 0, width_px, height_px, Qt.NoPen, QColor("white"))
+
+
             label_rect.setZValue(-1)
 
+
+
+
+
             for i, obj_data in enumerate(self.template.get('objects', [])):
+
+
                 self._draw_object(obj_data, i)
+
+
         except (KeyError, ValueError, TypeError) as e:
+
+
             logging.error(f"Ошибка отрисовки холста: {e}")
+
+
         finally:
+
+
             self.scene.blockSignals(False)
 
 
+
+
+
+
+
+
     def _draw_object(self, obj_data, object_id):
+
+
         item = PrintableObjectItem(obj_data, object_id, self.canvas_scale)
+
+
         self.scene.addItem(item)
+
+
         if self.selected_object_id == object_id:
+
+
             item.setSelected(True)
 
+
+
+
+
     def _add_object(self, template_key: str):
+
+
         import copy
+
+
         new_object = copy.deepcopy(self.object_templates[template_key])
+
+
         
+
+
         if 'objects' not in self.template: self.template['objects'] = []
+
+
         self.template['objects'].append(new_object)
+
+
         self._redraw_canvas()
 
+
+
+
+
     def _load_template_to_ui(self):
+
+
         if self.template.get('objects'):
+
+
             self.selected_object_id = 0
+
+
         else:
+
+
             self.selected_object_id = None
+
+
         self._update_properties_panel()
+
+
         self._redraw_canvas() 
 
+
+
+
+
     def _update_properties_panel(self):
+
+
         logging.debug(f"Updating properties panel for selected_id: {self.selected_object_id}")
 
+
+
+
+
         is_object_selected = self.selected_object_id is not None and self.selected_object_id < len(self.template.get('objects', []))
+
+
         
+
+
         # Включаем/выключаем все поля, кроме чекбокса
+
+
         self.prop_x.setEnabled(is_object_selected)
+
+
         self.prop_y.setEnabled(is_object_selected)
+
+
         self.prop_w.setEnabled(is_object_selected)
+
+
         self.prop_h.setEnabled(is_object_selected)
+
+
         self.prop_data_source_widget.setEnabled(is_object_selected)
+
+
         self.prop_image_source_widget.setEnabled(is_object_selected)
+
+
         self.props_layout.labelForField(self.prop_data_source_widget).setEnabled(is_object_selected)
+
+
         self.props_layout.labelForField(self.prop_image_source_widget).setEnabled(is_object_selected)
 
 
+
+
+
+
+
+
         # Сначала скрываем все опциональные виджеты
+
+
         self.prop_is_custom_text.setVisible(False)
+
+
         self.props_layout.labelForField(self.prop_image_source_widget).setVisible(False)
+
+
         self.prop_image_source_widget.setVisible(False)
+
+
         self.prop_data_source_combo.setVisible(False)
+
+
         self.prop_data_source_entry.setVisible(False)
 
+
+
+
+
         if not is_object_selected:
+
+
             self.prop_x.clear(); self.prop_y.clear(); self.prop_w.clear(); self.prop_h.clear()
+
+
             self.prop_data_source_combo.clear(); self.prop_data_source_entry.clear()
+
+
             logging.debug("Properties panel cleared and disabled.")
+
+
             return
+
+
             
+
+
         obj_data = self.template['objects'][self.selected_object_id]
+
+
         obj_type = obj_data.get("type")
 
+
+
+
+
         # Заполняем универсальные поля
+
+
         self.prop_x.setText(str(obj_data.get('x_mm', '')))
+
+
         self.prop_y.setText(str(obj_data.get('y_mm', '')))
+
+
         self.prop_w.setText(str(obj_data.get('width_mm', '')))
+
+
         self.prop_h.setText(str(obj_data.get('height_mm', '')))
+
+
         
+
+
         # Блокируем сигналы, чтобы не вызывать _update_properties_panel рекурсивно
+
+
         self.prop_is_custom_text.blockSignals(True)
+
+
         self.prop_is_custom_text.setChecked(obj_data.get('is_custom_text', False))
+
+
         self.prop_is_custom_text.blockSignals(False)
 
+
+
+
+
         # Настраиваем панель под конкретный тип объекта
+
+
         if obj_type == 'text':
+
+
             self.prop_is_custom_text.setVisible(True)
+
+
             if obj_data.get('is_custom_text'):
+
+
                 self.prop_data_source_entry.setVisible(True)
+
+
                 self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
+
+
             else:
+
+
                 self.prop_data_source_combo.setVisible(True)
+
+
                 self.prop_data_source_combo.setEditable(False)
+
+
                 self.prop_data_source_combo.clear()
+
+
                 self.prop_data_source_combo.addItems(self.available_text_sources)
+
+
                 self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
 
+
+
+
+
         elif obj_type == 'barcode':
+
+
             self.prop_data_source_combo.setVisible(True)
+
+
             self.prop_data_source_combo.setEditable(False)
+
+
             self.prop_data_source_combo.clear()
+
+
             barcode_type = obj_data.get('barcode_type', '').upper()
+
+
             sources = {
+
+
                 'QR': self.available_qr_sources,
+
+
                 'SSCC': self.available_sscc_sources,
+
+
                 'DATAMATRIX': self.available_datamatrix_sources
+
+
             }.get(barcode_type, [])
+
+
             self.prop_data_source_combo.addItems(sources)
+
+
             self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+
+
+
 
         elif obj_type == 'image':
+
+
             self.prop_data_source_combo.setVisible(True)
+
+
             self.prop_data_source_combo.setEditable(True)
+
+
             self.prop_data_source_combo.clear()
+
+
             # TODO: Загружать список доступных картинок из БД
+
+
             self.prop_data_source_combo.addItem(obj_data.get('data_source', '')) # Добавляем текущее значение
+
+
             self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
 
+
+
+
+
         elif obj_type == 'text_with_image':
+
+
             self.prop_data_source_entry.setVisible(True)
+
+
             self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
+
+
             self.prop_image_source_widget.setVisible(True)
+
+
             self.props_layout.labelForField(self.prop_image_source_widget).setVisible(True)
+
+
             self.prop_image_source_combo.clear()
+
+
             # TODO: Загружать список доступных картинок из БД
+
+
             self.prop_image_source_combo.addItem(obj_data.get('image_source', ''))
+
+
             self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
+
+
+
+
 
         logging.debug("Properties panel updated successfully.")
 
+
+
+
+
     def _apply_properties(self):
+
+
         if self.selected_object_id is None: return
+
+
         logging.debug(f"Applying properties for object_id: {self.selected_object_id}")
+
+
         try:
+
+
             obj_data = self.template['objects'][self.selected_object_id]
+
+
             obj_type = obj_data.get("type")
 
+
+
+
+
             obj_data['x_mm'] = float(self.prop_x.text())
+
+
             obj_data['y_mm'] = float(self.prop_y.text())
+
+
             obj_data['width_mm'] = float(self.prop_w.text())
+
+
             obj_data['height_mm'] = float(self.prop_h.text())
 
+
+
+
+
             if obj_type == 'text':
+
+
                 is_custom = self.prop_is_custom_text.isChecked()
+
+
                 obj_data['is_custom_text'] = is_custom
+
+
                 if is_custom:
+
+
                     obj_data['data_source'] = self.prop_data_source_entry.text()
+
+
                 else:
+
+
                     obj_data['data_source'] = self.prop_data_source_combo.currentText()
+
+
             
+
+
             elif obj_type in ['barcode', 'image']:
+
+
                 obj_data['data_source'] = self.prop_data_source_combo.currentText()
 
+
+
+
+
             elif obj_type == 'text_with_image':
+
+
                 obj_data['data_source'] = self.prop_data_source_entry.text()
+
+
                 obj_data['image_source'] = self.prop_image_source_combo.currentText()
 
+
+
+
+
             self._redraw_canvas()
+
+
             logging.debug("Properties applied and canvas redrawn.")
+
+
         except (ValueError, IndexError) as e:
+
+
             QMessageBox.warning(self, "Ошибка", f"Некорректные данные в свойствах: {e}")
+
+
             
+
+
     def _on_scene_selection_changed(self):
+
+
         logging.debug("Scene selection changed.")
+
+
         selected_items = self.scene.selectedItems()
+
+
         
+
+
         new_selected_id = None
+
+
         if selected_items:
+
+
             item = selected_items[0]
+
+
             if isinstance(item, PrintableObjectItem):
+
+
                 new_selected_id = item.object_id
 
+
+
+
+
         if self.selected_object_id != new_selected_id:
+
+
             self.selected_object_id = new_selected_id
+
+
             if new_selected_id is None:
+
+
                 logging.debug("No items selected or a non-PrintableObjectItem was selected.")
+
+
             else:
+
+
                 logging.debug(f"Item selected: id={self.selected_object_id}")
+
+
             self._update_properties_panel()
+
+
+
+
 
     def on_item_moved(self, object_id):
+
+
         """Слот, вызываемый из PrintableObjectItem при перемещении."""
+
+
         if self.selected_object_id == object_id:
+
+
             self._update_properties_panel()
+
+
             
+
+
     def accept(self):
+
+
         try:
+
+
             if not self.template.get('name'):
+
+
                 QMessageBox.warning(self, "Ошибка", "Название макета не может быть пустым.")
+
+
                 return
 
+
+
+
+
             self.catalog_service.upsert_print_layout(self.template)
+
+
             super().accept()
+
+
         except Exception as e:
+
+
             QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить макет: {e}")
+
+
+
+
+
+
+
+
+# --- NEW DIALOG FOR EMPLOYEE PASSES ---
+
+
+class EmployeePassesViewerDialog(QDialog):
+
+
+    """Диалог для просмотра и печати пропусков сотрудников."""
+
+
+    def __init__(self, parent, task_service, task_id):
+
+
+        super().__init__(parent)
+
+
+        self.task_service = task_service
+
+
+        self.task_id = task_id
+
+
+        self.pass_details = None
+
+
+
+
+
+        self.setWindowTitle(f"Пропуски для задачи #{task_id}")
+
+
+        self.setMinimumSize(600, 400)
+
+
+
+
+
+        self._build_ui()
+
+
+        self._load_passes()
+
+
+
+
+
+    def _build_ui(self):
+
+
+        main_layout = QVBoxLayout(self)
+
+
+
+
+
+        self.table = QTableWidget()
+
+
+        self.table.setColumnCount(1)
+
+
+        self.table.setHorizontalHeaderLabels(["Код доступа (пропуск)"])
+
+
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+
+
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+
+
+        main_layout.addWidget(self.table)
+
+
+
+
+
+        buttons_layout = QHBoxLayout()
+
+
+        btn_print = QPushButton("Печать")
+
+
+        btn_print.clicked.connect(self._print_passes)
+
+
+        btn_close = QPushButton("Закрыть")
+
+
+        btn_close.clicked.connect(self.accept)
+
+
+
+
+
+        buttons_layout.addStretch()
+
+
+        buttons_layout.addWidget(btn_print)
+
+
+        buttons_layout.addWidget(btn_close)
+
+
+        main_layout.addLayout(buttons_layout)
+
+
+
+
+
+    def _load_passes(self):
+
+
+        try:
+
+
+            self.pass_details = self.task_service.get_employee_passes_details(self.task_id)
+
+
+            if not self.pass_details or not self.pass_details.get("passes"):
+
+
+                QMessageBox.warning(self, "Нет данных", "Не найдено сгенерированных пропусков для этой задачи.")
+
+
+                return
+
+
+
+
+
+            self.table.setRowCount(len(self.pass_details["passes"]))
+
+
+            for i, access_code in enumerate(self.pass_details["passes"]):
+
+
+                self.table.setItem(i, 0, QTableWidgetItem(access_code))
+
+
+
+
+
+        except Exception as e:
+
+
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить пропуски: {e}")
+
+
+            self.close()
+
+
+
+
+
+        def _print_passes(self):
+
+
+
+
+
+            """Запускает процесс печати пропусков."""
+
+
+
+
+
+            if not self.pass_details or not self.pass_details.get("passes"):
+
+
+
+
+
+                QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
+
+
+
+
+
+                return
+
+
+
+
+
+    
+
+
+
+
+
+                    printer = QPrinter(QPrinter.Resolution.HighResolution)
+
+
+
+
+
+    
+
+
+
+
+
+                    # Устанавливаем размер страницы 60x40 мм
+
+
+
+
+
+    
+
+
+
+
+
+                    printer.setPageSize(QPrinter.PageSize.Custom)
+
+
+
+
+
+    
+
+
+
+
+
+                    printer.setPageSizeMM(QSize(60, 40))
+
+
+
+
+
+    
+
+
+
+
+
+                    printer.setPageMargins(2, 2, 2, 2, QPrinter.Unit.Millimeter)
+
+
+
+
+
+    
+
+
+
+
+
+            dialog = QPrintDialog(printer, self)
+
+
+
+
+
+            if dialog.exec() != QDialog.Accepted:
+
+
+
+
+
+                return
+
+
+
+
+
+    
+
+
+
+
+
+            painter = QPainter()
+
+
+
+
+
+            if not painter.begin(printer):
+
+
+
+
+
+                QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
+
+
+
+
+
+                return
+
+
+
+
+
+    
+
+
+
+
+
+            # --- Параметры макета в миллиметрах ---
+
+
+
+
+
+            LABEL_WIDTH_MM = 60
+
+
+
+
+
+            LABEL_HEIGHT_MM = 40
+
+
+
+
+
+            
+
+
+
+
+
+            # Получаем разрешение принтера в DPI (точек на дюйм)
+
+
+
+
+
+            dpi_x = printer.resolution()
+
+
+
+
+
+            dpi_y = printer.resolution()
+
+
+
+
+
+            
+
+
+
+
+
+            # Конвертируем мм в точки
+
+
+
+
+
+            def mm_to_px(mm, dpi):
+
+
+
+
+
+                return (mm / 25.4) * dpi
+
+
+
+
+
+    
+
+
+
+
+
+            # Шрифты
+
+
+
+
+
+            font_main = QFont("Arial", pointSize=10)
+
+
+
+
+
+            font_small = QFont("Arial", pointSize=8)
+
+
+
+
+
+            
+
+
+
+
+
+            client_name = self.pass_details.get('client_name', 'N/A')
+
+
+
+
+
+            container_number = self.pass_details.get('container_number', 'N/A')
+
+
+
+
+
+            print_date = datetime.now().strftime("%d.%m.%Y")
+
+
+
+
+
+    
+
+
+
+
+
+            passes = self.pass_details["passes"]
+
+
+
+
+
+            for i, access_code in enumerate(passes):
+
+
+
+
+
+                if i > 0:
+
+
+
+
+
+                    printer.newPage()
+
+
+
+
+
+    
+
+
+
+
+
+                # --- Рисуем текст ---
+
+
+
+
+
+                # Координаты в точках
+
+
+
+
+
+                painter.setFont(font_main)
+
+
+
+
+
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
+
+
+
+
+
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
+
+
+
+
+
+                
+
+
+
+
+
+                painter.setFont(font_small)
+
+
+
+
+
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
+
+
+
+
+
+    
+
+
+
+
+
+                # --- Генерируем и рисуем штрихкод ---
+
+
+
+
+
+                try:
+
+
+
+
+
+                    encoder = Code128Encoder(access_code, {"display_text": True})
+
+
+
+
+
+                    buffer = io.BytesIO()
+
+
+
+
+
+                    encoder.save(buffer, "PNG")
+
+
+
+
+
+                    buffer.seek(0)
+
+
+
+
+
+                    
+
+
+
+
+
+                    barcode_pixmap = QPixmap()
+
+
+
+
+
+                    barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
+
+
+
+
+
+                    
+
+
+
+
+
+                    # Размеры и позиция штрихкода в точках
+
+
+
+
+
+                    barcode_width_px = mm_to_px(54, dpi_x)
+
+
+
+
+
+                    barcode_height_px = mm_to_px(12, dpi_y)
+
+
+
+
+
+                    barcode_x_px = mm_to_px(3, dpi_x)
+
+
+
+
+
+                    barcode_y_px = mm_to_px(20, dpi_y)
+
+
+
+
+
+    
+
+
+
+
+
+                    painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), int(barcode_width_px), int(barcode_height_px), barcode_pixmap)
+
+
+
+
+
+    
+
+
+
+
+
+                except Exception as e:
+
+
+
+
+
+                    logging.error(f"Ошибка генерации штрихкоды: {e}")
+
+
+
+
+
+                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+
+
+
+
+
+    
+
+
+
+
+
+                # --- Пустая область для заметок ---
+
+
+
+
+
+                notes_rect_y_px = mm_to_px(33, dpi_y)
+
+
+
+
+
+                notes_rect_height_px = mm_to_px(5, dpi_y)
+
+
+
+
+
+                painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+
+
+
+
+
+    
+
+
+
+
+
+            painter.end()
+
+
+
+
+
+            QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
+
+
+
+
+
+    
+
+
+
+
+
+    # --- END NEW DIALOG ---
+
+
+
+
+
 
 
 
