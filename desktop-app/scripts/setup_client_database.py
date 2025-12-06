@@ -484,8 +484,68 @@ def update_client_db_schema(conn):
         sql.SQL("INSERT INTO app_visibility (app_name, visibility_rule) VALUES ('datamatrix-app', 'All') ON CONFLICT (app_name) DO NOTHING;"),
     ]
 
+    # --- НОВЫЙ БЛОК: Таблицы для выполнения заданий (Фаза 2) ---
+    task_execution_tables_commands = [
+        # 1. Таблица для кодов-пропусков сотрудников
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS task_employees (
+                id SERIAL PRIMARY KEY,
+                task_id INTEGER NOT NULL REFERENCES production_tasks(id) ON DELETE CASCADE,
+                access_code VARCHAR(255) NOT NULL UNIQUE,
+                employee_name VARCHAR(255)
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE task_employees IS 'Коды-пропуски для доступа сотрудников к выполнению задач.';"),
+
+        # 2. Таблица для иерархии упаковок
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS tasks_packages (
+                id SERIAL PRIMARY KEY,
+                sscc VARCHAR(18) NOT NULL UNIQUE,
+                task_id INTEGER NOT NULL REFERENCES production_tasks(id) ON DELETE CASCADE,
+                package_type VARCHAR(50) NOT NULL, -- 'блок', 'короб', 'паллета'
+                parent_package_id INTEGER REFERENCES tasks_packages(id) ON DELETE SET NULL,
+                quantity INTEGER
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE tasks_packages IS 'Иерархия упаковок (короба, паллеты) в рамках задач.';"),
+
+        # 3. Пул кодов DataMatrix для задач
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS task_datamatrix_pool (
+                id SERIAL PRIMARY KEY,
+                task_id INTEGER NOT NULL REFERENCES production_tasks(id) ON DELETE CASCADE,
+                gtin VARCHAR(14) NOT NULL,
+                datamatrix TEXT NOT NULL,
+                status VARCHAR(50) NOT NULL DEFAULT 'available', -- 'available', 'reserved', 'printed', 'aggregated'
+                employee_id INTEGER REFERENCES task_employees(id) ON DELETE SET NULL,
+                package_id INTEGER REFERENCES tasks_packages(id) ON DELETE SET NULL,
+                batch_number VARCHAR(255),
+                production_date DATE,
+                packaging_date DATE,
+                best_before_date DATE,
+                expiry_date DATE,
+                origin_country VARCHAR(3)
+            );
+        """),
+        sql.SQL("CREATE INDEX IF NOT EXISTS idx_datamatrix_pool_status ON task_datamatrix_pool(status);"),
+        sql.SQL("CREATE INDEX IF NOT EXISTS idx_datamatrix_pool_task_id ON task_datamatrix_pool(task_id);"),
+        sql.SQL("COMMENT ON TABLE task_datamatrix_pool IS 'Пул кодов DataMatrix для управления их жизненным циклом в задачах.';"),
+
+        # 4. Таблица управляющих штрихкодов
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS task_control_codes (
+                id SERIAL PRIMARY KEY,
+                code VARCHAR(255) NOT NULL UNIQUE,
+                action VARCHAR(100) NOT NULL UNIQUE, -- 'CANCEL_LAST', 'CLOSE_PALLET', и т.д.
+                description TEXT
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE task_control_codes IS 'Управляющие штрихкоды для контроля процесса выполнения задач.';"),
+    ]
+
     # Объединяем все команды
-    all_commands = sql_commands + ap_tables_commands + ap_settings_defaults + visibility_commands
+    all_commands = sql_commands + ap_tables_commands + ap_settings_defaults + visibility_commands + task_execution_tables_commands
 
     try:
         with conn.cursor() as cur:
