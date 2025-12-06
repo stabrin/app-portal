@@ -2403,214 +2403,421 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-    def _print_passes(self):
+        def _print_passes(self):
 
 
-        """Запускает процесс печати пропусков."""
 
 
-        if not self.pass_details or not self.pass_details.get("passes"):
 
+            """Запускает процесс печати пропусков."""
 
-            QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
 
 
-            return
 
 
+            if not self.pass_details or not self.pass_details.get("passes"):
 
 
 
-        printer = QPrinter(QPrinter.Resolution.HighResolution)
 
 
-        printer.setPageSize(QPrinter.PageSize.Custom)
+                QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
 
 
-        printer.setPageSizeMM(QSize(60, 40))
 
 
-        printer.setPageMargins(2, 2, 2, 2, QPrinter.Unit.Millimeter)
 
+                return
 
 
 
 
-        dialog = QPrintDialog(printer, self)
 
+    
 
-        if dialog.exec() != QDialog.Accepted:
 
 
-            return
 
 
+            printer = QPrinter(QPrinter.HighResolution)
 
 
 
-        painter = QPainter()
 
 
-        if not painter.begin(printer):
+            printer.setPageSize(QPrinter.Custom)
 
 
-            QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
 
 
-            return
 
+            printer.setPageSizeMM(QSize(60, 40))
 
-        
 
 
-        dpi_x = printer.resolution()
 
 
-        dpi_y = printer.resolution()
+            printer.setPageMargins(2, 2, 2, 2, QPrinter.Millimeter)
 
 
-        
 
 
-        def mm_to_px(mm, dpi):
 
+    
 
-            return (mm / 25.4) * dpi
 
 
 
 
+            dialog = QPrintDialog(printer, self)
 
-        font_main = QFont("Arial", pointSize=10)
 
 
-        font_small = QFont("Arial", pointSize=8)
 
 
-        
+            if dialog.exec() != QDialog.Accepted:
 
 
-        client_name = self.pass_details.get('client_name', 'N/A')
 
 
-        container_number = self.pass_details.get('container_number', 'N/A')
 
+                return
 
-        print_date = datetime.now().strftime("%d.%m.%Y")
 
 
 
 
+    
 
-        passes = self.pass_details["passes"]
 
 
-        for i, access_code in enumerate(passes):
 
 
-            if i > 0:
+            painter = QPainter()
 
 
-                printer.newPage()
 
 
 
+            if not painter.begin(printer):
 
 
-            painter.setFont(font_main)
 
 
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
 
+                QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
 
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
+
+
+
+
+                return
+
+
+
 
 
             
 
 
-            painter.setFont(font_small)
-
-
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
 
 
 
+            dpi_x = printer.resolution()
 
 
-            try:
 
 
-                barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+
+            dpi_y = printer.resolution()
 
 
-                drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
 
 
-                drawing.add(barcode)
+
+            
 
 
-                pil_image = renderPM.drawToPIL(drawing)
 
 
-                buffer = io.BytesIO()
+
+            def mm_to_px(mm, dpi):
 
 
-                pil_image.save(buffer, format="PNG")
 
 
-                buffer.seek(0)
+
+                return (mm / 25.4) * dpi
+
+
+
+
+
+    
+
+
+
+
+
+            font_main = QFont("Arial", pointSize=10)
+
+
+
+
+
+            font_small = QFont("Arial", pointSize=8)
+
+
+
+
+
+            
+
+
+
+
+
+            client_name = self.pass_details.get('client_name', 'N/A')
+
+
+
+
+
+            container_number = self.pass_details.get('container_number', 'N/A')
+
+
+
+
+
+            print_date = datetime.now().strftime("%d.%m.%Y")
+
+
+
+
+
+    
+
+
+
+
+
+            passes = self.pass_details["passes"]
+
+
+
+
+
+            for i, access_code in enumerate(passes):
+
+
+
+
+
+                if i > 0:
+
+
+
+
+
+                    printer.newPage()
+
+
+
+
+
+    
+
+
+
+
+
+                painter.setFont(font_main)
+
+
+
+
+
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
+
+
+
+
+
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
+
+
+
 
 
                 
 
 
-                barcode_pixmap = QPixmap()
 
 
-                barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
 
-
-                
-
-
-                barcode_x_px = mm_to_px(3, dpi_x)
-
-
-                barcode_y_px = mm_to_px(20, dpi_y)
-
-
-                painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
-
-
-            except Exception as e:
-
-
-                logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
-
-
-                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+                painter.setFont(font_small)
 
 
 
 
 
-            notes_rect_y_px = mm_to_px(33, dpi_y)
-
-
-            notes_rect_height_px = mm_to_px(5, dpi_y)
-
-
-            painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
 
 
 
 
 
-        painter.end()
+    
 
 
-        QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
+
+
+
+                try:
+
+
+
+
+
+                    barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+
+
+
+
+
+                    drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
+
+
+
+
+
+                    drawing.add(barcode)
+
+
+
+
+
+                    pil_image = renderPM.drawToPIL(drawing)
+
+
+
+
+
+                    buffer = io.BytesIO()
+
+
+
+
+
+                    pil_image.save(buffer, format="PNG")
+
+
+
+
+
+                    buffer.seek(0)
+
+
+
+
+
+                    
+
+
+
+
+
+                    barcode_pixmap = QPixmap()
+
+
+
+
+
+                    barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
+
+
+
+
+
+                    
+
+
+
+
+
+                    barcode_x_px = mm_to_px(3, dpi_x)
+
+
+
+
+
+                    barcode_y_px = mm_to_px(20, dpi_y)
+
+
+
+
+
+                    painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+
+
+
+
+
+                except Exception as e:
+
+
+
+
+
+                    logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
+
+
+
+
+
+                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+
+
+
+
+
+    
+
+
+
+
+
+                notes_rect_y_px = mm_to_px(33, dpi_y)
+
+
+
+
+
+                notes_rect_height_px = mm_to_px(5, dpi_y)
+
+
+
+
+
+                painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+
+
+
+
+
+    
+
+
+
+
+
+            painter.end()
+
+
+
+
+
+            QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
 
 
 
