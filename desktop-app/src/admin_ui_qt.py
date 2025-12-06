@@ -17,7 +17,11 @@ import logging
 import json
 from datetime import datetime
 import io
-from pyStrich.code128 import Code128Encoder
+# --- NEW IMPORTS FOR BARCODE GENERATION ---
+from reportlab.graphics.barcode import code128
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics import renderPM
+from PIL import Image
 # --- END NEW IMPORTS ---
 
 from dateutil.relativedelta import relativedelta
@@ -2729,91 +2733,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    # --- Генерируем и рисуем штрихкод ---
-
-
-
-
-
-                    try:
-
-
-
-
-
-                        encoder = Code128Encoder(access_code, {"display_text": True})
-
-
-
-
-
-                        buffer = io.BytesIO()
-
-
-
-
-
-                        encoder.save(buffer, "PNG")
-
-
-
-
-
-                        buffer.seek(0)
-
-
-
-
-
-                        
-
-
-
-
-
-                        barcode_pixmap = QPixmap()
-
-
-
-
-
-                        barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
-
-
-
-
-
-                        
-
-
-
-
-
-                        # Размеры и позиция штрихкода в точках
-
-
-
-
-
-                        barcode_width_px = mm_to_px(54, dpi_x)
-
-
-
-
-
-                        barcode_height_px = mm_to_px(12, dpi_y)
-
-
-
-
-
-                        barcode_x_px = mm_to_px(3, dpi_x)
-
-
-
-
-
-                        barcode_y_px = mm_to_px(20, dpi_y)
+                                # --- Генерируем и рисуем штрихкод ---
 
 
 
@@ -2825,7 +2745,7 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                        painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), int(barcode_width_px), int(barcode_height_px), barcode_pixmap)
+                                try:
 
 
 
@@ -2837,19 +2757,307 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-                    except Exception as e:
+                                    # 1. Создаем объект штрихкода
 
 
 
 
 
-                        logging.error(f"Ошибка генерации штрихкоды: {e}")
+        
 
 
 
 
 
-                        painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+                                    barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+
+
+
+
+
+        
+
+
+
+
+
+                    
+
+
+
+
+
+        
+
+
+
+
+
+                                    # 2. Создаем холст для рисования и добавляем штрихкод
+
+
+
+
+
+        
+
+
+
+
+
+                                    drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
+
+
+
+
+
+        
+
+
+
+
+
+                                    drawing.add(barcode)
+
+
+
+
+
+        
+
+
+
+
+
+                    
+
+
+
+
+
+        
+
+
+
+
+
+                                    # 3. Рендерим в PIL Image, а затем в буфер
+
+
+
+
+
+        
+
+
+
+
+
+                                    pil_image = renderPM.drawToPIL(drawing)
+
+
+
+
+
+        
+
+
+
+
+
+                                    buffer = io.BytesIO()
+
+
+
+
+
+        
+
+
+
+
+
+                                    pil_image.save(buffer, format="PNG")
+
+
+
+
+
+        
+
+
+
+
+
+                                    buffer.seek(0)
+
+
+
+
+
+        
+
+
+
+
+
+                    
+
+
+
+
+
+        
+
+
+
+
+
+                                    # 4. Загружаем в QPixmap
+
+
+
+
+
+        
+
+
+
+
+
+                                    barcode_pixmap = QPixmap()
+
+
+
+
+
+        
+
+
+
+
+
+                                    barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
+
+
+
+
+
+        
+
+
+
+
+
+                                    
+
+
+
+
+
+        
+
+
+
+
+
+                                    # Размеры и позиция штрихкода в точках
+
+
+
+
+
+        
+
+
+
+
+
+                                    barcode_x_px = mm_to_px(3, dpi_x)
+
+
+
+
+
+        
+
+
+
+
+
+                                    barcode_y_px = mm_to_px(20, dpi_y)
+
+
+
+
+
+        
+
+
+
+
+
+                    
+
+
+
+
+
+        
+
+
+
+
+
+                                    painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+
+
+
+
+
+        
+
+
+
+
+
+                    
+
+
+
+
+
+        
+
+
+
+
+
+                                except Exception as e:
+
+
+
+
+
+        
+
+
+
+
+
+                                    logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
+
+
+
+
+
+        
+
+
+
+
+
+                                    painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
 
 
 
