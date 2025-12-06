@@ -724,6 +724,9 @@ class ApiIntegrationFrameQt(QWidget):
         self.post_processing_mode = post_processing_mode
         self.main_app_window = main_app_window
         self.order_data = None
+        
+        # --- ИЗМЕНЕНИЕ: Список для хранения активных потоков ---
+        self.active_threads = []
 
         self._load_order_data()
         self._create_widgets()
@@ -806,34 +809,40 @@ class ApiIntegrationFrameQt(QWidget):
 
     def _run_in_thread(self, target_func, *args):
         """Запускает функцию в отдельном потоке, чтобы не блокировать UI."""
+        # --- ИЗМЕНЕНИЕ: Используем локальные переменные для потока и воркера ---
         class Worker(QObject):
             finished = Signal(object, object) # (результат, ошибка)
 
-            def __init__(self, func, *func_args):
+            def __init__(self, parent_thread, func, *func_args):
                 super().__init__()
+                self.parent_thread = parent_thread
                 self.func = func
                 self.func_args = func_args
 
             def run(self):
                 try:
                     result = self.func(*self.func_args)
-                    self.finished.emit(result, None)
+                    self.finished.emit(self.parent_thread, result, None)
                 except Exception as e:
-                    self.finished.emit(None, e)
+                    self.finished.emit(self.parent_thread, None, e)
 
-        self.thread = QThread()
-        self.worker = Worker(target_func, *args)
-        self.worker.moveToThread(self.thread)
+        thread = QThread()
+        worker = Worker(thread, target_func, *args)
+        worker.moveToThread(thread)
 
-        self.worker.finished.connect(self._on_task_finished)
-        self.thread.started.connect(self.worker.run)
-        self.thread.finished.connect(self.thread.quit)
-        self.worker.finished.connect(self.worker.deleteLater)
-        self.thread.finished.connect(self.thread.deleteLater)
+        # Сохраняем ссылку на поток, чтобы он не был удален сборщиком мусора
+        self.active_threads.append((thread, worker))
 
-        self.thread.start()
+        worker.finished.connect(self._on_task_finished)
+        thread.started.connect(worker.run)
+        
+        # Настраиваем автоматическую очистку
+        thread.finished.connect(thread.deleteLater)
+        worker.finished.connect(worker.deleteLater)
 
-    def _on_task_finished(self, result, error):
+        thread.start()
+
+    def _on_task_finished(self, thread_instance, result, error):
         """Обрабатывает результат выполнения фоновой задачи."""
         if error:
             logging.error("Ошибка в фоновой задаче API", exc_info=error)
@@ -855,6 +864,12 @@ class ApiIntegrationFrameQt(QWidget):
             self._update_buttons_state()
             if not error:
                 self._append_log("\nОперация успешно завершена.")
+        
+        # --- ИЗМЕНЕНИЕ: Безопасно удаляем завершенный поток из списка ---
+        for t, w in self.active_threads:
+            if t is thread_instance:
+                self.active_threads.remove((t, w))
+                break
 
     def _request_codes_flow(self):
         """Запускает полный цикл запроса кодов."""
