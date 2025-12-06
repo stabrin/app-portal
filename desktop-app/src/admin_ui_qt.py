@@ -837,14 +837,24 @@ class ApiIntegrationFrameQt(QWidget):
         """Обрабатывает результат выполнения фоновой задачи."""
         if error:
             logging.error("Ошибка в фоновой задаче API", exc_info=error)
-            QMessageBox.critical(self, "Ошибка выполнения", str(error))
+            # --- ИЗМЕНЕНИЕ: Отображаем более детальную ошибку, если она пришла из задачи ---
+            if isinstance(error, tuple) and len(error) == 2 and error[0] == 'error':
+                QMessageBox.critical(self, "Ошибка выполнения", str(error[1]))
+            else:
+                QMessageBox.critical(self, "Ошибка выполнения", str(error))
+        # --- НОВАЯ ЛОГИКА: Обработка кастомных результатов ---
+        elif isinstance(result, tuple) and len(result) == 2:
+            if result[0] == 'ask_prepare_report':
+                self._ask_prepare_report(result[1])
         elif result and isinstance(result, str):
              QMessageBox.information(self, "Результат операции", result)
 
-        self._load_order_data()
-        self._update_buttons_state() # Перезагружаем данные и обновляем кнопки
-        if not error:
-            self._append_log("\nОперация успешно завершена.")
+        # --- ИЗМЕНЕНИЕ: Обновляем состояние только если не был вызван диалог ---
+        if not (isinstance(result, tuple) and result[0] == 'ask_prepare_report'):
+            self._load_order_data()
+            self._update_buttons_state()
+            if not error:
+                self._append_log("\nОперация успешно завершена.")
 
     def _request_codes_flow(self):
         """Запускает полный цикл запроса кодов."""
