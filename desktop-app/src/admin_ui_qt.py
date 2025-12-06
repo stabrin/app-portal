@@ -811,7 +811,7 @@ class ApiIntegrationFrameQt(QWidget):
         """Запускает функцию в отдельном потоке, чтобы не блокировать UI."""
         # --- ИЗМЕНЕНИЕ: Используем локальные переменные для потока и воркера ---
         class Worker(QObject):
-            finished = Signal(object, object) # (результат, ошибка)
+            finished = Signal(object, object, object) # (thread_instance, результат, ошибка)
 
             def __init__(self, parent_thread, func, *func_args):
                 super().__init__()
