@@ -346,6 +346,24 @@ class OrderService:
         
         return df, report_name
 
+    def get_all_utilisation_upload_ids(self, order_id: int, order_status: str) -> list:
+        """
+        Возвращает список всех уникальных `utilisation_upload_id` для заказа.
+        """
+        all_ids = []
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                if order_status == 'dmkod':
+                    cur.execute("SELECT utilisation_upload_id FROM dmkod_aggregation_details WHERE order_id = %s AND utilisation_upload_id IS NOT NULL", (order_id,))
+                    all_ids.extend([row[0] for row in cur.fetchall()])
+                elif order_status == 'delta':
+                    cur.execute("SELECT utilisation_upload_id FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NOT NULL", (order_id,))
+                    all_ids.extend([row[0] for row in cur.fetchall()])
+        
+        # Возвращаем только уникальные ID
+        return list(set(all_ids))
+
+
     def get_order_summary(self, order_id: int):
         """
         Возвращает сводную информацию по заказу: имя клиента, количество товаров, заказанных и полученных кодов.

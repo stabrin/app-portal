@@ -613,3 +613,34 @@ class ApiService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при создании отчета об использовании: {e}", exc_info=True)
             raise
+
+    def get_aggregated_utilisation_results(self, order_id: int, order_status: str) -> tuple[int, int, int]:
+        """
+        Собирает все ID загрузок для заказа, запрашивает их статусы в API и агрегирует результаты.
+        """
+        logger.info(f"Сбор агрегированных результатов для заказа ID {order_id}, статус '{order_status}'")
+        all_upload_ids = []
+        
+        # Используем order_service для получения ID из базы данных
+        if not self.order_service:
+            raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+            
+        all_upload_ids = self.order_service.get_all_utilisation_upload_ids(order_id, order_status)
+        
+        if not all_upload_ids:
+            logger.warning(f"Не найдено ID загрузок для заказа {order_id}. Возвращаю нули.")
+            return 0, 0, 0
+
+        logger.info(f"Проверка статуса обработки для {len(all_upload_ids)} загрузок...")
+        total_success, total_not_found, total_duplicated = 0, 0, 0
+        
+        for upload_id in all_upload_ids:
+            result = self.get_utilisation_result(upload_id)
+            include_data = result.get('include', {})
+            total_success += include_data.get('success', {}).get('count', 0)
+            total_not_found += include_data.get('not_found', {}).get('count', 0)
+            total_duplicated += include_data.get('duplicated', {}).get('count', 0)
+            time.sleep(0.5) # Небольшая пауза между запросами к API
+
+        logger.info(f"Результаты для заказа {order_id}: Успешно={total_success}, Не найдено={total_not_found}, Дубликаты={total_duplicated}")
+        return total_success, total_not_found, total_duplicated
