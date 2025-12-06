@@ -2169,40 +2169,79 @@ class EmployeePassesViewerDialog(QDialog):
 
 
 
-    def _load_passes(self):
+        def _load_passes(self):
 
 
-        try:
 
 
-            self.pass_details = self.task_service.get_employee_passes_details(self.task_id)
+
+            try:
 
 
-            if not self.pass_details or not self.pass_details.get("passes"):
 
 
-                QMessageBox.warning(self, "Нет данных", "Не найдено сгенерированных пропусков для этой задачи.")
+
+                self.pass_details = self.task_service.get_employee_passes_details(self.task_id)
 
 
-                return
 
 
-            self.table.setRowCount(len(self.pass_details["passes"]))
+
+                if not self.pass_details or not self.pass_details.get("passes"):
 
 
-            for i, access_code in enumerate(self.pass_details["passes"]):
 
 
-                self.table.setItem(i, 0, QTableWidgetItem(access_code))
+
+                    QMessageBox.warning(self, "Нет данных", "Не найдено сгенерированных пропусков для этой задачи.")
 
 
-        except Exception as e:
 
 
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить пропуски: {e}")
+
+                    return
 
 
-            self.close()
+
+
+
+                self.table.setRowCount(len(self.pass_details["passes"]))
+
+
+
+
+
+                for i, access_code in enumerate(self.pass_details["passes"]):
+
+
+
+
+
+                    self.table.setItem(i, 0, QTableWidgetItem(access_code))
+
+
+
+
+
+            except Exception as e:
+
+
+
+
+
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить пропуски: {e}")
+
+
+
+
+
+                self.close()
+
+
+
+
+
+    
 
 
 
