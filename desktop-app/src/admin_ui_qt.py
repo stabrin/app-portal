@@ -952,7 +952,36 @@ class ApiIntegrationFrameQt(QWidget):
             self._update_buttons_state()
 
     def _prepare_report_flow(self):
-        QMessageBox.warning(self, "В разработке", "Цикл 'Подготовить отчет' еще не реализован.")
+        """Запускает полный цикл подготовки отчета о нанесении."""
+        self._display_api_response("4. Подготовка отчета", "Запуск операции...")
+        self._run_in_thread(self._prepare_report_task)
+
+    def _prepare_report_task(self):
+        """
+        Задача для подготовки отчета о нанесении. Адаптировано из admin_ui.py.
+        """
+        self._append_log("Начинаю подготовку отчета о нанесении...")
+        try:
+            with self.api_service.order_service._get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        "SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL ORDER BY id",
+                        (self.order_id,)
+                    )
+                    details_to_process = cur.fetchall()
+
+            if not details_to_process:
+                raise Exception("Не найдено позиций с ID тиража (api_id) для подготовки отчета.")
+
+            self._append_log(f"Найдено {len(details_to_process)} позиций для обработки.")
+            for i, detail in enumerate(details_to_process):
+                self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+                self.api_service.create_utilisation_report({"printrun_id": detail['api_id']})
+                self._append_log(f"  Запрос для тиража {detail['api_id']} успешно отправлен.")
+            return "Отчет об использовании кодов успешно подготовлен и отправлен в АПИ."
+        except Exception as e:
+            logging.error("Ошибка в _prepare_report_task", exc_info=True)
+            return ('error', e)
 
 
 class CodeUploadFrameQt(QWidget):
