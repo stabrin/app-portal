@@ -2409,18 +2409,21 @@ class EmployeePassesViewerDialog(QDialog):
 
         # Рисуем штрихкод
         try:
-            encoder = Code128Encoder(access_code)
-            # --- ИЗМЕНЕНИЕ: Заменяем pystrich на python-barcode ---
-            # python-barcode более надежен и корректно обрабатывает разные типы данных.
-            # Он также позволяет управлять высотой и толщиной линий напрямую.
-            from barcode.writer import ImageWriter
-            from barcode import get_barcode_class
+            # --- ИЗМЕНЕНИЕ: Заменяем python-barcode на reportlab, который уже есть в проекте ---
+            # Это решает ошибку ModuleNotFoundError и не требует новых зависимостей.
+            barcode_drawing = createBarcodeDrawing(
+                'Code128', 
+                value=access_code, 
+                barHeight=mm_to_px(10, dpi), # Высота в пикселях
+                humanReadable=False
+            )
+            drawing = Drawing(barcode_drawing.width, barcode_drawing.height)
+            drawing.add(barcode_drawing)
             
-            Code128 = get_barcode_class('code128')
-            # Убираем текст под штрихкодом и задаем высоту в мм
-            writer_options = {"write_text": False, "module_height": 10.0}
-            # Генерируем изображение в виде объекта PIL
-            pil_image = Code128(access_code, writer=ImageWriter()).render(writer_options)
+            buffer = io.BytesIO()
+            renderPM.drawToFile(drawing, buffer, fmt='PNG')
+            buffer.seek(0)
+            pil_image = Image.open(buffer)
 
             barcode_width_px = int(mm_to_px(50, dpi))
             barcode_height_px = int(mm_to_px(10, dpi))
