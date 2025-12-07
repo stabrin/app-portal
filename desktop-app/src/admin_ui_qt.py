@@ -2336,104 +2336,21 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                # --- ИСПРАВЛЕНИЕ: Используем pystrich API правильно, через get_imagedata ---
+                # --- ИСПРАВЛЕНИЕ: Используем pystrich API правильно.
+                # get_imagedata() возвращает один ряд пикселей, который мы размножаем на нужную высоту.
                 encoder = Code128Encoder(access_code)
                 
-                bar_height_px = int(mm_to_px(10, dpi_y))
-                pixels = encoder.get_imagedata(height=bar_height_px)
-                
-                img_height = len(pixels)
-                if img_height == 0:
+                pixel_row = encoder.get_imagedata()
+                img_width = len(pixel_row)
+                if img_width == 0:
                     raise ValueError("Barcode generation with pyStrich returned empty image data.")
-                img_width = len(pixels[0])
 
-                pil_image = Image.new("RGB", (img_width, img_height), "white")
-                for y in range(img_height):
-                    for x in range(img_width):
-                        if pixels[y][x] == 1:
-                            pil_image.putpixel((x, y), (0, 0, 0)) # Black
-
-                buffer = io.BytesIO()
-                pil_image.save(buffer, format="PNG")
-                buffer.seek(0)
-                barcode_pixmap = QPixmap()
-                barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
-                barcode_x_px = mm_to_px(3, dpi_x)
-                barcode_y_px = mm_to_px(20, dpi_y)
-                painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
-            except Exception as e:
-                logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
-                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
-            notes_rect_y_px = mm_to_px(33, dpi_y)
-            notes_rect_height_px = mm_to_px(5, dpi_y)
-            painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
-        painter.end()
-        QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
-
-    def _load_passes(self):
-        try:
-            self.pass_details = self.task_service.get_employee_passes_details(self.task_id)
-            if not self.pass_details or not self.pass_details.get("passes"):
-                QMessageBox.warning(self, "Нет данных", "Не найдено сгенерированных пропусков для этой задачи.")
-                return
-            self.table.setRowCount(len(self.pass_details["passes"]))
-            for i, access_code in enumerate(self.pass_details["passes"]):
-                self.table.setItem(i, 0, QTableWidgetItem(access_code))
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить пропуски: {e}")
-            self.close()
-
-    def _print_passes(self):
-        """Запускает процесс печати пропусков."""
-        if not self.pass_details or not self.pass_details.get("passes"):
-            QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
-            return
-        printer = QPrinter(QPrinter.HighResolution)
-        page_size = QPageSize(QSizeF(60, 40), QPageSize.Unit.Millimeter)
-        printer.setPageSize(page_size)
-        margins = QMarginsF(2, 2, 2, 2)
-        printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-        painter = QPainter()
-        if not painter.begin(printer):
-            QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
-            return
-        dpi_x = printer.resolution()
-        dpi_y = printer.resolution()
-        def mm_to_px(mm, dpi):
-            return (mm / 25.4) * dpi
-        font_main = QFont("Arial", pointSize=10)
-        font_small = QFont("Arial", pointSize=8)
-        client_name = self.pass_details.get('client_name', 'N/A')
-        container_number = self.pass_details.get('container_number', 'N/A')
-        print_date = datetime.now().strftime("%d.%m.%Y")
-        passes = self.pass_details["passes"]
-        for i, access_code in enumerate(passes):
-            if i > 0:
-                printer.newPage()
-            painter.setFont(font_main)
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
-            painter.setFont(font_small)
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
-            try:
-                # --- ИСПРАВЛЕНИЕ: Используем pystrich API правильно, через get_imagedata ---
-                encoder = Code128Encoder(access_code)
-                
                 bar_height_px = int(mm_to_px(10, dpi_y))
-                pixels = encoder.get_imagedata(height=bar_height_px)
-                
-                img_height = len(pixels)
-                if img_height == 0:
-                    raise ValueError("Barcode generation with pyStrich returned empty image data.")
-                img_width = len(pixels[0])
 
-                pil_image = Image.new("RGB", (img_width, img_height), "white")
-                for y in range(img_height):
+                pil_image = Image.new("RGB", (img_width, bar_height_px), "white")
+                for y in range(bar_height_px):
                     for x in range(img_width):
-                        if pixels[y][x] == 1:
+                        if pixel_row[x] == 1:
                             pil_image.putpixel((x, y), (0, 0, 0)) # Black
 
                 buffer = io.BytesIO()
