@@ -2426,7 +2426,6 @@ class EmployeePassesViewerDialog(QDialog):
             barcode_width_px = int(mm_to_px(50, dpi))
             barcode_height_px = int(mm_to_px(10, dpi))
             barcode_pixmap = QPixmap.fromImage(pil_image).scaled(barcode_width_px, barcode_height_px, Qt.IgnoreAspectRatio, Qt.FastTransformation)
-            
             painter.drawPixmap(int(mm_to_px(3, dpi)), int(mm_to_px(20, dpi)), barcode_pixmap)
         except Exception as e:
             logging.error(f"Ошибка генерации штрихкода для предпросмотра: {e}", exc_info=True)
