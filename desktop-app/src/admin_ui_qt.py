@@ -2374,6 +2374,113 @@ class EmployeePassesViewerDialog(QDialog):
         painter.end()
         QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
 
+    def _print_passes(self):
+        """
+        Генерирует изображения пропусков и открывает диалог предпросмотра.
+        """
+        if not self.pass_details or not self.pass_details.get("passes"):
+            QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
+            return
+
+        try:
+            pass_images = [self._generate_pass_image(code) for code in self.pass_details["passes"]]
+            if not pass_images:
+                QMessageBox.warning(self, "Ошибка генерации", "Не удалось создать изображения для пропусков.")
+                return
+
+            # Открываем новый диалог предпросмотра
+            preview_dialog = PassPreviewDialog(self, pass_images)
+            preview_dialog.exec()
+
+        except Exception as e:
+            logging.error(f"Ошибка при подготовке к предпросмотру: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось подготовить пропуски к предпросмотру: {e}")
+
+
+class PassPreviewDialog(QDialog):
+    """Диалог для предпросмотра и печати пропусков."""
+    def __init__(self, parent, images: list[QPixmap]):
+        super().__init__(parent)
+        self.images = images
+        self.current_index = 0
+        self.setWindowTitle("Предпросмотр пропусков")
+        self.setMinimumSize(600, 500)
+
+        layout = QVBoxLayout(self)
+
+        self.info_label = QLabel()
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+
+        nav_layout = QHBoxLayout()
+        self.prev_button = QPushButton("<< Назад")
+        self.next_button = QPushButton("Далее >>")
+        self.print_button = QPushButton("Напечатать все")
+
+        nav_layout.addWidget(self.prev_button)
+        nav_layout.addStretch()
+        nav_layout.addWidget(self.print_button)
+        nav_layout.addStretch()
+        nav_layout.addWidget(self.next_button)
+
+        layout.addWidget(self.info_label, alignment=Qt.AlignCenter)
+        layout.addWidget(self.image_label, 1)
+        layout.addLayout(nav_layout)
+
+        self.prev_button.clicked.connect(self.show_previous)
+        self.next_button.clicked.connect(self.show_next)
+        self.print_button.clicked.connect(self.print_all)
+
+        self.show_image(0)
+
+    def show_image(self, index):
+        self.current_index = index
+        pixmap = self.images[index]
+        # Масштабируем для отображения, сохраняя пропорции
+        scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
+
+        self.info_label.setText(f"Пропуск {index + 1} из {len(self.images)}")
+        self.prev_button.setEnabled(index > 0)
+        self.next_button.setEnabled(index < len(self.images) - 1)
+
+    def show_previous(self):
+        if self.current_index > 0:
+            self.show_image(self.current_index - 1)
+
+    def show_next(self):
+        if self.current_index < len(self.images) - 1:
+            self.show_image(self.current_index + 1)
+
+    def print_all(self):
+        """Запускает печать всех пропусков, показанных в предпросмотре."""
+        printer = QPrinter(QPrinter.HighResolution)
+        page_size = QPageSize(QSizeF(60, 40), QPageSize.Unit.Millimeter)
+        printer.setPageSize(page_size)
+        margins = QMarginsF(2, 2, 2, 2)
+        printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
+
+        dialog = QPrintDialog(printer, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        painter = QPainter()
+        if not painter.begin(printer):
+            QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
+            return
+
+        for i, pixmap in enumerate(self.images):
+            if i > 0:
+                printer.newPage()
+            
+            # Рисуем QPixmap на всю доступную область печати
+            page_rect = printer.pageRect(QPrinter.Unit.DevicePixel)
+            painter.drawPixmap(page_rect.toRect(), pixmap, pixmap.rect())
+
+        painter.end()
+        QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
+        self.accept() # Закрываем окно предпросмотра
+
     def _generate_pass_image(self, access_code: str) -> QPixmap:
         """Генерирует QPixmap для одного пропуска."""
         # Определяем размеры в мм и DPI
