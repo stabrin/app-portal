@@ -967,15 +967,15 @@ class ApiIntegrationFrameQt(QWidget):
     def _ask_prepare_report(self, prompt_text):
         """Показывает диалог подтверждения и запускает следующий шаг."""
         # --- ИЗМЕНЕНИЕ: Используем немодальный диалог с callback'ом ---
-        # Создаем QMessageBox, но не вызываем exec()
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Подтверждение")
-        msg_box.setText(prompt_text)
-        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg_box.setDefaultButton(QMessageBox.Yes)
+        # --- ИСПРАВЛЕНИЕ: Сохраняем ссылку на диалог в self, чтобы он не был удален сборщиком мусора ---
+        self.msg_box = QMessageBox(self)
+        self.msg_box.setWindowTitle("Подтверждение")
+        self.msg_box.setText(prompt_text)
+        self.msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        self.msg_box.setDefaultButton(QMessageBox.Yes)
         # Привязываем обработчик к сигналу buttonClicked
-        msg_box.buttonClicked.connect(self._handle_prepare_report_dialog_result)
-        msg_box.open() # Показываем немодально
+        self.msg_box.buttonClicked.connect(self._handle_prepare_report_dialog_result)
+        self.msg_box.open() # Показываем немодально
 
     def _handle_prepare_report_dialog_result(self, button):
         """Обрабатывает результат диалога подтверждения."""
