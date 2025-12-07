@@ -836,9 +836,13 @@ class ApiIntegrationFrameQt(QWidget):
         worker.finished.connect(self._on_task_finished)
         thread.started.connect(worker.run)
         
-        # Настраиваем автоматическую очистку
+        # --- ИСПРАВЛЕНИЕ: Правильная последовательность завершения потока ---
+        # 1. Когда воркер закончил, он говорит потоку завершиться.
+        worker.finished.connect(thread.quit)
+        # 2. Когда поток завершился, он помечается на удаление.
         thread.finished.connect(thread.deleteLater)
-        worker.finished.connect(worker.deleteLater)
+        # 3. Воркер также удаляется после того, как поток завершился.
+        thread.finished.connect(worker.deleteLater)
 
         thread.start()
 
