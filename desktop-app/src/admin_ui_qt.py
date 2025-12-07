@@ -2374,6 +2374,61 @@ class EmployeePassesViewerDialog(QDialog):
         painter.end()
         QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
 
+    def _generate_pass_image(self, access_code: str) -> QPixmap:
+        """Генерирует QPixmap для одного пропуска."""
+        # Определяем размеры в мм и DPI
+        width_mm, height_mm = 60, 40
+        dpi = 200  # Стандартное высокое разрешение для термопринтеров
+
+        # Конвертируем мм в пиксели
+        width_px = int((width_mm / 25.4) * dpi)
+        height_px = int((height_mm / 25.4) * dpi)
+
+        # Создаем холст для рисования
+        pixmap = QPixmap(width_px, height_px)
+        pixmap.fill(Qt.white)
+
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        def mm_to_px(mm, res):
+            return (mm / 25.4) * res
+
+        # Данные для печати
+        font_main = QFont("Arial", pointSize=10)
+        font_small = QFont("Arial", pointSize=8)
+        client_name = self.pass_details.get('client_name', 'N/A')
+        container_number = self.pass_details.get('container_number', 'N/A')
+        print_date = datetime.now().strftime("%d.%m.%Y")
+
+        # Рисуем текст
+        painter.setFont(font_main)
+        painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(2, dpi), mm_to_px(56, dpi), mm_to_px(8, dpi)), Qt.AlignLeft, f"Клиент: {client_name}")
+        painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(8, dpi), mm_to_px(56, dpi), mm_to_px(8, dpi)), Qt.AlignLeft, f"Контейнер: {container_number}")
+        painter.setFont(font_small)
+        painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(14, dpi), mm_to_px(56, dpi), mm_to_px(6, dpi)), Qt.AlignLeft, f"Дата: {print_date}")
+
+        # Рисуем штрихкод
+        try:
+            encoder = Code128Encoder(access_code)
+            pixel_row = encoder.get_imagedata()
+            img_width = len(pixel_row)
+            if img_width == 0: raise ValueError("pyStrich вернул пустые данные")
+
+            barcode_width_px = int(mm_to_px(50, dpi))
+            barcode_height_px = int(mm_to_px(10, dpi))
+
+            pil_image_row = Image.new("1", (img_width, 1), "white")
+            pil_image_row.putdata(pixel_row)
+            barcode_pixmap = QPixmap.fromImage(pil_image_row.toqimage()).scaled(barcode_width_px, barcode_height_px, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+            
+            painter.drawPixmap(int(mm_to_px(3, dpi)), int(mm_to_px(20, dpi)), barcode_pixmap)
+        except Exception as e:
+            logging.error(f"Ошибка генерации штрихкода для предпросмотра: {e}", exc_info=True)
+
+        painter.end()
+        return pixmap
+
     # --- END NEW DIALOG ---
 
 class AdminWindowQt(QMainWindow):
