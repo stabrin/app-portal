@@ -1,6 +1,7 @@
 import json
 import logging
-import uuid
+import random
+import string
 from .db_connector import get_client_db_connection
 from psycopg2.extras import RealDictCursor
 
@@ -104,15 +105,23 @@ class TaskService:
 
                 # 2. Генерируем и вставляем новые
                 for _ in range(employee_count):
-                    access_code = str(uuid.uuid4())
-                    cur.execute(
-                        """
-                        INSERT INTO task_employees (task_id, access_code)
-                        VALUES (%s, %s)
-                        """,
-                        (task_id, access_code)
-                    )
-                    generated_codes.append(access_code)
+                    # --- ИЗМЕНЕНИЕ: Генерируем короткий 8-значный код вместо длинного GUID ---
+                    # Этого более чем достаточно для уникальности и делает штрихкод короче.
+                    while True:
+                        try:
+                            chars = string.ascii_uppercase + string.digits
+                            access_code = ''.join(random.choices(chars, k=8))
+                            cur.execute(
+                                """
+                                INSERT INTO task_employees (task_id, access_code)
+                                VALUES (%s, %s)
+                                """,
+                                (task_id, access_code)
+                            )
+                            generated_codes.append(access_code)
+                            break # Выходим из цикла, если вставка прошла успешно
+                        except psycopg2.IntegrityError: # Перехватываем ошибку уникальности
+                            logging.warning(f"Сгенерирован дублирующийся код '{access_code}'. Повторная генерация...")
             conn.commit()
         
         logging.info(f"Сгенерировано {len(generated_codes)} новых пропусков для задачи #{task_id}.")
