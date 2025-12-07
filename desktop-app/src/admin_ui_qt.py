@@ -22,6 +22,7 @@ import time
 from reportlab.graphics.barcode import createBarcodeDrawing
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics import renderPM
+from pystrich.code128 import Code128Encoder
 from PIL import Image
 # --- END NEW IMPORTS ---
 
@@ -2335,8 +2336,18 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                barcode_drawing = createBarcodeDrawing('Code128', value=access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
-                pil_image = renderPM.drawToPIL(barcode_drawing)
+                encoder = Code128Encoder(access_code)
+                pil_image = encoder.render(show_text=False)
+
+                # Scale the image to the desired height while maintaining aspect ratio
+                desired_height_px = mm_to_px(10, dpi_y) # Based on original reportlab barHeight
+                original_width, original_height = pil_image.size
+                if original_height > 0:
+                    aspect_ratio = float(original_width) / float(original_height)
+                    new_height = int(desired_height_px)
+                    new_width = int(new_height * aspect_ratio)
+                    pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
                 buffer = io.BytesIO()
                 pil_image.save(buffer, format="PNG")
                 buffer.seek(0)
@@ -2403,8 +2414,18 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                barcode_drawing = createBarcodeDrawing('Code128', value=access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
-                pil_image = renderPM.drawToPIL(barcode_drawing)
+                encoder = Code128Encoder(access_code)
+                pil_image = encoder.render(show_text=False)
+
+                # Scale the image to the desired height while maintaining aspect ratio
+                desired_height_px = mm_to_px(10, dpi_y) # Based on original reportlab barHeight
+                original_width, original_height = pil_image.size
+                if original_height > 0:
+                    aspect_ratio = float(original_width) / float(original_height)
+                    new_height = int(desired_height_px)
+                    new_width = int(new_height * aspect_ratio)
+                    pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
                 buffer = io.BytesIO()
                 pil_image.save(buffer, format="PNG")
                 buffer.seek(0)
