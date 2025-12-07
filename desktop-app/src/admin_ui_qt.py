@@ -2345,19 +2345,24 @@ class EmployeePassesViewerDialog(QDialog):
                 if img_width == 0:
                     raise ValueError("Barcode generation with pyStrich returned empty image data.")
 
-                bar_height_px = int(mm_to_px(10, dpi_y))
+                # --- ИЗМЕНЕНИЕ: Задаем желаемые размеры штрихкода в миллиметрах ---
+                barcode_width_mm = 50
+                barcode_height_mm = 10
+                
+                # --- ИЗМЕНЕНИЕ: Конвертируем желаемые размеры в пиксели ---
+                barcode_width_px = int(mm_to_px(barcode_width_mm, dpi_x))
+                barcode_height_px = int(mm_to_px(barcode_height_mm, dpi_y))
 
                 pil_image = Image.new("RGB", (img_width, bar_height_px), "white")
                 for y in range(bar_height_px):
                     for x in range(img_width):
                         if pixel_row[x] == 1:
                             pil_image.putpixel((x, y), (0, 0, 0)) # Black
-
-                buffer = io.BytesIO()
-                pil_image.save(buffer, format="PNG")
-                buffer.seek(0)
-                barcode_pixmap = QPixmap()
-                barcode_pixmap.loadFromData(buffer.getvalue(), "PNG")
+                
+                # --- ИЗМЕНЕНИЕ: Масштабируем изображение до нужных размеров в пикселях ---
+                # Используем QPixmap для масштабирования, так как он лучше работает с painter
+                barcode_pixmap = QPixmap.fromImage(pil_image.toqimage()).scaled(barcode_width_px, barcode_height_px, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                
                 barcode_x_px = mm_to_px(3, dpi_x)
                 barcode_y_px = mm_to_px(20, dpi_y)
                 painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
