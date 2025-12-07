@@ -2336,17 +2336,22 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
+                # --- ИСПРАВЛЕНИЕ: Используем pystrich API правильно, через get_imagedata ---
                 encoder = Code128Encoder(access_code)
-                pil_image = encoder.render(show_text=False)
+                
+                bar_height_px = int(mm_to_px(10, dpi_y))
+                pixels = encoder.get_imagedata(height=bar_height_px)
+                
+                img_height = len(pixels)
+                if img_height == 0:
+                    raise ValueError("Barcode generation with pyStrich returned empty image data.")
+                img_width = len(pixels[0])
 
-                # Scale the image to the desired height while maintaining aspect ratio
-                desired_height_px = mm_to_px(10, dpi_y) # Based on original reportlab barHeight
-                original_width, original_height = pil_image.size
-                if original_height > 0:
-                    aspect_ratio = float(original_width) / float(original_height)
-                    new_height = int(desired_height_px)
-                    new_width = int(new_height * aspect_ratio)
-                    pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                pil_image = Image.new("RGB", (img_width, img_height), "white")
+                for y in range(img_height):
+                    for x in range(img_width):
+                        if pixels[y][x] == 1:
+                            pil_image.putpixel((x, y), (0, 0, 0)) # Black
 
                 buffer = io.BytesIO()
                 pil_image.save(buffer, format="PNG")
@@ -2414,17 +2419,22 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
+                # --- ИСПРАВЛЕНИЕ: Используем pystrich API правильно, через get_imagedata ---
                 encoder = Code128Encoder(access_code)
-                pil_image = encoder.render(show_text=False)
+                
+                bar_height_px = int(mm_to_px(10, dpi_y))
+                pixels = encoder.get_imagedata(height=bar_height_px)
+                
+                img_height = len(pixels)
+                if img_height == 0:
+                    raise ValueError("Barcode generation with pyStrich returned empty image data.")
+                img_width = len(pixels[0])
 
-                # Scale the image to the desired height while maintaining aspect ratio
-                desired_height_px = mm_to_px(10, dpi_y) # Based on original reportlab barHeight
-                original_width, original_height = pil_image.size
-                if original_height > 0:
-                    aspect_ratio = float(original_width) / float(original_height)
-                    new_height = int(desired_height_px)
-                    new_width = int(new_height * aspect_ratio)
-                    pil_image = pil_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                pil_image = Image.new("RGB", (img_width, img_height), "white")
+                for y in range(img_height):
+                    for x in range(img_width):
+                        if pixels[y][x] == 1:
+                            pil_image.putpixel((x, y), (0, 0, 0)) # Black
 
                 buffer = io.BytesIO()
                 pil_image.save(buffer, format="PNG")
