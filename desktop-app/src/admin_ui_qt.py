@@ -869,11 +869,15 @@ class ApiIntegrationFrameQt(QWidget):
             if not error:
                 self._append_log("\nОперация успешно завершена.")
         
-        # --- ИЗМЕНЕНИЕ: Безопасно удаляем завершенный поток из списка ---
-        for t, w in self.active_threads:
-            if t is thread_instance:
-                self.active_threads.remove((t, w))
-                break
+        # --- ИСПРАВЛЕНИЕ: Не удаляем поток из self.active_threads здесь.
+        # Удаление ссылки на объект QThread до того, как Qt завершит его через deleteLater(),
+        # приводит к преждевременной сборке мусора в Python и к ошибке "QThread: Destroyed while thread is still running".
+        # Поток и воркер будут удалены асинхронно. Оставляя ссылку в списке, мы предотвращаем падение.
+        # Это может привести к небольшой утечке памяти (список будет расти), но это решает проблему падения.
+        # for t, w in self.active_threads:
+        #     if t is thread_instance:
+        #         self.active_threads.remove((t, w))
+        #         break
 
     def _request_codes_flow(self):
         """Запускает полный цикл запроса кодов."""
