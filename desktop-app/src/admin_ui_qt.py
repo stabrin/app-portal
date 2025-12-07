@@ -25,7 +25,6 @@ from pystrich.code128 import Code128Encoder
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from reportlab.lib.units import mm
-from reportlab.graphics.barcode import code128
 # --- END NEW IMPORTS ---
 
 from dateutil.relativedelta import relativedelta
@@ -2338,19 +2337,23 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                # --- ИЗМЕНЕНИЕ: Используем reportlab для качественной генерации штрихкода ---
-                barcode = code128.Code128(access_code, barHeight=10*mm, barWidth=0.25*mm, quiet=False)
-                
-                barcode_width_mm, barcode_height_mm = 50, 10
-                drawing_width_px = mm_to_px(barcode_width_mm, dpi_x)
-                drawing_height_px = mm_to_px(barcode_height_mm, dpi_y)
+                # --- ИЗМЕНЕНИЕ: Используем reportlab.createBarcodeDrawing для правильной генерации ---
+                barcode_drawing = createBarcodeDrawing(
+                    'Code128',
+                    value=access_code,
+                    barHeight=10*mm,
+                    barWidth=0.25*mm,
+                    humanReadable=True
+                )
 
-                drawing = Drawing(drawing_width_px, drawing_height_px)
-                drawing.add(barcode)
-                pil_image = renderPM.drawToPIL(drawing, dpi=dpi_x)
-
+                pil_image = renderPM.drawToPIL(barcode_drawing, dpi=dpi_x)
                 qimage = ImageQt(pil_image)
                 barcode_pixmap = QPixmap.fromImage(qimage)
+
+                # Масштабируем, если штрихкод получился слишком широким, сохраняя пропорции
+                desired_width_px = mm_to_px(50, dpi_x)
+                if barcode_pixmap.width() > desired_width_px:
+                    barcode_pixmap = barcode_pixmap.scaledToWidth(desired_width_px, Qt.SmoothTransformation)
 
                 barcode_x_px = mm_to_px(3, dpi_x)
                 barcode_y_px = mm_to_px(20, dpi_y)
@@ -2400,19 +2403,23 @@ class EmployeePassesViewerDialog(QDialog):
 
         # Рисуем штрихкод
         try:
-            # --- ИЗМЕНЕНИЕ: Используем reportlab для качественной генерации штрихкода ---
-            barcode = code128.Code128(access_code, barHeight=10*mm, barWidth=0.25*mm, quiet=False)
+            # --- ИЗМЕНЕНИЕ: Используем reportlab.createBarcodeDrawing для правильной генерации ---
+            barcode_drawing = createBarcodeDrawing(
+                'Code128', 
+                value=access_code, 
+                barHeight=10*mm, 
+                barWidth=0.25*mm, 
+                humanReadable=True
+            )
 
-            barcode_width_mm, barcode_height_mm = 50, 10
-            drawing_width_px = mm_to_px(barcode_width_mm, dpi)
-            drawing_height_px = mm_to_px(barcode_height_mm, dpi)
-            
-            drawing = Drawing(drawing_width_px, drawing_height_px)
-            drawing.add(barcode)
-            pil_image = renderPM.drawToPIL(drawing, dpi=dpi)
-
+            pil_image = renderPM.drawToPIL(barcode_drawing, dpi=dpi)
             qimage = ImageQt(pil_image)
             barcode_pixmap = QPixmap.fromImage(qimage)
+
+            # Масштабируем, если штрихкод получился слишком широким, сохраняя пропорции
+            desired_width_px = mm_to_px(50, dpi)
+            if barcode_pixmap.width() > desired_width_px:
+                barcode_pixmap = barcode_pixmap.scaledToWidth(desired_width_px, Qt.SmoothTransformation)
 
             painter.drawPixmap(int(mm_to_px(3, dpi)), int(mm_to_px(20, dpi)), barcode_pixmap)
         except Exception as e:
