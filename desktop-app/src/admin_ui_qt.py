@@ -2409,21 +2409,19 @@ class EmployeePassesViewerDialog(QDialog):
 
         # Рисуем штрихкод
         try:
-            # --- ИЗМЕНЕНИЕ: Заменяем python-barcode на reportlab, который уже есть в проекте ---
-            # Это решает ошибку ModuleNotFoundError и не требует новых зависимостей.
-            barcode_drawing = createBarcodeDrawing(
-                'Code128', 
-                value=access_code, 
-                barHeight=mm_to_px(10, dpi), # Высота в пикселях
-                humanReadable=False
-            )
-            drawing = Drawing(barcode_drawing.width, barcode_drawing.height)
-            drawing.add(barcode_drawing)
+            # --- ИЗМЕНЕНИЕ: Возвращаемся к pystrich, но с принудительным указанием кодировки 'B' ---
+            # Это решает проблему с некорректным рендерингом смешанных буквенно-цифровых кодов
+            # и не требует установки дополнительных зависимостей для reportlab.
+            encoder = Code128Encoder(access_code, "B")
+            pixel_row = encoder.get_imagedata()
+            img_width = len(pixel_row)
+            if img_width == 0: raise ValueError("pyStrich вернул пустые данные")
             
-            buffer = io.BytesIO()
-            renderPM.drawToFile(drawing, buffer, fmt='PNG')
-            buffer.seek(0)
-            pil_image = Image.open(buffer)
+            # Создаем однострочное изображение и затем масштабируем его
+            pil_image_row = Image.new("1", (img_width, 1), "white")
+            pil_image_row.putdata(pixel_row)
+            # Преобразуем в QPixmap для дальнейшего масштабирования
+            pil_image = pil_image_row.toqimage()
 
             barcode_width_px = int(mm_to_px(50, dpi))
             barcode_height_px = int(mm_to_px(10, dpi))
