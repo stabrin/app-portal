@@ -2353,15 +2353,14 @@ class EmployeePassesViewerDialog(QDialog):
                 barcode_width_px = int(mm_to_px(barcode_width_mm, dpi_x))
                 barcode_height_px = int(mm_to_px(barcode_height_mm, dpi_y))
 
-                pil_image = Image.new("RGB", (img_width, barcode_height_px), "white")
-                for y in range(barcode_height_px):
-                    for x in range(img_width):
-                        if pixel_row[x] == 1:
-                            pil_image.putpixel((x, y), (0, 0, 0)) # Black
+                # --- УЛУЧШЕНИЕ: Создаем однострочное изображение и затем масштабируем его ---
+                # Это эффективнее, чем рисовать каждую строку вручную.
+                pil_image_row = Image.new("1", (img_width, 1), "white")
+                pil_image_row.putdata(pixel_row)
                 
                 # --- ИЗМЕНЕНИЕ: Масштабируем изображение до нужных размеров в пикселях ---
-                # Используем QPixmap для масштабирования, так как он лучше работает с painter
-                barcode_pixmap = QPixmap.fromImage(pil_image.toqimage()).scaled(barcode_width_px, barcode_height_px, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                # Заменяем SmoothTransformation на FastTransformation для сохранения четкости линий.
+                barcode_pixmap = QPixmap.fromImage(pil_image_row.toqimage()).scaled(barcode_width_px, barcode_height_px, Qt.IgnoreAspectRatio, Qt.FastTransformation)
                 
                 barcode_x_px = mm_to_px(3, dpi_x)
                 barcode_y_px = mm_to_px(20, dpi_y)
