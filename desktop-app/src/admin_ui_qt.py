@@ -17,7 +17,6 @@ import logging
 import json
 from datetime import datetime
 import io
-import time
 # --- NEW IMPORTS FOR BARCODE GENERATION ---
 from reportlab.graphics.barcode import createBarcodeDrawing
 from reportlab.graphics.shapes import Drawing
@@ -2411,16 +2410,21 @@ class EmployeePassesViewerDialog(QDialog):
         # Рисуем штрихкод
         try:
             encoder = Code128Encoder(access_code)
-            pixel_row = encoder.get_imagedata()
-            img_width = len(pixel_row)
-            if img_width == 0: raise ValueError("pyStrich вернул пустые данные")
+            # --- ИЗМЕНЕНИЕ: Заменяем pystrich на python-barcode ---
+            # python-barcode более надежен и корректно обрабатывает разные типы данных.
+            # Он также позволяет управлять высотой и толщиной линий напрямую.
+            from barcode.writer import ImageWriter
+            from barcode import get_barcode_class
+            
+            Code128 = get_barcode_class('code128')
+            # Убираем текст под штрихкодом и задаем высоту в мм
+            writer_options = {"write_text": False, "module_height": 10.0}
+            # Генерируем изображение в виде объекта PIL
+            pil_image = Code128(access_code, writer=ImageWriter()).render(writer_options)
 
             barcode_width_px = int(mm_to_px(50, dpi))
             barcode_height_px = int(mm_to_px(10, dpi))
-
-            pil_image_row = Image.new("1", (img_width, 1), "white")
-            pil_image_row.putdata(pixel_row)
-            barcode_pixmap = QPixmap.fromImage(pil_image_row.toqimage()).scaled(barcode_width_px, barcode_height_px, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+            barcode_pixmap = QPixmap.fromImage(pil_image.toqimage()).scaled(barcode_width_px, barcode_height_px, Qt.IgnoreAspectRatio, Qt.FastTransformation)
             
             painter.drawPixmap(int(mm_to_px(3, dpi)), int(mm_to_px(20, dpi)), barcode_pixmap)
         except Exception as e:
