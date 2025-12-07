@@ -23,6 +23,9 @@ from reportlab.graphics.shapes import Drawing
 from reportlab.graphics import renderPM
 from pystrich.code128 import Code128Encoder
 from PIL import Image
+from PIL.ImageQt import ImageQt
+from reportlab.lib.units import mm
+from reportlab.graphics.barcode import code128
 # --- END NEW IMPORTS ---
 
 from dateutil.relativedelta import relativedelta
@@ -2335,35 +2338,23 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                # --- ИСПРАВЛЕНИЕ: Используем pystrich API правильно.
-                # get_imagedata() возвращает один ряд пикселей, который мы размножаем на нужную высоту.
-                encoder = Code128Encoder(access_code)
+                # --- ИЗМЕНЕНИЕ: Используем reportlab для качественной генерации штрихкода ---
+                barcode = code128.Code128(access_code, barHeight=10*mm, barWidth=0.25*mm, quiet=False)
                 
-                pixel_row = encoder.get_imagedata()
-                img_width = len(pixel_row)
-                if img_width == 0:
-                    raise ValueError("Barcode generation with pyStrich returned empty image data.")
+                barcode_width_mm, barcode_height_mm = 50, 10
+                drawing_width_px = mm_to_px(barcode_width_mm, dpi_x)
+                drawing_height_px = mm_to_px(barcode_height_mm, dpi_y)
 
-                # --- ИЗМЕНЕНИЕ: Задаем желаемые размеры штрихкода в миллиметрах ---
-                barcode_width_mm = 50
-                barcode_height_mm = 10
-                
-                # --- ИЗМЕНЕНИЕ: Конвертируем желаемые размеры в пиксели ---
-                barcode_width_px = int(mm_to_px(barcode_width_mm, dpi_x))
-                barcode_height_px = int(mm_to_px(barcode_height_mm, dpi_y))
+                drawing = Drawing(drawing_width_px, drawing_height_px)
+                drawing.add(barcode)
+                pil_image = renderPM.drawToPIL(drawing, dpi=dpi_x)
 
-                # --- УЛУЧШЕНИЕ: Создаем однострочное изображение и затем масштабируем его ---
-                # Это эффективнее, чем рисовать каждую строку вручную.
-                pil_image_row = Image.new("1", (img_width, 1), "white")
-                pil_image_row.putdata(pixel_row)
-                
-                # --- ИЗМЕНЕНИЕ: Масштабируем изображение до нужных размеров в пикселях ---
-                # Заменяем SmoothTransformation на FastTransformation для сохранения четкости линий.
-                barcode_pixmap = QPixmap.fromImage(pil_image_row.toqimage()).scaled(barcode_width_px, barcode_height_px, Qt.IgnoreAspectRatio, Qt.FastTransformation)
-                
+                qimage = ImageQt(pil_image)
+                barcode_pixmap = QPixmap.fromImage(qimage)
+
                 barcode_x_px = mm_to_px(3, dpi_x)
                 barcode_y_px = mm_to_px(20, dpi_y)
-                painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap.width(), barcode_pixmap.height(), barcode_pixmap)
+                painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap)
             except Exception as e:
                 logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
                 painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
@@ -2409,26 +2400,24 @@ class EmployeePassesViewerDialog(QDialog):
 
         # Рисуем штрихкод
         try:
-            # --- ИЗМЕНЕНИЕ: Возвращаемся к pystrich, но с принудительным указанием кодировки 'B' ---
-            # Это решает проблему с некорректным рендерингом смешанных буквенно-цифровых кодов
-            # и не требует установки дополнительных зависимостей для reportlab.
-            encoder = Code128Encoder(access_code)
-            pixel_row = encoder.get_imagedata()
-            img_width = len(pixel_row)
-            if img_width == 0: raise ValueError("pyStrich вернул пустые данные")
-            
-            # Создаем однострочное изображение и затем масштабируем его
-            pil_image_row = Image.new("1", (img_width, 1), "white")
-            pil_image_row.putdata(pixel_row)
-            # Преобразуем в QPixmap для дальнейшего масштабирования
-            pil_image = pil_image_row.toqimage()
+            # --- ИЗМЕНЕНИЕ: Используем reportlab для качественной генерации штрихкода ---
+            barcode = code128.Code128(access_code, barHeight=10*mm, barWidth=0.25*mm, quiet=False)
 
-            barcode_width_px = int(mm_to_px(50, dpi))
-            barcode_height_px = int(mm_to_px(10, dpi))
-            barcode_pixmap = QPixmap.fromImage(pil_image).scaled(barcode_width_px, barcode_height_px, Qt.IgnoreAspectRatio, Qt.FastTransformation)
+            barcode_width_mm, barcode_height_mm = 50, 10
+            drawing_width_px = mm_to_px(barcode_width_mm, dpi)
+            drawing_height_px = mm_to_px(barcode_height_mm, dpi)
+            
+            drawing = Drawing(drawing_width_px, drawing_height_px)
+            drawing.add(barcode)
+            pil_image = renderPM.drawToPIL(drawing, dpi=dpi)
+
+            qimage = ImageQt(pil_image)
+            barcode_pixmap = QPixmap.fromImage(qimage)
+
             painter.drawPixmap(int(mm_to_px(3, dpi)), int(mm_to_px(20, dpi)), barcode_pixmap)
         except Exception as e:
             logging.error(f"Ошибка генерации штрихкода для предпросмотра: {e}", exc_info=True)
+            painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(20, dpi), mm_to_px(56, dpi), mm_to_px(12, dpi)), Qt.AlignCenter, "Ошибка ШК")
 
         painter.end()
         return pixmap
