@@ -19,7 +19,7 @@ from datetime import datetime
 import io
 import time
 # --- NEW IMPORTS FOR BARCODE GENERATION ---
-from reportlab.graphics.barcode import code128
+from reportlab.graphics.barcode import createBarcodeDrawing
 from reportlab.graphics.shapes import Drawing
 from reportlab.graphics import renderPM
 from PIL import Image
@@ -2335,10 +2335,8 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
-                drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
-                drawing.add(barcode)
-                pil_image = renderPM.drawToPIL(drawing)
+                barcode_drawing = createBarcodeDrawing('Code128', value=access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+                pil_image = renderPM.drawToPIL(barcode_drawing)
                 buffer = io.BytesIO()
                 pil_image.save(buffer, format="PNG")
                 buffer.seek(0)
@@ -2405,10 +2403,8 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                barcode = code128.Code128(access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
-                drawing = Drawing(mm_to_px(54, dpi_x), mm_to_px(12, dpi_y))
-                drawing.add(barcode)
-                pil_image = renderPM.drawToPIL(drawing)
+                barcode_drawing = createBarcodeDrawing('Code128', value=access_code, barHeight=mm_to_px(10, dpi_y), barWidth=mm_to_px(0.2, dpi_x))
+                pil_image = renderPM.drawToPIL(barcode_drawing)
                 buffer = io.BytesIO()
                 pil_image.save(buffer, format="PNG")
                 buffer.seek(0)
