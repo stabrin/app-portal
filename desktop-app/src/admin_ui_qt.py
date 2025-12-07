@@ -9,8 +9,8 @@ from PySide6.QtWidgets import (
 )
 # --- NEW IMPORTS FOR PRINTING ---
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
-from PySide6.QtCore import Qt, Slot, QDate, QTimer, QThread, Signal, QObject, QRectF, QSize
-from PySide6.QtGui import QColor, QPen, QPainter, QFont, QPixmap
+from PySide6.QtCore import Qt, Slot, QDate, QTimer, QThread, Signal, QObject, QRectF, QSize, QSizeF
+from PySide6.QtGui import QColor, QPen, QPainter, QFont, QPixmap, QPageSize
 import sys
 import traceback
 import logging
@@ -2305,7 +2305,8 @@ class EmployeePassesViewerDialog(QDialog):
             QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
             return
         printer = QPrinter(QPrinter.HighResolution)
-        printer.setPageSizeMM(QSize(60, 40))
+        page_size = QPageSize(QSizeF(60, 40), QPageSize.Unit.Millimeter)
+        printer.setPageSize(page_size)
         printer.setPageMargins(2, 2, 2, 2, QPrinter.Millimeter)
         dialog = QPrintDialog(printer, self)
         if dialog.exec() != QDialog.Accepted:
@@ -2373,7 +2374,8 @@ class EmployeePassesViewerDialog(QDialog):
             QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
             return
         printer = QPrinter(QPrinter.HighResolution)
-        printer.setPageSizeMM(QSize(60, 40))
+        page_size = QPageSize(QSizeF(60, 40), QPageSize.Unit.Millimeter)
+        printer.setPageSize(page_size)
         printer.setPageMargins(2, 2, 2, 2, QPrinter.Millimeter)
         dialog = QPrintDialog(printer, self)
         if dialog.exec() != QDialog.Accepted:
