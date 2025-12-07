@@ -2353,8 +2353,8 @@ class EmployeePassesViewerDialog(QDialog):
                 barcode_width_px = int(mm_to_px(barcode_width_mm, dpi_x))
                 barcode_height_px = int(mm_to_px(barcode_height_mm, dpi_y))
 
-                pil_image = Image.new("RGB", (img_width, bar_height_px), "white")
-                for y in range(bar_height_px):
+                pil_image = Image.new("RGB", (img_width, barcode_height_px), "white")
+                for y in range(barcode_height_px):
                     for x in range(img_width):
                         if pixel_row[x] == 1:
                             pil_image.putpixel((x, y), (0, 0, 0)) # Black
