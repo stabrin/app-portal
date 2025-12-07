@@ -2412,7 +2412,7 @@ class EmployeePassesViewerDialog(QDialog):
             # --- ИЗМЕНЕНИЕ: Возвращаемся к pystrich, но с принудительным указанием кодировки 'B' ---
             # Это решает проблему с некорректным рендерингом смешанных буквенно-цифровых кодов
             # и не требует установки дополнительных зависимостей для reportlab.
-            encoder = Code128Encoder(access_code, "B")
+            encoder = Code128Encoder(access_code)
             pixel_row = encoder.get_imagedata()
             img_width = len(pixel_row)
             if img_width == 0: raise ValueError("pyStrich вернул пустые данные")
