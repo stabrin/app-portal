@@ -29,7 +29,7 @@ PySide6==6.10.1
 PySide6_Addons==6.10.1
 PySide6_Essentials==6.10.1
 pyStrich==0.10
-python-barcode>=0.15.1
+python-barcode==0.15.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
 pytz==2025.2
