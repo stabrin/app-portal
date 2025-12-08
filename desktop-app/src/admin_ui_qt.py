@@ -18,13 +18,10 @@ import json
 from datetime import datetime
 import io
 # --- NEW IMPORTS FOR BARCODE GENERATION ---
-from reportlab.graphics.barcode import createBarcodeDrawing
-from reportlab.graphics.shapes import Drawing
-from reportlab.graphics import renderPM
-from pystrich.code128 import Code128Encoder
 from PIL import Image
 from PIL.ImageQt import ImageQt
-from reportlab.lib.units import mm
+import barcode
+from barcode.writer import ImageWriter
 # --- END NEW IMPORTS ---
 
 from dateutil.relativedelta import relativedelta
@@ -2337,16 +2334,17 @@ class EmployeePassesViewerDialog(QDialog):
             painter.setFont(font_small)
             painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
-                # --- ИЗМЕНЕНИЕ: Используем reportlab.createBarcodeDrawing для правильной генерации ---
-                barcode_drawing = createBarcodeDrawing(
-                    'Code128',
-                    value=access_code,
-                    barHeight=10*mm,
-                    barWidth=0.25*mm,
-                    humanReadable=True
-                )
-
-                pil_image = renderPM.drawToPIL(barcode_drawing, dpi=dpi_x)
+                # --- ИЗМЕНЕНИЕ: Используем python-barcode для генерации штрих-кода ---
+                Code128 = barcode.get_barcode_class('code128')
+                code128_barcode = Code128(access_code, writer=ImageWriter())
+                options = {
+                    'module_height': 10.0,
+                    'module_width': 0.25,
+                    'font_size': 10,
+                    'text_distance': 5.0,
+                    'quiet_zone': 2.0
+                }
+                pil_image = code128_barcode.render(writer_options=options)
                 qimage = ImageQt(pil_image)
                 barcode_pixmap = QPixmap.fromImage(qimage)
 
@@ -2403,16 +2401,17 @@ class EmployeePassesViewerDialog(QDialog):
 
         # Рисуем штрихкод
         try:
-            # --- ИЗМЕНЕНИЕ: Используем reportlab.createBarcodeDrawing для правильной генерации ---
-            barcode_drawing = createBarcodeDrawing(
-                'Code128', 
-                value=access_code, 
-                barHeight=10*mm, 
-                barWidth=0.25*mm, 
-                humanReadable=True
-            )
-
-            pil_image = renderPM.drawToPIL(barcode_drawing, dpi=dpi)
+            # --- ИЗМЕНЕНИЕ: Используем python-barcode для генерации штрих-кода ---
+            Code128 = barcode.get_barcode_class('code128')
+            code128_barcode = Code128(access_code, writer=ImageWriter())
+            options = {
+                'module_height': 10.0,
+                'module_width': 0.25,
+                'font_size': 10,
+                'text_distance': 5.0,
+                'quiet_zone': 2.0
+            }
+            pil_image = code128_barcode.render(writer_options=options)
             qimage = ImageQt(pil_image)
             barcode_pixmap = QPixmap.fromImage(qimage)
 
