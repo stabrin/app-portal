@@ -396,7 +396,14 @@ class ApiService:
             start_time = time.time()
             while time.time() - start_time < max_wait:
                 runs_resp = self.get_printruns(api_order_id)
-                is_awaiting = any(p.get('state') == 'AWAITING' for p in runs_resp.get('orders', [{}])[0].get('printruns', []))
+                # --- ИСПРАВЛЕНИЕ: Добавлена проверка на пустой ответ от API ---
+                # Если API вернуло пустой ответ, orders_list будет пустым, и код упадет с ошибкой.
+                orders_list = runs_resp.get('orders', [])
+                if not orders_list:
+                    log("  API вернуло пустой ответ, ожидание...")
+                    time.sleep(interval)
+                    continue # Переходим к следующей итерации цикла
+                is_awaiting = any(p.get('state') == 'AWAITING' for p in orders_list[0].get('printruns', []))
                 if not is_awaiting:
                     log("  API готово.")
                     break
