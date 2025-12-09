@@ -351,6 +351,7 @@ class ApiService:
                 with self.order_service._get_connection() as conn:
                     with conn.cursor() as cur:
                         upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+                    conn.commit() # <-- ИСПРАВЛЕНИЕ: Добавлена фиксация транзакции
                 log("Успешно выполнена операция обновления/вставки в справочник товаров.")
             except Exception as e:
                 log(f"ОШИБКА при обновлении справочника товаров: {e}")
@@ -474,6 +475,7 @@ class ApiService:
                     with self.order_service._get_connection() as conn:
                         with conn.cursor() as cur:
                             upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+                    conn.commit() # <-- ИСПРАВЛЕНИЕ: Добавлена фиксация транзакции
                     log("Успешно выполнена операция обновления/вставки в справочник товаров.")
                 except Exception as e:
                     log(f"  Произошла ошибка при UPSERT: {e}")
