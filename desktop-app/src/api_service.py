@@ -462,6 +462,7 @@ class ApiService:
         if not api_products:
             log("ВНИМАНИЕ: API не вернуло список продуктов в заказе. Обновление справочника пропущено.")
         else:
+            log(f"  Приступаю к обработке списка продуктов, полученных из API.")
             log(f"От API получено {len(api_products)} товаров для обновления справочника. GTINs: {[p.get('gtin') for p in api_products]}")
             products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name') and p.get('gtin')]
             if products_to_upsert:
@@ -469,11 +470,13 @@ class ApiService:
                 try:
                     from .utils import upsert_data_to_db
                     upsert_df = pd.DataFrame(products_to_upsert)
+                    log(f"  DataFrame для UPSERT создан, размер: {len(upsert_df)} строк.")
                     with self.order_service._get_connection() as conn:
                         with conn.cursor() as cur:
                             upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
                     log("Успешно выполнена операция обновления/вставки в справочник товаров.")
                 except Exception as e:
+                log(f"  Произошла ошибка при UPSERT: {e}")
                     log(f"ОШИБКА при обновлении справочника товаров: {e}")
                     logger.error("Ошибка при обновлении справочника товаров из API", exc_info=True)
             else:
