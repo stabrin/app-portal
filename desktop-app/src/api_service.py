@@ -476,7 +476,7 @@ class ApiService:
                             upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
                     log("Успешно выполнена операция обновления/вставки в справочник товаров.")
                 except Exception as e:
-                log(f"  Произошла ошибка при UPSERT: {e}")
+                    log(f"  Произошла ошибка при UPSERT: {e}")
                     log(f"ОШИБКА при обновлении справочника товаров: {e}")
                     logger.error("Ошибка при обновлении справочника товаров из API", exc_info=True)
             else:
