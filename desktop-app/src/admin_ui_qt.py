@@ -15,6 +15,7 @@ import sys
 import traceback
 import logging
 import json
+import time
 from datetime import datetime
 import io
 # --- NEW IMPORTS FOR BARCODE GENERATION ---
