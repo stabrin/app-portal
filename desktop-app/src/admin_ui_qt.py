@@ -1020,6 +1020,7 @@ class CodeUploadFrameQt(QWidget):
             def run(self):
                 logs = run_aggregation_process_desktop(
                     user_info=self.user_info, order_id=self.order_id, filepaths=filepaths,
+
                     dm_type=dm_type, aggregation_mode=aggregation_mode, level1_qty=level1_qty
                 )
                 for line in logs:

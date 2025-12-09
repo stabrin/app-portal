@@ -48,6 +48,7 @@ def project_root_path(relative_path):
 
 def resource_path(relative_path):
     """Обертка для совместимости."""
+
     return project_root_path(relative_path)
 
 def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_column: str):
