@@ -404,6 +404,25 @@ class ApiService:
             else:
                 raise Exception("Время ожидания готовности API истекло. Один из тиражей остался в статусе AWAITING.")
         
+        # --- ИЗМЕНЕНИЕ: Добавлено детальное логирование ---
+        log(f"От API получено {len(api_products)} товаров. GTINs: {[p.get('gtin') for p in api_products]}")
+
+        # --- ИСПРАВЛЕНИЕ: Обновляем справочник товаров на основе данных из API ---
+        products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name') and p.get('gtin')]
+        if products_to_upsert:
+            log(f"Подготовлено к обновлению/вставке {len(products_to_upsert)} товаров в локальный справочник 'products'.")
+            try:
+                from .utils import upsert_data_to_db
+                upsert_df = pd.DataFrame(products_to_upsert)
+                with self.order_service._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+                log("Успешно выполнена операция обновления/вставки в справочник товаров.")
+            except Exception as e:
+                log(f"ОШИБКА при обновлении справочника товаров: {e}")
+                logger.error("Ошибка при обновлении справочника товаров из API", exc_info=True)
+        else:
+            log("Не найдено товаров с GTIN и именем в ответе API для обновления локального справочника.")
         self.order_service.update_order_status(order_id, 'Тиражи созданы')
         log("Шаг создания тиражей успешно завершен.")
 
