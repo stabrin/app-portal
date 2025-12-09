@@ -339,6 +339,16 @@ class ApiService:
         if not api_products:
             raise Exception("API не вернуло список продуктов в заказе.")
 
+        # --- ИСПРАВЛЕНИЕ: Обновляем справочник товаров на основе данных из API ---
+        products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name') and p.get('gtin')]
+        if products_to_upsert:
+            log("Обновление локального справочника товаров...")
+            from .utils import upsert_data_to_db
+            upsert_df = pd.DataFrame(products_to_upsert)
+            with self.order_service._get_connection() as conn:
+                with conn.cursor() as cur:
+                    upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+
         gtin_to_api_product_id = {p['gtin']: p['id'] for p in api_products if p.get('state') == 'ACTIVE' and p.get('qty') == p.get('qty_received')}
         details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
         log("Сопоставление продуктов с API завершено.")
