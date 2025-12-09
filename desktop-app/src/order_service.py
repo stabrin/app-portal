@@ -363,6 +363,31 @@ class OrderService:
         # Возвращаем только уникальные ID
         return list(set(all_ids))
 
+    def get_delta_results_for_upload(self, order_id: int):
+        """Возвращает записи из delta_result, которые еще не были выгружены в API."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT id, printrun_id, codes_json FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NULL", (order_id,))
+                return cur.fetchall()
+
+    def update_delta_result_upload_id(self, result_id: int, upload_id: int):
+        """Обновляет utilisation_upload_id для записи в delta_result."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (upload_id, result_id))
+            conn.commit()
+
+    def get_dmkod_details_for_upload(self, order_id: int):
+        """Возвращает детали dmkod, которые еще не были выгружены в API."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT d.api_id, d.production_date, d.expiry_date, d.id as detail_id, o.fias_code
+                    FROM dmkod_aggregation_details d JOIN orders o ON d.order_id = o.id
+                    WHERE d.order_id = %s AND d.api_id IS NOT NULL AND d.utilisation_upload_id IS NULL
+                """, (order_id,))
+                return cur.fetchall()
+
 
     def get_order_summary(self, order_id: int):
         """
@@ -470,6 +495,23 @@ class OrderService:
             with conn.cursor() as cur:
                 cur.execute("UPDATE dmkod_aggregation_details SET api_id = %s WHERE order_id = %s AND gtin = %s", (api_id, order_id, gtin))
             conn.commit()
+
+    def update_detail_utilisation_upload_id(self, detail_id: int, upload_id: int):
+        """Обновляет utilisation_upload_id для одной строки детализации по ее ID."""
+        with self._get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (upload_id, detail_id))
+            conn.commit()
+
+    def get_details_for_report(self, order_id: int):
+        """Возвращает детали, необходимые для создания отчета о нанесении."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL ORDER BY id",
+                    (order_id,)
+                )
+                return cur.fetchall()
 
     def get_unique_printrun_ids(self, order_id: int):
         """Возвращает множество уникальных ID тиражей (api_id) для заказа."""

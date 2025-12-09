@@ -459,6 +459,96 @@ class ApiService:
         log(f"\nСкачивание завершено. Всего скачано кодов: {total_codes_downloaded}.")
 
     # --- Существующие низкоуровневые методы ---
+    def prepare_utilisation_data_full_cycle(self, order_id, progress_callback):
+        """
+        Выполняет полный цикл подготовки сведений для отчета и запрашивает подтверждение.
+        Возвращает специальный кортеж для вызова диалога в UI.
+        """
+        if not self.order_service:
+            raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+
+        def log(message):
+            if progress_callback:
+                progress_callback(message)
+
+        log("--- НАЧАЛО ПОДГОТОВКИ СВЕДЕНИЙ ДЛЯ ОТЧЕТА ---")
+        order_data = self.order_service.get_order_by_id(order_id)
+        order_status = order_data.get('status')
+        log(f"Статус заказа: {order_status}")
+
+        # Получаем все ID загрузок, которые уже есть в БД
+        existing_upload_ids = self.order_service.get_all_utilisation_upload_ids(order_id, order_status)
+        newly_created_upload_ids = []
+
+        # Логика для статуса 'delta'
+        if order_status == 'delta':
+            results_to_process = self.order_service.get_delta_results_for_upload(order_id)
+            if not results_to_process:
+                log("Нет новых данных от 'Дельта' для отправки.")
+            else:
+                log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки.")
+                for i, result in enumerate(results_to_process):
+                    log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {result['printrun_id']} ---")
+                    response_data = self.upload_utilisation_data(result['codes_json'])
+                    upload_id = response_data.get('utilisation_upload_id')
+                    if not upload_id: raise ValueError(f"API не вернуло 'utilisation_upload_id': {response_data}")
+                    newly_created_upload_ids.append(upload_id)
+                    self.order_service.update_delta_result_upload_id(result['id'], upload_id)
+                    log(f"  Ответ API: {json.dumps(response_data, ensure_ascii=False)}")
+                    time.sleep(1)
+        # Логика для статуса 'dmkod'
+        elif order_status == 'dmkod':
+            details_to_process = self.order_service.get_dmkod_details_for_upload(order_id)
+            if not details_to_process:
+                log("Нет новых тиражей для отправки сведений.")
+            else:
+                for detail in details_to_process:
+                    attributes = {k: v.strftime('%Y-%m-%d') for k, v in {'production_date': detail.get('production_date'), 'expiration_date': detail.get('expiry_date')}.items() if v}
+                    if detail.get('fias_code'): attributes['fias_id'] = detail['fias_code']
+                    payload = {"all_from_printrun": detail['api_id']}
+                    if attributes: payload['attributes'] = attributes
+                    response_data = self.upload_utilisation_data(payload)
+                    upload_id = response_data.get('utilisation_upload_id')
+                    if not upload_id: raise ValueError(f"API не вернуло 'utilisation_upload_id': {response_data}")
+                    newly_created_upload_ids.append(upload_id)
+                    self.order_service.update_detail_utilisation_upload_id(detail['detail_id'], upload_id)
+                    log(f"  Записи присвоен ID из API: {upload_id}")
+                    time.sleep(1)
+
+        log("\n--- Итоговая проверка ---")
+        summary = self.order_service.get_order_summary(order_id)
+        summary_msg_1 = f"По клиенту '{summary['client_name']}' заказу №{order_id} всего в заказе {summary['total_products']} товаров. Заказано {summary['ordered_codes']} кодов, получено {summary['received_codes']} кодов."
+        log(summary_msg_1)
+        total_success, total_not_found, total_duplicated = self.get_aggregated_utilisation_results(order_id, order_status)
+        summary_msg_2 = f"Результаты обработки в API: \n  - Успешно принято: {total_success}\n  - Не найдено: {total_not_found}\n  - Дубликаты: {total_duplicated}"
+        log(summary_msg_2)
+        final_prompt = f"{summary_msg_1}\n\n{summary_msg_2}\n\nПодготовить отчет?"
+        return ('ask_prepare_report', final_prompt)
+
+    def create_utilisation_report_full_cycle(self, order_id, progress_callback):
+        """Выполняет полный цикл создания отчета о нанесении."""
+        if not self.order_service:
+            raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+
+        def log(message):
+            if progress_callback:
+                progress_callback(message)
+
+        log("--- НАЧАЛО ПОДГОТОВКИ ОТЧЕТА О НАНЕСЕНИИ ---")
+        details_to_process = self.order_service.get_details_for_report(order_id)
+
+        if not details_to_process:
+            raise Exception("Не найдено позиций с ID тиража (api_id) для подготовки отчета.")
+
+        log(f"Найдено {len(details_to_process)} позиций для обработки.")
+        for i, detail in enumerate(details_to_process):
+            log(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
+            self.create_utilisation_report({"printrun_id": detail['api_id']})
+            log(f"  Запрос для тиража {detail['api_id']} успешно отправлен.")
+
+        self.order_service.update_order_status(order_id, 'Отчет подготовлен')
+        return "Отчет об использовании кодов успешно подготовлен и отправлен в АПИ."
+
     def get_participants(self):
         """Получает список участников (клиентов) из API."""
         logger.info("Получение списка участников из API...")

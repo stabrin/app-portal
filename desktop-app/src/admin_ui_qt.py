@@ -882,11 +882,11 @@ class ApiIntegrationFrameQt(QWidget):
     def _request_codes_flow(self):
         """Запускает полный цикл запроса кодов."""
         self._display_api_response("1. Запрос кодов", "Запуск операции...")
-        self._run_in_thread(
-            self.api_service.request_codes_full_cycle, 
-            self.order_id, 
-            self._append_log
-        )
+        # --- ИЗМЕНЕНИЕ: Используем _run_in_thread для вызова метода ApiService ---
+        # Этот метод теперь инкапсулирует всю логику, включая обновление статусов.
+        # Он вернет либо строковое сообщение об успехе, либо кортеж ('error', exception)
+        self._run_in_thread(self.api_service.request_codes_full_cycle, self.order_id, self._append_log)
+
     
     def _get_codes_flow(self):
         """Запускает полный цикл получения кодов."""
@@ -901,93 +901,13 @@ class ApiIntegrationFrameQt(QWidget):
     def _prepare_report_data_flow(self):
         """Запускает полный цикл подготовки сведений для отчета."""
         self._display_api_response("3. Подготовка сведений", "Запуск операции...")
-        self._run_in_thread(self._prepare_report_data_task)
-
-    def _prepare_report_data_task(self):
-        """
-        Задача для подготовки сведений для отчета. Адаптировано из admin_ui.py.
-        """
-        self._append_log("Начинаю подготовку сведений для отчета...")
-        try:
-            order_status = self.order_data.get('status')
-            self._append_log(f"Статус заказа: {order_status}")
-            all_upload_ids = []
-
-            with self.api_service.order_service._get_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    if order_status == 'delta':
-                        cur.execute("SELECT id, printrun_id, codes_json FROM delta_result WHERE order_id = %s AND utilisation_upload_id IS NULL", (self.order_id,))
-                        results_to_process = cur.fetchall()
-                        if not results_to_process:
-                            self._append_log("Нет новых данных от 'Дельта' для отправки.")
-                        else:
-                            self._append_log(f"Найдено {len(results_to_process)} записей от 'Дельта' для обработки.")
-                            for i, result in enumerate(results_to_process):
-                                self._append_log(f"--- {i+1}/{len(results_to_process)}: Отправка данных для тиража ID {result['printrun_id']} ---")
-                                response_data = self.api_service.upload_utilisation_data(result['codes_json'])
-                                upload_id = response_data.get('utilisation_upload_id')
-                                if not upload_id: raise ValueError(f"API не вернуло 'utilisation_upload_id': {response_data}")
-                                all_upload_ids.append(upload_id)
-                                cur.execute("UPDATE delta_result SET utilisation_upload_id = %s WHERE id = %s", (upload_id, result['id']))
-                                self._append_log(f"  Ответ API: {json.dumps(response_data, ensure_ascii=False)}")
-                                time.sleep(1)
-                    elif order_status == 'dmkod':
-                        cur.execute("""
-                            SELECT d.api_id, d.production_date, d.expiry_date, d.id as detail_id, o.fias_code
-                            FROM dmkod_aggregation_details d JOIN orders o ON d.order_id = o.id
-                            WHERE d.order_id = %s AND d.api_id IS NOT NULL AND d.utilisation_upload_id IS NULL
-                        """, (self.order_id,))
-                        details_to_process = cur.fetchall()
-                        if not details_to_process:
-                            self._append_log("Нет новых тиражей для отправки сведений.")
-                        else:
-                            for detail in details_to_process:
-                                attributes = {k: v.strftime('%Y-%m-%d') for k, v in {'production_date': detail.get('production_date'), 'expiration_date': detail.get('expiry_date')}.items() if v}
-                                if detail.get('fias_code'): attributes['fias_id'] = detail['fias_code']
-                                payload = {"all_from_printrun": detail['api_id']}
-                                if attributes: payload['attributes'] = attributes
-                                response_data = self.api_service.upload_utilisation_data(payload)
-                                upload_id = response_data.get('utilisation_upload_id')
-                                if not upload_id: raise ValueError(f"API не вернуло 'utilisation_upload_id': {response_data}")
-                                all_upload_ids.append(upload_id)
-                                cur.execute("UPDATE dmkod_aggregation_details SET utilisation_upload_id = %s WHERE id = %s", (upload_id, detail['detail_id']))
-                                self._append_log(f"  Записи присвоен ID из API: {upload_id}")
-                                time.sleep(1)
-                    conn.commit()
-
-            self._append_log("\n--- Итоговая проверка ---")
-            summary = self.api_service.order_service.get_order_summary(self.order_id)
-            summary_msg_1 = f"По клиенту '{summary['client_name']}' заказу №{self.order_id} всего в заказе {summary['total_products']} товаров. Заказано {summary['ordered_codes']} кодов, получено {summary['received_codes']} кодов."
-            self._append_log(summary_msg_1)
-
-            total_success, total_not_found, total_duplicated = self.api_service.get_aggregated_utilisation_results(self.order_id, order_status)
-            summary_msg_2 = f"Результаты обработки в API: \n  - Успешно принято: {total_success}\n  - Не найдено: {total_not_found}\n  - Дубликаты: {total_duplicated}"
-            self._append_log(summary_msg_2)
-
-            final_prompt = f"{summary_msg_1}\n\n{summary_msg_2}\n\nПодготовить отчет?"
-            return ('ask_prepare_report', final_prompt)
-
-        except Exception as e:
-            logging.error("Ошибка в _prepare_report_data_task", exc_info=True)
-            # Возвращаем ошибку для отображения в основном потоке
-            return ('error', e)
+        # --- ИЗМЕНЕНИЕ: Вызываем новый метод в ApiService, который инкапсулирует всю логику ---
+        self._run_in_thread(self.api_service.prepare_utilisation_data_full_cycle, self.order_id, self._append_log)
 
     def _ask_prepare_report(self, prompt_text):
         """Показывает диалог подтверждения и запускает следующий шаг."""
-        # --- ИЗМЕНЕНИЕ: Используем немодальный диалог с callback'ом ---
-        # --- ИСПРАВЛЕНИЕ: Сохраняем ссылку на диалог в self, чтобы он не был удален сборщиком мусора ---
-        self.msg_box = QMessageBox(self)
-        self.msg_box.setWindowTitle("Подтверждение")
-        self.msg_box.setText(prompt_text)
-        self.msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        self.msg_box.setDefaultButton(QMessageBox.Yes)
-        # Привязываем обработчик к сигналу buttonClicked
-        self.msg_box.buttonClicked.connect(self._handle_prepare_report_dialog_result)
-        self.msg_box.open() # Показываем немодально
-
-    def _handle_prepare_report_dialog_result(self, button):
-        """Обрабатывает результат диалога подтверждения."""
-        if button.text() == "&Yes":
+        reply = QMessageBox.question(self, "Подтверждение", prompt_text, QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
              self._append_log("\nПользователь подтвердил создание отчета. Запускаю...")
              self._prepare_report_flow()
         else: # No или закрытие окна
@@ -999,34 +919,7 @@ class ApiIntegrationFrameQt(QWidget):
     def _prepare_report_flow(self):
         """Запускает полный цикл подготовки отчета о нанесении."""
         self._display_api_response("4. Подготовка отчета", "Запуск операции...")
-        self._run_in_thread(self._prepare_report_task)
-
-    def _prepare_report_task(self):
-        """
-        Задача для подготовки отчета о нанесении. Адаптировано из admin_ui.py.
-        """
-        self._append_log("Начинаю подготовку отчета о нанесении...")
-        try:
-            with self.api_service.order_service._get_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    cur.execute(
-                        "SELECT id, api_id, gtin FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL ORDER BY id",
-                        (self.order_id,)
-                    )
-                    details_to_process = cur.fetchall()
-
-            if not details_to_process:
-                raise Exception("Не найдено позиций с ID тиража (api_id) для подготовки отчета.")
-
-            self._append_log(f"Найдено {len(details_to_process)} позиций для обработки.")
-            for i, detail in enumerate(details_to_process):
-                self._append_log(f"--- {i+1}/{len(details_to_process)}: Отправка запроса для GTIN {detail['gtin']} (ID тиража: {detail['api_id']}) ---")
-                self.api_service.create_utilisation_report({"printrun_id": detail['api_id']})
-                self._append_log(f"  Запрос для тиража {detail['api_id']} успешно отправлен.")
-            return "Отчет об использовании кодов успешно подготовлен и отправлен в АПИ."
-        except Exception as e:
-            logging.error("Ошибка в _prepare_report_task", exc_info=True)
-            return ('error', e)
+        self._run_in_thread(self.api_service.create_utilisation_report_full_cycle, self.order_id, self._append_log)
 
 
 class CodeUploadFrameQt(QWidget):
