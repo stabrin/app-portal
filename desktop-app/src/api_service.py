@@ -338,16 +338,25 @@ class ApiService:
         api_products = order_details_from_api.get('orders', [{}])[0].get('products', [])
         if not api_products:
             raise Exception("API не вернуло список продуктов в заказе.")
+        # --- ИЗМЕНЕНИЕ: Добавлено детальное логирование ---
+        log(f"От API получено {len(api_products)} товаров. GTINs: {[p.get('gtin') for p in api_products]}")
 
         # --- ИСПРАВЛЕНИЕ: Обновляем справочник товаров на основе данных из API ---
         products_to_upsert = [{'gtin': p['gtin'], 'name': p['name']} for p in api_products if p.get('name') and p.get('gtin')]
         if products_to_upsert:
-            log("Обновление локального справочника товаров...")
-            from .utils import upsert_data_to_db
-            upsert_df = pd.DataFrame(products_to_upsert)
-            with self.order_service._get_connection() as conn:
-                with conn.cursor() as cur:
-                    upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+            log(f"Подготовлено к обновлению/вставке {len(products_to_upsert)} товаров в локальный справочник 'products'.")
+            try:
+                from .utils import upsert_data_to_db
+                upsert_df = pd.DataFrame(products_to_upsert)
+                with self.order_service._get_connection() as conn:
+                    with conn.cursor() as cur:
+                        upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+                log("Успешно выполнена операция обновления/вставки в справочник товаров.")
+            except Exception as e:
+                log(f"ОШИБКА при обновлении справочника товаров: {e}")
+                logger.error("Ошибка при обновлении справочника товаров из API", exc_info=True)
+        else:
+            log("Не найдено товаров с GTIN и именем в ответе API для обновления локального справочника.")
 
         gtin_to_api_product_id = {p['gtin']: p['id'] for p in api_products if p.get('state') == 'ACTIVE' and p.get('qty') == p.get('qty_received')}
         details_df['api_product_id'] = details_df['gtin'].map(gtin_to_api_product_id)
