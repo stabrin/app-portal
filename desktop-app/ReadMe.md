@@ -2,6 +2,65 @@
 
 Это десктопное приложение для взаимодействия с базой данных портала.
 
+## Компилятор nuitka (tasks.json)
+```json
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Сборка Release (PySide6)",
+            "type": "shell",
+            "command": "${command:python.interpreterPath}",
+            "args": [
+                "-m",
+                "nuitka",
+                "--standalone",
+                "--mingw64",
+                // "--enable-plugin=tk-inter",
+                "--enable-plugin=pyside6",
+                
+                // Оставляем force, пока не убедимся, что все работает, потом поменяете на disable
+                "--windows-console-mode=disable", 
+                
+                "--output-dir=build",
+                "--output-filename=TildaKod.exe",
+                "--windows-icon-from-ico=ts.ico", 
+                
+                // Явно включаем все необходимые пакеты для надежности
+                "--include-package=pylibdmtx",
+                "--include-package=jinja2",
+                "--include-package=babel",
+                "--include-package=psycopg2",
+                "--include-package=PIL",
+                "--include-package=pandas",
+                "--include-package=requests",
+                "--include-package=bcrypt",
+                "--include-package=dotenv",
+                "--include-package=barcode",
+                
+                // Включаем нужные файлы данных
+                // Автоматически находим и включаем DLL для pylibdmtx
+                // "--include-package-data=pylibdmtx",
+                "--include-data-file=${workspaceFolder}/.venv/Lib/site-packages/pylibdmtx/libdmtx-64.dll=libdmtx-64.dll",
+                "--include-data-file=desktop-app/.env=.env",
+                "--include-data-file=desktop-app/msvcr120.dll=msvcr120.dll",
+                "--include-data-dir=secrets=secrets",
+                
+                "desktop-app/run.py"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            },
+            "problemMatcher": []
+        }
+    ]
+}
+```
 ## Создание установочного файла (.msi)
 
 Для распространения приложения можно создать установочный файл `.msi` с помощью `cx_Freeze`.
@@ -22,7 +81,7 @@
 
     # Зависимости, которые нужно явно включить в сборку
     build_exe_options = {
-        "packages": ["os", "tkinter", "psycopg2", "dotenv", "idna"],
+        "packages": ["os", "tkinter", "psycopg2", "dotenv", "idna", "qrcode", "PIL"],
         "includes": ["tkinter.ttk"],
         "include_files": [
             "keys/",  # Включаем папку с ключами
@@ -99,4 +158,3 @@ git remote set-url origin https://github.com/stabrin/app-portal.git
 `pip freeze > requirements.txt`
 Устаносить бмблиотеки
 `pip install -r requirements.txt`
-
