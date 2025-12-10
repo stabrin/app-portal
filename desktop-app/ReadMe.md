@@ -99,7 +99,7 @@
         version="1.0",
         description="Desktop client for portal",
         options={"build_exe": build_exe_options},
-        executables=[Executable("src/main_window.py", base=base, target_name="TildaKodApp.exe")]
+        executables=[Executable("run.py", base=base, target_name="TildaKodApp.exe")]
     )
     ```
 
