@@ -5098,7 +5098,10 @@ class AdminWindowQt(QMainWindow):
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
             
-            response = method_to_call(**kwargs)
+            # ИСПРАВЛЕНИЕ: Передаем аргументы позиционно, а не как kwargs,
+            # чтобы исправить TypeError для методов, не принимающих именованные аргументы.
+            args = list(kwargs.values())
+            response = method_to_call(*args)
             
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
