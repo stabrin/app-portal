@@ -2453,6 +2453,7 @@ class AdminWindowQt(QMainWindow):
         # --- ИЗМЕНЕНИЕ: Передаем обработчик для повторной аутентификации ---
         self.api_service = ApiService(self.user_info, self.order_service, reauth_handler=self._reauthenticate_api)
         # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+        self._define_endpoint_map() # ИСПРАВЛЕНИЕ: Добавляем вызов для инициализации карты эндпоинтов
         self._build_ui()
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
         self._setup_api_status_checker() # Настраиваем и запускаем проверку API
