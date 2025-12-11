@@ -5167,8 +5167,8 @@ class AdminWindowQt(QMainWindow):
                     )
                     result = cur.fetchone()
                     if result and result[0]:
-                        # Загружаем строку JSON в объект Python
-                        return json.loads(result[0])
+                        # Данные из поля JSON/JSONB уже являются словарем, парсинг не нужен
+                        return result[0]
                     else:
                         return {'error': f'Для тиража ID {printrun_id} не найдено данных в public.delta_result.'}
         except Exception as e:
