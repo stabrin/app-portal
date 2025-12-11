@@ -2495,7 +2495,22 @@ class AdminWindowQt(QMainWindow):
                 'cycle_item_source': 'printruns',
                 'payload_generator': lambda oid, item_id: {'order_id': oid, 'printrun_id': item_id, 'log_callback': None}
             },
-            # ... добавьте другие эндпоинты по аналогии
+            'get_utilisation_upload_status': {
+                'requires_order': True,
+                'is_cyclic': True,
+                'cycle_item_source': 'utilisation_uploads',
+                'payload_generator': lambda oid, item_id: {'upload_id': item_id}
+            },
+            'Загрузка утилизации (delta_result)': {
+                'requires_order': True,
+                'is_cyclic': True,
+                'cycle_item_source': 'printruns',
+                'payload_generator': self._generate_delta_result_payload,
+                # --- Новые ключи для прямого HTTP вызова ---
+                'is_direct_http_call': True,
+                'http_method': 'POST',
+                'http_path': 'utilisation/upload'
+            }
         }
 
     def _reauthenticate_api(self):
@@ -5103,22 +5118,62 @@ class AdminWindowQt(QMainWindow):
         
         try:
             endpoint_info = self.endpoint_map.get(endpoint_name, {})
-            method_name = endpoint_info.get("method_name", endpoint_name)
-            method_to_call = getattr(self.api_service, method_name)
-            
-            self.api_tools_response_text.setPlainText("Выполняется запрос...")
-            QApplication.processEvents()
-            
-            # ИСПРАВЛЕНИЕ: Передаем аргументы позиционно, а не как kwargs,
-            # чтобы исправить TypeError для методов, не принимающих именованные аргументы.
-            args = list(kwargs.values())
-            response = method_to_call(*args)
+
+            # --- ИЗМЕНЕНИЕ: Проверяем, является ли это прямым HTTP-вызовом ---
+            if endpoint_info.get('is_direct_http_call'):
+                http_method_str = endpoint_info.get('http_method', 'POST').lower()
+                http_path = endpoint_info.get('http_path')
+                if not http_path:
+                    raise ValueError("Не определен http_path для прямого вызова API")
+                
+                # Предполагаем, что у api_service есть общий метод для POST-запросов
+                # с сигнатурой post(path, json=payload)
+                if http_method_str != 'post':
+                     raise NotImplementedError(f"Прямые HTTP вызовы поддерживаются только для POST. Запрошен: {http_method_str}")
+
+                self.api_tools_response_text.setPlainText("Выполняется запрос...")
+                QApplication.processEvents()
+                
+                # `kwargs` - это payload из текстового поля
+                response = self.api_service.post(http_path, json=kwargs)
+
+            else: # Оригинальная логика для вызова методов по имени
+                method_name = endpoint_info.get("method_name", endpoint_name)
+                method_to_call = getattr(self.api_service, method_name)
+                
+                self.api_tools_response_text.setPlainText("Выполняется запрос...")
+                QApplication.processEvents()
+                
+                args = list(kwargs.values())
+                response = method_to_call(*args)
             
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
         except Exception as e:
             logging.error(f"Ошибка вызова API через тестер: {e}", exc_info=True)
             self.api_tools_response_text.setPlainText(f"ОШИБКА:\n\n{traceback.format_exc()}")
+
+    def _generate_delta_result_payload(self, order_id, printrun_id):
+        """Генерирует тело запроса из поля public.delta_result.codes_json."""
+        if not printrun_id:
+            return {'error': 'ID Тиража (printrun_id) не выбран.'}
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    # Ищем запись в delta_result по printrun_id
+                    cur.execute(
+                        "SELECT codes_json FROM public.delta_result WHERE printrun_id = %s",
+                        (printrun_id,)
+                    )
+                    result = cur.fetchone()
+                    if result and result[0]:
+                        # Загружаем строку JSON в объект Python
+                        return json.loads(result[0])
+                    else:
+                        return {'error': f'Для тиража ID {printrun_id} не найдено данных в public.delta_result.'}
+        except Exception as e:
+            logging.error(f"Ошибка при генерации payload из delta_result: {e}", exc_info=True)
+            return {'error': f'Ошибка БД: {e}'}
 
     def _build_print_management_page(self):
         """Создает страницу для управления печатью: выбор принтера, просмотр размеров бумаги и тестовая печать."""
