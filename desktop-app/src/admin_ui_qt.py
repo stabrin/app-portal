@@ -2468,8 +2468,10 @@ class AdminWindowQt(QMainWindow):
                 'requires_order': True,
                 'payload_generator': lambda oid, item_id: self.api_service.order_service.get_order_for_api_creation(oid)
             },
-            'get_order_details': {
+            'Детали заказа': {
+                'method_name': 'get_order_details',
                 'requires_order': True,
+                'is_cyclic': False,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
             'get_suborders': {
@@ -5093,7 +5095,9 @@ class AdminWindowQt(QMainWindow):
                 return
         
         try:
-            method_to_call = getattr(self.api_service, endpoint_name)
+            endpoint_info = self.endpoint_map.get(endpoint_name, {})
+            method_name = endpoint_info.get("method_name", endpoint_name)
+            method_to_call = getattr(self.api_service, method_name)
             
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
