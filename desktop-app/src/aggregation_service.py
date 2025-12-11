@@ -93,7 +93,7 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
                 logging.debug(f"Для заказа ID: {order_id} получен client_name: '{client_name}'")
 
                 # Очистка имен для SQL
-                base_view_name_str = f"{client_name[:10]}_{order_id}"
+                base_view_name_str = f"{client_name[:20]}_{order_id}"
                 sanitized_name = re.sub(r'[^\w]', '_', base_view_name_str)
                 sanitized_name = re.sub(r'_+', '_', sanitized_name).strip('_')
                 
@@ -194,18 +194,20 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
     Адаптировано из datamatrix-app.
     """
     logger.debug(f"run_import_from_dmkod: Запуск для order_id={order_id}")
-    logs = [f"Запуск импорта кодов из БД для Заказа №{order_id}..."]
-    conn = None
+    logs = [f"Запуск импорта и агрегации кодов из БД для Заказа №{order_id}..."]
 
+    # --- ИСПРАВЛЕНИЕ: Убраны явные conn.commit(), conn.rollback() и conn.close().
+    # Контекстный менеджер 'with get_client_db_connection(...)' теперь полностью управляет
+    # соединением и транзакцией, что решает проблему с закрытием pooled-соединений.
     try:
-        with get_client_db_connection(user_info) as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
+        with get_client_db_connection(user_info) as conn:
+          with conn.cursor(cursor_factory=RealDictCursor) as cur:
             logging.debug(f"Получено соединение с БД и курсор для заказа ID: {order_id}")
             # 1. Получаем все строки детализации с кодами для этого заказа
             query = """
                 SELECT gtin, api_codes_json, aggregation_level, api_id
                 FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL
             """
-            logger.debug(f"Выполнение запроса для получения деталей: {query % (order_id,)}")
             cur.execute(query, (order_id,))
             all_details_with_codes = cur.fetchall()
 
@@ -303,20 +305,12 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
                 logger.debug(f"Вызов upsert_data_to_db для {len(items_df)} товаров.")
                 upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
 
-            conn.commit()
-            logger.debug(f"run_import_from_dmkod: Транзакция для order_id={order_id} успешно закоммичена.")
-
         logs.append("\nПроцесс импорта и агрегации успешно завершен!")
         logger.info(f"run_import_from_dmkod: Успешное завершение для order_id={order_id}")
     except Exception as e:
         logger.error(f"Ошибка в run_import_from_dmkod для order_id={order_id}: {e}", exc_info=True)
-        if conn:
-            logger.debug(f"run_import_from_dmkod: Выполняется откат транзакции для order_id={order_id}")
-            conn.rollback()
         logs.append(f"\nКРИТИЧЕСКАЯ ОШИБКА: {e}")
         logs.append("Все изменения в базе данных отменены.")
-    finally:
-        if conn: conn.close()
 
     return logs
 

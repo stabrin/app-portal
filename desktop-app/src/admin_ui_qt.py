@@ -410,19 +410,20 @@ class OrderEditorFrameQt(QWidget):
 
     def _create_bartender_view(self):
         """Создает/обновляет представления для Bartender."""
-        progress = QProgressDialog("Выполняется импорт и создание представлений...", "Отмена", 0, 100, self)
+        progress = QProgressDialog("Выполняется импорт кодов и создание представлений...", "Отмена", 0, 100, self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setValue(10)
         
         try:
-            # Сервисный метод теперь инкапсулирует оба шага
+            # --- ИЗМЕНЕНИЕ: Вызываем единый метод из сервиса заказов,
+            # который инкапсулирует всю бизнес-логику.
             result = self.order_service.create_bartender_views_for_order(self.order_id)
             progress.setValue(100)
 
             if result.get('success'):
                 QMessageBox.information(self, "Успех", result.get('message', 'Представления успешно созданы/обновлены.'))
             else:
-                QMessageBox.critical(self, "Ошибка", result.get('message', 'Произошла неизвестная ошибка.'))
+                QMessageBox.critical(self, "Ошибка", result.get('message', 'Произошла неизвестная ошибка. Подробности в лог-файле.'))
         except Exception as e:
             progress.setValue(100)
             QMessageBox.critical(self, "Критическая ошибка", f"Не удалось создать представления: {e}")

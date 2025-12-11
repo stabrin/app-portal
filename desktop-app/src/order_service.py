@@ -151,13 +151,21 @@ class OrderService:
             conn.commit()
         return len(df)
 
-    def create_bartender_views_for_order(self, order_id: int):
+    def create_bartender_views_for_order(self, order_id: int) -> dict:
         """Выполняет импорт кодов и создает/обновляет представления для Bartender."""
-        # Шаг 1: Импорт кодов
-        run_import_from_dmkod(self.user_info, order_id)
-        # Шаг 2: Создание представлений
-        result = create_bartender_views(self.user_info, order_id)
-        return result
+        try:
+            # Шаг 1: Импорт кодов
+            logging.info(f"OrderService: Запуск run_import_from_dmkod для заказа {order_id}")
+            import_logs = run_import_from_dmkod(self.user_info, order_id)
+            if any("КРИТИЧЕСКАЯ ОШИБКА" in log for log in import_logs):
+                error_message = next((log for log in import_logs if "КРИТИЧЕСКАЯ ОШИБКА" in log), "Неизвестная ошибка импорта.")
+                return {"success": False, "message": error_message}
+            # Шаг 2: Создание представлений
+            logging.info(f"OrderService: Запуск create_bartender_views для заказа {order_id}")
+            return create_bartender_views(self.user_info, order_id)
+        except Exception as e:
+            logging.error(f"OrderService: Критическая ошибка в create_bartender_views_for_order для заказа {order_id}: {e}", exc_info=True)
+            return {"success": False, "message": f"Критическая ошибка сервиса: {e}"}
 
     def export_data_for_external_sw(self, order_id: int):
         """Готовит DataFrame для выгрузки данных в формате 'Дельта'."""
