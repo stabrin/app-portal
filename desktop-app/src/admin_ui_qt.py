@@ -5167,29 +5167,29 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
             return
 
-        # Собираем аргументы из текстового поля
-        kwargs = {}
-        if args_text.strip():
-            try:
-                kwargs = json.loads(args_text)
-            except json.JSONDecodeError as e:
-                QMessageBox.critical(self, "Ошибка JSON", f"Некорректный формат JSON в поле аргументов:\n{e}")
-                return
-        
         try:
+            # 1. Собираем аргументы из текстового поля
+            kwargs = {}
+            if args_text.strip():
+                try:
+                    kwargs = json.loads(args_text)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Некорректный формат JSON в поле аргументов:\n{e}")
+
+            # 2. Получаем метод из экземпляра api_service
             method_to_call = getattr(self.api_service, endpoint_name)
+            
+            # 3. Вызываем метод
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
             response = method_to_call(**kwargs)
+            
+            # 4. Отображаем результат
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
         except Exception as e:
             logging.error(f"Ошибка вызова API через тестер: {e}", exc_info=True)
             self.api_tools_response_text.setPlainText(f"ОШИБКА:\n\n{traceback.format_exc()}")
-
-    def _build_print_management_page(self):
-        """Создает страницу для управления макетами печати."""
-        widget = QWidget()
         layout = QVBoxLayout(widget)
 
         controls_layout = QHBoxLayout()
