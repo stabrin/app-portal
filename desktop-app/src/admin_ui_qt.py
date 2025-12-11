@@ -4910,21 +4910,13 @@ class AdminWindowQt(QMainWindow):
         layout = QVBoxLayout(widget)
         form_layout = QFormLayout()
 
-        # 1. Выбор заказа
-        # 1. Выбор эндпоинта (теперь это первый шаг)
+        # 1. Выбор эндпоинта
         self.api_tools_endpoint_combo = QComboBox()
         form_layout.addRow("1. Выберите эндпоинт:", self.api_tools_endpoint_combo)
 
         # 2. Выбор заказа (скрыт по умолчанию)
         self.api_tools_order_label = QLabel("2. Выберите заказ:")
         self.api_tools_order_combo = QComboBox()
-        form_layout.addRow("Выберите заказ:", self.api_tools_order_combo)
-
-        # 2. Выбор эндпоинта
-        self.api_tools_endpoint_combo = QComboBox()
-        form_layout.addRow("Выберите эндпоинт:", self.api_tools_endpoint_combo)
-
-        # 3. Поле для аргументов
         form_layout.addRow(self.api_tools_order_label, self.api_tools_order_combo)
 
         # 3. Выбор элемента цикла (скрыт по умолчанию)
@@ -4935,30 +4927,25 @@ class AdminWindowQt(QMainWindow):
         # 4. Поле для аргументов
         self.api_tools_args_edit = QTextEdit()
         self.api_tools_args_edit.setPlaceholderText(
-            "Введите аргументы в формате JSON, если они требуются.\n"
-            "Например: {\"key\": \"value\", \"number\": 123}"
+            "Аргументы в формате JSON будут сгенерированы автоматически на основе выбора выше.\n"
+            "Вы можете отредактировать их перед отправкой."
         )
-        self.api_tools_args_edit.setPlaceholderText("Аргументы в формате JSON будут сгенерированы автоматически...")
-        self.api_tools_args_edit.setMinimumHeight(80)
-        form_layout.addRow("Аргументы (JSON):", self.api_tools_args_edit)
+        self.api_tools_args_edit.setMinimumHeight(100)
         form_layout.addRow("4. Аргументы (JSON):", self.api_tools_args_edit)
 
         layout.addLayout(form_layout)
 
-        # 4. Кнопка отправки
         # 5. Кнопка отправки
         btn_send = QPushButton("Отправить запрос")
         btn_send.clicked.connect(self._send_api_tool_request)
         layout.addWidget(btn_send)
 
-        # 5. Поле для ответа
         # 6. Поле для ответа
         layout.addWidget(QLabel("Ответ API:"))
         self.api_tools_response_text = QTextEdit()
         self.api_tools_response_text.setReadOnly(True)
         layout.addWidget(self.api_tools_response_text)
 
-        # Заполняем список эндпоинтов
         # Инициализация
         self._populate_api_endpoints()
         self._hide_api_tools_fields()
@@ -5004,9 +4991,14 @@ class AdminWindowQt(QMainWindow):
         """Обработчик смены заказа."""
         endpoint_name = self.api_tools_endpoint_combo.currentText()
         order_id = self.api_tools_order_combo.currentData()
+        
+        # Сбрасываем поле с аргументами и дочерние комбо-боксы
+        self.api_tools_args_edit.clear()
+        self.api_tools_cycle_combo.clear()
+        self.api_tools_cycle_label.setVisible(False)
+        self.api_tools_cycle_combo.setVisible(False)
+
         if not endpoint_name or not order_id:
-            self.api_tools_cycle_label.setVisible(False)
-            self.api_tools_cycle_combo.setVisible(False)
             return
 
         endpoint_info = self.endpoint_map.get(endpoint_name, {})
@@ -5016,8 +5008,6 @@ class AdminWindowQt(QMainWindow):
             self.api_tools_cycle_combo.setVisible(True)
             self._populate_cycle_items(order_id, endpoint_info.get('cycle_item_source'))
         else:
-            self.api_tools_cycle_label.setVisible(False)
-            self.api_tools_cycle_combo.setVisible(False)
             # Генерируем payload для нецикличного эндпоинта
             payload_func = endpoint_info.get('payload_generator')
             if payload_func:
@@ -5030,7 +5020,7 @@ class AdminWindowQt(QMainWindow):
         order_id = self.api_tools_order_combo.currentData()
         item_id = self.api_tools_cycle_combo.currentData()
 
-        if not all([endpoint_name, order_id, item_id]):
+        if not all([endpoint_name, order_id]): # item_id может быть None
             return
 
         endpoint_info = self.endpoint_map.get(endpoint_name, {})
@@ -5042,6 +5032,7 @@ class AdminWindowQt(QMainWindow):
     def _populate_cycle_items(self, order_id, source_type):
         """Заполняет комбобокс элементами для цикличных эндпоинтов."""
         self.api_tools_cycle_combo.clear()
+        self.api_tools_cycle_combo.addItem("Выберите элемент...", userData=None) # Add a placeholder
         try:
             items = []
             if source_type == 'printruns':
@@ -5066,11 +5057,8 @@ class AdminWindowQt(QMainWindow):
         """Загружает все заказы (активные и архивные) для комбобокса в АПИ тестере."""
         self.api_tools_order_combo.clear()
         try:
-            # Загружаем активные
             active_orders = self.order_service.get_orders(is_archive=False)
-            # Загружаем архивные
             archived_orders = self.order_service.get_orders(is_archive=True)
-            
             all_orders = active_orders + archived_orders
             
             for order in sorted(all_orders, key=lambda o: o['id'], reverse=True):
@@ -5079,23 +5067,16 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             logging.error(f"Ошибка загрузки заказов для АПИ тестера: {e}", exc_info=True)
             self.api_tools_order_combo.addItem("Ошибка загрузки заказов")
+
     def _populate_api_endpoints(self):
-        """Заполняет комбобокс эндпоинтов методами из ApiService."""
+        """Заполняет комбобокс эндпоинтов на основе карты `endpoint_map`."""
         self.api_tools_endpoint_combo.clear()
-        try:
-            # Получаем все методы класса ApiService
-            methods = inspect.getmembers(self.api_service, predicate=inspect.ismethod)
-            # Фильтруем, оставляя только публичные методы (не начинаются с '_')
-            public_methods = sorted([name for name, func in methods if not name.startswith('_')])
-            self.api_tools_endpoint_combo.addItems(public_methods)
-        except Exception as e:
-            logging.error(f"Ошибка получения эндпоинтов API: {e}", exc_info=True)
+        self.api_tools_endpoint_combo.addItem("", userData=None) # Add a placeholder
         # Заполняем на основе нашей карты, чтобы избежать лишних методов
         self.api_tools_endpoint_combo.addItems(sorted(self.endpoint_map.keys()))
 
     def _send_api_tool_request(self):
         """Отправляет запрос к выбранному эндпоинту API."""
-        order_id = self.api_tools_order_combo.currentData()
         endpoint_name = self.api_tools_endpoint_combo.currentText()
         args_text = self.api_tools_args_edit.toPlainText()
 
@@ -5103,9 +5084,6 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
             return
 
-        try:
-            # Пытаемся получить метод из экземпляра api_service
-        # Собираем аргументы из текстового поля
         kwargs = {}
         if args_text.strip():
             try:
@@ -5117,70 +5095,11 @@ class AdminWindowQt(QMainWindow):
         try:
             method_to_call = getattr(self.api_service, endpoint_name)
             
-            # Собираем аргументы
-            kwargs = {}
-            if args_text.strip():
-                kwargs = json.loads(args_text)
-            
-            # Вызываем метод
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
+            
             response = method_to_call(**kwargs)
             
-            # Отображаем результат
-            self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
-
-        except Exception as e:
-        return widget
-
-    def _load_orders_for_api_tools(self):
-        """Загружает все заказы (активные и архивные) для комбобокса в АПИ тестере."""
-        self.api_tools_order_combo.clear()
-        try:
-            # Загружаем активные
-            active_orders = self.order_service.get_orders(is_archive=False)
-            # Загружаем архивные
-            archived_orders = self.order_service.get_orders(is_archive=True)
-            
-            all_orders = active_orders + archived_orders
-            
-            for order in sorted(all_orders, key=lambda o: o['id'], reverse=True):
-                display_text = f"Заказ №{order['id']} - {order['client_name']} ({order.get('notes', 'без комментария')})"
-                self.api_tools_order_combo.addItem(display_text, userData=order['id'])
-        except Exception as e:
-            logging.error(f"Ошибка загрузки заказов для АПИ тестера: {e}", exc_info=True)
-            self.api_tools_order_combo.addItem("Ошибка загрузки заказов")
-
-    def _populate_api_endpoints(self):
-        """Заполняет комбобокс эндпоинтов методами из ApiService."""
-        self.api_tools_endpoint_combo.clear()
-        # Заполняем на основе нашей карты, чтобы избежать лишних методов
-        self.api_tools_endpoint_combo.addItems(sorted(self.endpoint_map.keys()))
-
-    def _send_api_tool_request(self):
-        """Отправляет запрос к выбранному эндпоинту API."""
-        order_id = self.api_tools_order_combo.currentData()
-        endpoint_name = self.api_tools_endpoint_combo.currentText()
-        args_text = self.api_tools_args_edit.toPlainText()
-
-        if not endpoint_name:
-            QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
-            return
-
-        # Собираем аргументы из текстового поля
-        kwargs = {}
-        if args_text.strip():
-            try:
-                kwargs = json.loads(args_text)
-            except json.JSONDecodeError as e:
-                QMessageBox.critical(self, "Ошибка JSON", f"Некорректный формат JSON в поле аргументов:\n{e}")
-                return
-        
-        try:
-            method_to_call = getattr(self.api_service, endpoint_name)
-            self.api_tools_response_text.setPlainText("Выполняется запрос...")
-            QApplication.processEvents()
-            response = method_to_call(**kwargs)
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
         except Exception as e:
