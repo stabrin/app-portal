@@ -5103,8 +5103,6 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
             return
 
-        try:
-            # Пытаемся получить метод из экземпляра api_service
         # Собираем аргументы из текстового поля
         kwargs = {}
         if args_text.strip():
@@ -5115,23 +5113,31 @@ class AdminWindowQt(QMainWindow):
                 return
         
         try:
-            method_to_call = getattr(self.api_service, endpoint_name)
-            
-            # Собираем аргументы
+            # 1. Собираем аргументы из текстового поля
             kwargs = {}
             if args_text.strip():
-                kwargs = json.loads(args_text)
+                try:
+                    kwargs = json.loads(args_text)
+                except json.JSONDecodeError as e:
+                    raise ValueError(f"Некорректный формат JSON в поле аргументов:\n{e}")
+
+            # 2. Получаем метод из экземпляра api_service
+            method_to_call = getattr(self.api_service, endpoint_name)
             
             # Вызываем метод
+            # 3. Вызываем метод
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
             response = method_to_call(**kwargs)
             
             # Отображаем результат
+            # 4. Отображаем результат
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
         except Exception as e:
-        return widget
+            logging.error(f"Ошибка вызова API через тестер: {e}", exc_info=True)
+            self.api_tools_response_text.setPlainText(f"ОШИБКА:\n\n{traceback.format_exc()}")
+            return widget
 
     def _load_orders_for_api_tools(self):
         """Загружает все заказы (активные и архивные) для комбобокса в АПИ тестере."""
