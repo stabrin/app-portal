@@ -5076,6 +5076,9 @@ class AdminWindowQt(QMainWindow):
             for order in sorted(all_orders, key=lambda o: o['id'], reverse=True):
                 display_text = f"Заказ №{order['id']} - {order['client_name']} ({order.get('notes', 'без комментария')})"
                 self.api_tools_order_combo.addItem(display_text, userData=order['id'])
+        except Exception as e:
+            logging.error(f"Ошибка загрузки заказов для АПИ тестера: {e}", exc_info=True)
+            self.api_tools_order_combo.addItem("Ошибка загрузки заказов")
     def _populate_api_endpoints(self):
         """Заполняет комбобокс эндпоинтов методами из ApiService."""
         self.api_tools_endpoint_combo.clear()
