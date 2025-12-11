@@ -17,6 +17,7 @@ import logging
 import json
 import time
 from datetime import datetime
+import inspect # НОВЫЙ ИМПОРТ
 import io
 # --- NEW IMPORTS FOR BARCODE GENERATION ---
 from PIL import Image
@@ -2499,6 +2500,7 @@ class AdminWindowQt(QMainWindow):
         item_admin_utilities = QTreeWidgetItem(item_admin, ["Служебные"]) # НОВЫЙ ПОДРАЗДЕЛ
         item_generate_sscc = QTreeWidgetItem(item_admin_utilities, ["Сгенерировать SSCC"]) # НОВЫЙ ПУНКТ
         item_config_save_ini = QTreeWidgetItem(item_admin_utilities, ["Сохранить INI"]) # ПЕРЕМЕЩЕНО
+        item_api_tools = QTreeWidgetItem(item_admin_utilities, ["АПИ Тестер"]) # НОВЫЙ ПУНКТ
         item_upload_lenta = QTreeWidgetItem(item_admin_utilities, ["Загрузить Ленту"]) # НОВЫЙ ПУНКТ
         item_admin_catalogs = QTreeWidgetItem(item_admin, ["Справочники"])
         item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
@@ -2519,6 +2521,7 @@ class AdminWindowQt(QMainWindow):
             'utilities': item_admin_utilities, # Добавляем в словарь
             'generate_sscc': item_generate_sscc, # Добавляем в словарь
             'save_ini': item_config_save_ini,
+            'api_tools': item_api_tools, # Добавляем в словарь
             'upload_lenta': item_upload_lenta,
             'workplaces': item_config_workplaces,
         }
@@ -2556,6 +2559,10 @@ class AdminWindowQt(QMainWindow):
         self.page_print_management = self._build_print_management_page()
         self.content_stack.addWidget(self.page_print_management)
 
+        # Страница 7: АПИ Тестер
+        self.page_api_tools = self._build_api_tools_page()
+        self.content_stack.addWidget(self.page_api_tools)
+
         # Страница 6: Пустая заглушка для остальных
         self.page_placeholder = QWidget()
         placeholder_layout = QVBoxLayout()
@@ -2572,7 +2579,8 @@ class AdminWindowQt(QMainWindow):
             'workplaces': 4,
             'catalogs': 5,
             'print_management': 6,
-            'placeholder': 7,
+            'api_tools': 7,
+            'placeholder': 8,
         }
 
         # Собираем основной layout
@@ -2750,6 +2758,12 @@ class AdminWindowQt(QMainWindow):
             self.content_stack.setCurrentIndex(self.stack_indices['catalogs'])
         elif text == "Управление печатью":
             self.content_stack.setCurrentIndex(self.stack_indices['print_management'])
+        elif text == "АПИ Тестер":
+            try:
+                self._load_orders_for_api_tools()
+            except Exception as e:
+                logging.error(f"Ошибка при загрузке данных для АПИ Тестера: {e}", exc_info=True)
+            self.content_stack.setCurrentIndex(self.stack_indices['api_tools'])
         else:
             # Для всех остальных пунктов пока показываем заглушку
             self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
