@@ -5069,11 +5069,21 @@ class AdminWindowQt(QMainWindow):
             self.api_tools_order_combo.addItem("Ошибка загрузки заказов")
 
     def _populate_api_endpoints(self):
-        """Заполняет комбобокс эндпоинтов на основе карты `endpoint_map`."""
+        """Заполняет комбобокс всеми публичными методами из ApiService."""
         self.api_tools_endpoint_combo.clear()
-        self.api_tools_endpoint_combo.addItem("", userData=None) # Add a placeholder
-        # Заполняем на основе нашей карты, чтобы избежать лишних методов
-        self.api_tools_endpoint_combo.addItems(sorted(self.endpoint_map.keys()))
+        self.api_tools_endpoint_combo.addItem("", userData=None)
+        try:
+            # Получаем все методы из экземпляра ApiService
+            methods = inspect.getmembers(self.api_service, predicate=inspect.ismethod)
+            # Фильтруем, оставляя только публичные методы (не начинаются с '_')
+            public_methods = sorted([
+                name for name, func in methods 
+                if not name.startswith('_')
+            ])
+            self.api_tools_endpoint_combo.addItems(public_methods)
+        except Exception as e:
+            logging.error(f"Ошибка получения эндпоинтов API: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", "Не удалось загрузить эндпоинты API.")
 
     def _send_api_tool_request(self):
         """Отправляет запрос к выбранному эндпоинту API."""
