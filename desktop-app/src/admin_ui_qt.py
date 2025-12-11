@@ -4903,6 +4903,7 @@ class AdminWindowQt(QMainWindow):
         # Эта функция потребует доработки для корректной загрузки JSON
         QMessageBox.information(self, "В разработке", "Импорт сценариев в разработке.")
 
+    # --- ИЗМЕНЕНИЕ: Вся логика АПИ Тестера переработана ---
     def _build_api_tools_page(self):
         """Создает страницу для тестирования эндпоинтов API."""
         widget = QWidget()
@@ -4910,6 +4911,12 @@ class AdminWindowQt(QMainWindow):
         form_layout = QFormLayout()
 
         # 1. Выбор заказа
+        # 1. Выбор эндпоинта (теперь это первый шаг)
+        self.api_tools_endpoint_combo = QComboBox()
+        form_layout.addRow("1. Выберите эндпоинт:", self.api_tools_endpoint_combo)
+
+        # 2. Выбор заказа (скрыт по умолчанию)
+        self.api_tools_order_label = QLabel("2. Выберите заказ:")
         self.api_tools_order_combo = QComboBox()
         form_layout.addRow("Выберите заказ:", self.api_tools_order_combo)
 
@@ -4918,30 +4925,209 @@ class AdminWindowQt(QMainWindow):
         form_layout.addRow("Выберите эндпоинт:", self.api_tools_endpoint_combo)
 
         # 3. Поле для аргументов
+        form_layout.addRow(self.api_tools_order_label, self.api_tools_order_combo)
+
+        # 3. Выбор элемента цикла (скрыт по умолчанию)
+        self.api_tools_cycle_label = QLabel("3. Выберите элемент цикла:")
+        self.api_tools_cycle_combo = QComboBox()
+        form_layout.addRow(self.api_tools_cycle_label, self.api_tools_cycle_combo)
+
+        # 4. Поле для аргументов
         self.api_tools_args_edit = QTextEdit()
         self.api_tools_args_edit.setPlaceholderText(
             "Введите аргументы в формате JSON, если они требуются.\n"
             "Например: {\"key\": \"value\", \"number\": 123}"
         )
+        self.api_tools_args_edit.setPlaceholderText("Аргументы в формате JSON будут сгенерированы автоматически...")
         self.api_tools_args_edit.setMinimumHeight(80)
         form_layout.addRow("Аргументы (JSON):", self.api_tools_args_edit)
+        form_layout.addRow("4. Аргументы (JSON):", self.api_tools_args_edit)
 
         layout.addLayout(form_layout)
 
         # 4. Кнопка отправки
+        # 5. Кнопка отправки
         btn_send = QPushButton("Отправить запрос")
         btn_send.clicked.connect(self._send_api_tool_request)
         layout.addWidget(btn_send)
 
         # 5. Поле для ответа
+        # 6. Поле для ответа
         layout.addWidget(QLabel("Ответ API:"))
         self.api_tools_response_text = QTextEdit()
         self.api_tools_response_text.setReadOnly(True)
         layout.addWidget(self.api_tools_response_text)
 
         # Заполняем список эндпоинтов
+        # Инициализация
         self._populate_api_endpoints()
+        self._hide_api_tools_fields()
 
+        # Привязываем обработчики
+        self.api_tools_endpoint_combo.currentTextChanged.connect(self._on_api_endpoint_changed)
+        self.api_tools_order_combo.currentIndexChanged.connect(self._on_api_order_changed)
+        self.api_tools_cycle_combo.currentIndexChanged.connect(self._on_api_cycle_item_changed)
+
+        return widget
+
+    def _hide_api_tools_fields(self):
+        """Скрывает все опциональные поля на странице АПИ Тестера."""
+        self.api_tools_order_label.setVisible(False)
+        self.api_tools_order_combo.setVisible(False)
+        self.api_tools_cycle_label.setVisible(False)
+        self.api_tools_cycle_combo.setVisible(False)
+        self.api_tools_args_edit.clear()
+
+    def _on_api_endpoint_changed(self, endpoint_name):
+        """Обработчик смены эндпоинта."""
+        self._hide_api_tools_fields()
+        if not endpoint_name:
+            return
+
+        endpoint_info = self.endpoint_map.get(endpoint_name, {})
+        
+        if endpoint_info.get('requires_order'):
+            self.api_tools_order_label.setVisible(True)
+            self.api_tools_order_combo.setVisible(True)
+            # Загружаем заказы, если они еще не загружены
+            if self.api_tools_order_combo.count() == 0:
+                self._load_orders_for_api_tools()
+            # Вызываем обработчик смены заказа, чтобы запустить цепочку
+            self._on_api_order_changed()
+        else:
+            # Если заказ не нужен, сразу генерируем payload
+            payload_func = endpoint_info.get('payload_generator', lambda oid, item_id: {})
+            payload = payload_func(None, None)
+            self.api_tools_args_edit.setPlainText(json.dumps(payload, indent=4, ensure_ascii=False))
+
+    def _on_api_order_changed(self):
+        """Обработчик смены заказа."""
+        endpoint_name = self.api_tools_endpoint_combo.currentText()
+        order_id = self.api_tools_order_combo.currentData()
+        if not endpoint_name or not order_id:
+            self.api_tools_cycle_label.setVisible(False)
+            self.api_tools_cycle_combo.setVisible(False)
+            return
+
+        endpoint_info = self.endpoint_map.get(endpoint_name, {})
+
+        if endpoint_info.get('is_cyclic'):
+            self.api_tools_cycle_label.setVisible(True)
+            self.api_tools_cycle_combo.setVisible(True)
+            self._populate_cycle_items(order_id, endpoint_info.get('cycle_item_source'))
+        else:
+            self.api_tools_cycle_label.setVisible(False)
+            self.api_tools_cycle_combo.setVisible(False)
+            # Генерируем payload для нецикличного эндпоинта
+            payload_func = endpoint_info.get('payload_generator')
+            if payload_func:
+                payload = payload_func(order_id, None)
+                self.api_tools_args_edit.setPlainText(json.dumps(payload, indent=4, ensure_ascii=False))
+
+    def _on_api_cycle_item_changed(self):
+        """Обработчик смены элемента цикла."""
+        endpoint_name = self.api_tools_endpoint_combo.currentText()
+        order_id = self.api_tools_order_combo.currentData()
+        item_id = self.api_tools_cycle_combo.currentData()
+
+        if not all([endpoint_name, order_id, item_id]):
+            return
+
+        endpoint_info = self.endpoint_map.get(endpoint_name, {})
+        payload_func = endpoint_info.get('payload_generator')
+        if payload_func:
+            payload = payload_func(order_id, item_id)
+            self.api_tools_args_edit.setPlainText(json.dumps(payload, indent=4, ensure_ascii=False))
+
+    def _populate_cycle_items(self, order_id, source_type):
+        """Заполняет комбобокс элементами для цикличных эндпоинтов."""
+        self.api_tools_cycle_combo.clear()
+        try:
+            items = []
+            if source_type == 'printruns':
+                ids = self.order_service.get_unique_printrun_ids(order_id)
+                items = [(f"Тираж ID: {id}", id) for id in sorted(list(ids))]
+            elif source_type == 'utilisation_uploads':
+                status = self.order_service.get_order_by_id(order_id).get('status')
+                ids = self.order_service.get_all_utilisation_upload_ids(order_id, status)
+                items = [(f"ID выгрузки: {id}", id) for id in sorted(list(ids))]
+            
+            if not items:
+                self.api_tools_cycle_combo.addItem("Нет элементов для выбора")
+                return
+
+            for text, data in items:
+                self.api_tools_cycle_combo.addItem(text, userData=data)
+        except Exception as e:
+            logging.error(f"Ошибка загрузки элементов цикла: {e}", exc_info=True)
+            self.api_tools_cycle_combo.addItem("Ошибка загрузки")
+
+    def _load_orders_for_api_tools(self):
+        """Загружает все заказы (активные и архивные) для комбобокса в АПИ тестере."""
+        self.api_tools_order_combo.clear()
+        try:
+            # Загружаем активные
+            active_orders = self.order_service.get_orders(is_archive=False)
+            # Загружаем архивные
+            archived_orders = self.order_service.get_orders(is_archive=True)
+            
+            all_orders = active_orders + archived_orders
+            
+            for order in sorted(all_orders, key=lambda o: o['id'], reverse=True):
+                display_text = f"Заказ №{order['id']} - {order['client_name']} ({order.get('notes', 'без комментария')})"
+                self.api_tools_order_combo.addItem(display_text, userData=order['id'])
+    def _populate_api_endpoints(self):
+        """Заполняет комбобокс эндпоинтов методами из ApiService."""
+        self.api_tools_endpoint_combo.clear()
+        try:
+            # Получаем все методы класса ApiService
+            methods = inspect.getmembers(self.api_service, predicate=inspect.ismethod)
+            # Фильтруем, оставляя только публичные методы (не начинаются с '_')
+            public_methods = sorted([name for name, func in methods if not name.startswith('_')])
+            self.api_tools_endpoint_combo.addItems(public_methods)
+        except Exception as e:
+            logging.error(f"Ошибка получения эндпоинтов API: {e}", exc_info=True)
+        # Заполняем на основе нашей карты, чтобы избежать лишних методов
+        self.api_tools_endpoint_combo.addItems(sorted(self.endpoint_map.keys()))
+
+    def _send_api_tool_request(self):
+        """Отправляет запрос к выбранному эндпоинту API."""
+        order_id = self.api_tools_order_combo.currentData()
+        endpoint_name = self.api_tools_endpoint_combo.currentText()
+        args_text = self.api_tools_args_edit.toPlainText()
+
+        if not endpoint_name:
+            QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
+            return
+
+        try:
+            # Пытаемся получить метод из экземпляра api_service
+        # Собираем аргументы из текстового поля
+        kwargs = {}
+        if args_text.strip():
+            try:
+                kwargs = json.loads(args_text)
+            except json.JSONDecodeError as e:
+                QMessageBox.critical(self, "Ошибка JSON", f"Некорректный формат JSON в поле аргументов:\n{e}")
+                return
+        
+        try:
+            method_to_call = getattr(self.api_service, endpoint_name)
+            
+            # Собираем аргументы
+            kwargs = {}
+            if args_text.strip():
+                kwargs = json.loads(args_text)
+            
+            # Вызываем метод
+            self.api_tools_response_text.setPlainText("Выполняется запрос...")
+            QApplication.processEvents()
+            response = method_to_call(**kwargs)
+            
+            # Отображаем результат
+            self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
+
+        except Exception as e:
         return widget
 
     def _load_orders_for_api_tools(self):
