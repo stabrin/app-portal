@@ -4871,6 +4871,108 @@ class AdminWindowQt(QMainWindow):
         # Эта функция потребует доработки для корректной загрузки JSON
         QMessageBox.information(self, "В разработке", "Импорт сценариев в разработке.")
 
+    def _build_api_tools_page(self):
+        """Создает страницу для тестирования эндпоинтов API."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        form_layout = QFormLayout()
+
+        # 1. Выбор заказа
+        self.api_tools_order_combo = QComboBox()
+        form_layout.addRow("Выберите заказ:", self.api_tools_order_combo)
+
+        # 2. Выбор эндпоинта
+        self.api_tools_endpoint_combo = QComboBox()
+        form_layout.addRow("Выберите эндпоинт:", self.api_tools_endpoint_combo)
+
+        # 3. Поле для аргументов
+        self.api_tools_args_edit = QTextEdit()
+        self.api_tools_args_edit.setPlaceholderText(
+            "Введите аргументы в формате JSON, если они требуются.\n"
+            "Например: {\"key\": \"value\", \"number\": 123}"
+        )
+        self.api_tools_args_edit.setMinimumHeight(80)
+        form_layout.addRow("Аргументы (JSON):", self.api_tools_args_edit)
+
+        layout.addLayout(form_layout)
+
+        # 4. Кнопка отправки
+        btn_send = QPushButton("Отправить запрос")
+        btn_send.clicked.connect(self._send_api_tool_request)
+        layout.addWidget(btn_send)
+
+        # 5. Поле для ответа
+        layout.addWidget(QLabel("Ответ API:"))
+        self.api_tools_response_text = QTextEdit()
+        self.api_tools_response_text.setReadOnly(True)
+        layout.addWidget(self.api_tools_response_text)
+
+        # Заполняем список эндпоинтов
+        self._populate_api_endpoints()
+
+        return widget
+
+    def _load_orders_for_api_tools(self):
+        """Загружает все заказы (активные и архивные) для комбобокса в АПИ тестере."""
+        self.api_tools_order_combo.clear()
+        try:
+            # Загружаем активные
+            active_orders = self.order_service.get_orders(is_archive=False)
+            # Загружаем архивные
+            archived_orders = self.order_service.get_orders(is_archive=True)
+            
+            all_orders = active_orders + archived_orders
+            
+            for order in sorted(all_orders, key=lambda o: o['id'], reverse=True):
+                display_text = f"Заказ №{order['id']} - {order['client_name']} ({order.get('notes', 'без комментария')})"
+                self.api_tools_order_combo.addItem(display_text, userData=order['id'])
+        except Exception as e:
+            logging.error(f"Ошибка загрузки заказов для АПИ тестера: {e}", exc_info=True)
+            self.api_tools_order_combo.addItem("Ошибка загрузки заказов")
+
+    def _populate_api_endpoints(self):
+        """Заполняет комбобокс эндпоинтов методами из ApiService."""
+        self.api_tools_endpoint_combo.clear()
+        try:
+            # Получаем все методы класса ApiService
+            methods = inspect.getmembers(self.api_service, predicate=inspect.ismethod)
+            # Фильтруем, оставляя только публичные методы (не начинаются с '_')
+            public_methods = sorted([name for name, func in methods if not name.startswith('_')])
+            self.api_tools_endpoint_combo.addItems(public_methods)
+        except Exception as e:
+            logging.error(f"Ошибка получения эндпоинтов API: {e}", exc_info=True)
+
+    def _send_api_tool_request(self):
+        """Отправляет запрос к выбранному эндпоинту API."""
+        order_id = self.api_tools_order_combo.currentData()
+        endpoint_name = self.api_tools_endpoint_combo.currentText()
+        args_text = self.api_tools_args_edit.toPlainText()
+
+        if not endpoint_name:
+            QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
+            return
+
+        try:
+            # Пытаемся получить метод из экземпляра api_service
+            method_to_call = getattr(self.api_service, endpoint_name)
+            
+            # Собираем аргументы
+            kwargs = {}
+            if args_text.strip():
+                kwargs = json.loads(args_text)
+            
+            # Вызываем метод
+            self.api_tools_response_text.setPlainText("Выполняется запрос...")
+            QApplication.processEvents()
+            response = method_to_call(**kwargs)
+            
+            # Отображаем результат
+            self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
+
+        except Exception as e:
+            logging.error(f"Ошибка вызова API через тестер: {e}", exc_info=True)
+            self.api_tools_response_text.setPlainText(f"ОШИБКА:\n\n{traceback.format_exc()}")
+
     def _build_print_management_page(self):
         """Создает страницу для управления макетами печати."""
         widget = QWidget()
