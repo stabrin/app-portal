@@ -2483,11 +2483,17 @@ class AdminWindowQt(QMainWindow):
                 'requires_order': True,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
-            'create_printrun_json': {
+            'create_utilisation_report_for_printrun': {
                 'requires_order': True,
                 'is_cyclic': True,
                 'cycle_item_source': 'printruns',
-                'payload_generator': lambda oid, item_id: {'printrun_id': item_id}
+                'payload_generator': lambda oid, item_id: {'order_id': oid, 'printrun_id': item_id}
+            },
+            'prepare_utilisation_data_full_cycle': {
+                'requires_order': True,
+                'is_cyclic': True,
+                'cycle_item_source': 'printruns',
+                'payload_generator': lambda oid, item_id: {'order_id': oid, 'printrun_id': item_id, 'log_callback': None}
             },
             # ... добавьте другие эндпоинты по аналогии
         }
