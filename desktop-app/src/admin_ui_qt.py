@@ -2474,7 +2474,8 @@ class AdminWindowQt(QMainWindow):
                 'is_cyclic': False,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
-            'get_suborders': {
+            'Детали запроса': {
+                'method_name': 'get_suborders',
                 'requires_order': True,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
