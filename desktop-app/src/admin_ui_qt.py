@@ -5103,6 +5103,8 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
             return
 
+        try:
+            # Пытаемся получить метод из экземпляра api_service
         # Собираем аргументы из текстового поля
         kwargs = {}
         if args_text.strip():
@@ -5113,31 +5115,23 @@ class AdminWindowQt(QMainWindow):
                 return
         
         try:
-            # 1. Собираем аргументы из текстового поля
-            kwargs = {}
-            if args_text.strip():
-                try:
-                    kwargs = json.loads(args_text)
-                except json.JSONDecodeError as e:
-                    raise ValueError(f"Некорректный формат JSON в поле аргументов:\n{e}")
-
-            # 2. Получаем метод из экземпляра api_service
             method_to_call = getattr(self.api_service, endpoint_name)
             
+            # Собираем аргументы
+            kwargs = {}
+            if args_text.strip():
+                kwargs = json.loads(args_text)
+            
             # Вызываем метод
-            # 3. Вызываем метод
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
             response = method_to_call(**kwargs)
             
             # Отображаем результат
-            # 4. Отображаем результат
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
         except Exception as e:
-            logging.error(f"Ошибка вызова API через тестер: {e}", exc_info=True)
-            self.api_tools_response_text.setPlainText(f"ОШИБКА:\n\n{traceback.format_exc()}")
-            return widget
+        return widget
 
     def _load_orders_for_api_tools(self):
         """Загружает все заказы (активные и архивные) для комбобокса в АПИ тестере."""
@@ -5173,29 +5167,103 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
             return
 
+        # Собираем аргументы из текстового поля
+        kwargs = {}
+        if args_text.strip():
+            try:
+                kwargs = json.loads(args_text)
+            except json.JSONDecodeError as e:
+                QMessageBox.critical(self, "Ошибка JSON", f"Некорректный формат JSON в поле аргументов:\n{e}")
+                return
+        
         try:
-            # 1. Собираем аргументы из текстового поля
-            kwargs = {}
-            if args_text.strip():
-                try:
-                    kwargs = json.loads(args_text)
-                except json.JSONDecodeError as e:
-                    raise ValueError(f"Некорректный формат JSON в поле аргументов:\n{e}")
-
-            # 2. Получаем метод из экземпляра api_service
             method_to_call = getattr(self.api_service, endpoint_name)
-            
-            # 3. Вызываем метод
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
             response = method_to_call(**kwargs)
-            
-            # 4. Отображаем результат
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
         except Exception as e:
             logging.error(f"Ошибка вызова API через тестер: {e}", exc_info=True)
             self.api_tools_response_text.setPlainText(f"ОШИБКА:\n\n{traceback.format_exc()}")
+
+    def _build_print_management_page(self):
+        """Создает страницу для управления печатью: выбор принтера, просмотр размеров бумаги и тестовая печать."""
+        try:
+            import win32print
+            import win32ui
+            import win32con
+            from pywintypes import error as pywin_error
+        except ImportError:
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            layout.addWidget(QLabel("Библиотека 'pywin32' не установлена. Установите ее: pip install pywin32"))
+            return widget
+
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        form_layout = QFormLayout()
+
+        self.paper_sizes_data = {}
+
+        # 1. Выбор принтера
+        self.print_mgmt_printer_combo = QComboBox()
+        form_layout.addRow("Выберите принтер:", self.print_mgmt_printer_combo)
+
+        # 2. Список размеров бумаги
+        self.print_mgmt_paper_list = QTableWidget(0, 2)
+        self.print_mgmt_paper_list.setHorizontalHeaderLabels(["Формат", "Размер (мм)"])
+        self.print_mgmt_paper_list.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.print_mgmt_paper_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.print_mgmt_paper_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.print_mgmt_paper_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+
+        # 3. Кнопка тестовой печати
+        btn_test_print = QPushButton("Напечатать тестовую страницу")
+
+        layout.addLayout(form_layout)
+        layout.addWidget(self.print_mgmt_paper_list)
+        layout.addWidget(btn_test_print)
+
+        def load_printers():
+            try:
+                printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1)]
+                self.print_mgmt_printer_combo.addItems(printers)
+                if printers:
+                    default_printer = win32print.GetDefaultPrinter()
+                    if default_printer in printers:
+                        self.print_mgmt_printer_combo.setCurrentText(default_printer)
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось получить список принтеров:\n{e}")
+
+        def load_paper_sizes():
+            self.print_mgmt_paper_list.setRowCount(0)
+            self.paper_sizes_data.clear()
+            try:
+                h_server = win32print.OpenPrinter(None)
+                forms = win32print.EnumForms(h_server)
+                win32print.ClosePrinter(h_server)
+                for form in forms:
+                    if form['Name'].startswith('Tilda_'):
+                        name = form['Name']
+                        width_mm = form['Size']['cx'] / 1000.0
+                        height_mm = form['Size']['cy'] / 1000.0
+                        self.paper_sizes_data[name] = (width_mm, height_mm)
+                        row = self.print_mgmt_paper_list.rowCount()
+                        self.print_mgmt_paper_list.insertRow(row)
+                        self.print_mgmt_paper_list.setItem(row, 0, QTableWidgetItem(name))
+                        self.print_mgmt_paper_list.setItem(row, 1, QTableWidgetItem(f"{width_mm} x {height_mm}"))
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось получить размеры бумаги.\nПодробности в лог-файле: {e}")
+
+        self.print_mgmt_printer_combo.currentTextChanged.connect(load_paper_sizes)
+        load_printers()
+
+        return widget
+
+    def _build_print_management_page(self):
+        """Создает страницу для управления макетами печати."""
+        widget = QWidget()
         layout = QVBoxLayout(widget)
 
         controls_layout = QHBoxLayout()
