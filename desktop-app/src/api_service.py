@@ -551,7 +551,7 @@ class ApiService:
                     newly_created_upload_ids.append(upload_id)
                     self.order_service.update_delta_result_upload_id(result['id'], upload_id)
                     log(f"  Ответ API: {json.dumps(response_data, ensure_ascii=False)}")
-                    time.sleep(1)
+                    time.sleep(2)
         # Логика для статуса 'dmkod'
         elif order_status == 'dmkod':
             details_to_process = self.order_service.get_dmkod_details_for_upload(order_id)
@@ -569,7 +569,7 @@ class ApiService:
                     newly_created_upload_ids.append(upload_id)
                     self.order_service.update_detail_utilisation_upload_id(detail['detail_id'], upload_id)
                     log(f"  Записи присвоен ID из API: {upload_id}")
-                    time.sleep(1)
+                    time.sleep(2)
 
         log("\n--- Итоговая проверка ---")
         summary = self.order_service.get_order_summary(order_id)
