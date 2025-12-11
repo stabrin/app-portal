@@ -4933,14 +4933,8 @@ class AdminWindowQt(QMainWindow):
     def _populate_api_endpoints(self):
         """Заполняет комбобокс эндпоинтов методами из ApiService."""
         self.api_tools_endpoint_combo.clear()
-        try:
-            # Получаем все методы класса ApiService
-            methods = inspect.getmembers(self.api_service, predicate=inspect.ismethod)
-            # Фильтруем, оставляя только публичные методы (не начинаются с '_')
-            public_methods = sorted([name for name, func in methods if not name.startswith('_')])
-            self.api_tools_endpoint_combo.addItems(public_methods)
-        except Exception as e:
-            logging.error(f"Ошибка получения эндпоинтов API: {e}", exc_info=True)
+        # Заполняем на основе нашей карты, чтобы избежать лишних методов
+        self.api_tools_endpoint_combo.addItems(sorted(self.endpoint_map.keys()))
 
     def _send_api_tool_request(self):
         """Отправляет запрос к выбранному эндпоинту API."""
@@ -4952,21 +4946,20 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Выберите эндпоинт для вызова.")
             return
 
-        try:
-            # Пытаемся получить метод из экземпляра api_service
-            method_to_call = getattr(self.api_service, endpoint_name)
-            
-            # Собираем аргументы
-            kwargs = {}
-            if args_text.strip():
+        # Собираем аргументы из текстового поля
+        kwargs = {}
+        if args_text.strip():
+            try:
                 kwargs = json.loads(args_text)
-            
-            # Вызываем метод
+            except json.JSONDecodeError as e:
+                QMessageBox.critical(self, "Ошибка JSON", f"Некорректный формат JSON в поле аргументов:\n{e}")
+                return
+        
+        try:
+            method_to_call = getattr(self.api_service, endpoint_name)
             self.api_tools_response_text.setPlainText("Выполняется запрос...")
             QApplication.processEvents()
             response = method_to_call(**kwargs)
-            
-            # Отображаем результат
             self.api_tools_response_text.setPlainText(json.dumps(response, indent=4, ensure_ascii=False))
 
         except Exception as e:
