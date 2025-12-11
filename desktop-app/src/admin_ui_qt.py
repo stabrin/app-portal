@@ -2458,6 +2458,37 @@ class AdminWindowQt(QMainWindow):
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
         self._setup_api_status_checker() # Настраиваем и запускаем проверку API
 
+    def _define_endpoint_map(self):
+        """Определяет метаданные для каждого эндпоинта API."""
+        self.endpoint_map = {
+            'get_participants': {'requires_order': False},
+            'authenticate': {'requires_order': False},
+            'refresh_token': {'requires_order': False},
+            'create_order': {
+                'requires_order': True,
+                'payload_generator': lambda oid, item_id: self.api_service.order_service.get_order_for_api_creation(oid)
+            },
+            'get_order_details': {
+                'requires_order': True,
+                'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
+            },
+            'get_suborders': {
+                'requires_order': True,
+                'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
+            },
+            'get_printruns': {
+                'requires_order': True,
+                'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
+            },
+            'create_printrun_json': {
+                'requires_order': True,
+                'is_cyclic': True,
+                'cycle_item_source': 'printruns',
+                'payload_generator': lambda oid, item_id: {'printrun_id': item_id}
+            },
+            # ... добавьте другие эндпоинты по аналогии
+        }
+
     def _reauthenticate_api(self):
         """
         Handles the full re-authentication flow for the API.
