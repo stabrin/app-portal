@@ -2450,10 +2450,8 @@ class AdminWindowQt(QMainWindow):
         self.order_service = OrderService(lambda: get_client_db_connection(self.user_info))
         self.task_service = TaskService(lambda: get_client_db_connection(self.user_info))
         self.supply_notification_service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-        self.catalogs_service = CatalogsService(lambda: get_client_db_connection(self.user_info))
-        # --- ИЗМЕНЕНИЕ: Передаем обработчик для повторной аутентификации ---
-        self.api_service = ApiService(self.user_info, self.order_service, reauth_handler=self._reauthenticate_api)
-        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+        self.catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+        self.api_service = ApiService(self.user_info, self.order_service) # ApiService должен быть инициализирован после всех, так как может их использовать
         self._define_endpoint_map() # ИСПРАВЛЕНИЕ: Добавляем вызов для инициализации карты эндпоинтов
         self._build_ui()
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
