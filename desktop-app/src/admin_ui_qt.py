@@ -2447,8 +2447,8 @@ class AdminWindowQt(QMainWindow):
         self.archive_orders_cache = []
 
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
-        self.order_service = OrderService(lambda: get_client_db_connection(self.user_info))
-        self.task_service = TaskService(lambda: get_client_db_connection(self.user_info))
+        self.order_service = OrderService(self.user_info)
+        self.task_service = TaskService(self.user_info)
         self.supply_notification_service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
         self.catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
         self.api_service = ApiService(self.user_info, self.order_service) # ApiService должен быть инициализирован после всех, так как может их использовать
