@@ -2447,9 +2447,10 @@ class AdminWindowQt(QMainWindow):
         self.archive_orders_cache = []
 
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
-        self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
-        self.order_service = OrderService(self.user_info)
-        self.task_service = TaskService(self.user_info) # НОВЫЙ СЕРВИС
+        self.order_service = OrderService(lambda: get_client_db_connection(self.user_info))
+        self.task_service = TaskService(lambda: get_client_db_connection(self.user_info))
+        self.supply_notification_service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+        self.catalogs_service = CatalogsService(lambda: get_client_db_connection(self.user_info))
         # --- ИЗМЕНЕНИЕ: Передаем обработчик для повторной аутентификации ---
         self.api_service = ApiService(self.user_info, self.order_service, reauth_handler=self._reauthenticate_api)
         # --- КОНЕЦ ИЗМЕНЕНИЯ ---
@@ -5370,6 +5371,173 @@ class AdminWindowQt(QMainWindow):
                 self._refresh_print_layouts()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить макет: {e}")
+
+    # --- NEW METHODS FOR ORDER DOCUMENTS TAB ---
+
+    def _setup_order_docs_tab(self, notification_id, scenario_data):
+        """Настраивает содержимое вкладки 'Документы' для выбранного уведомления."""
+        # Используем _set_tab_content для полной замены содержимого
+        container_widget = QWidget()
+        layout = QVBoxLayout(container_widget)
+
+        # --- Блок для управления файлами ---
+        files_group = QGroupBox("Файлы отгрузки")
+        files_layout = QVBoxLayout(files_group)
+        
+        self.supply_files_table = QTableWidget()
+        self.supply_files_table.setColumnCount(4)
+        self.supply_files_table.setHorizontalHeaderLabels(["ID", "Имя файла", "Тип", "Дата загрузки"])
+        self.supply_files_table.setColumnHidden(0, True)
+        self.supply_files_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.supply_files_table.horizontalHeader().setStretchLastSection(True)
+        files_layout.addWidget(self.supply_files_table)
+
+        buttons_layout = QHBoxLayout()
+        btn_upload = QPushButton("Загрузить файл")
+        btn_upload.clicked.connect(lambda: self._upload_supply_file(notification_id))
+        btn_download = QPushButton("Скачать файл")
+        btn_download.clicked.connect(lambda: self._download_supply_file())
+        btn_delete = QPushButton("Удалить файл")
+        btn_delete.clicked.connect(lambda: self._delete_supply_file(notification_id))
+        
+        buttons_layout.addWidget(btn_upload)
+        buttons_layout.addWidget(btn_download)
+        buttons_layout.addWidget(btn_delete)
+        files_layout.addLayout(buttons_layout)
+        layout.addWidget(files_group)
+
+        # --- Блок для управления комментарием ---
+        comment_group = QGroupBox("Комментарий к отгрузке")
+        comment_layout = QVBoxLayout(comment_group)
+
+        self.supply_comment_edit = QTextEdit()
+        comment_layout.addWidget(self.supply_comment_edit)
+
+        btn_save_comment = QPushButton("Сохранить комментарий")
+        btn_save_comment.clicked.connect(lambda: self._save_supply_notification_comment(notification_id))
+        comment_layout.addWidget(btn_save_comment)
+        layout.addWidget(comment_group)
+        
+        layout.addStretch()
+
+        self._set_tab_content(self.order_docs_tab, container_widget)
+        
+        # Загружаем данные
+        self._load_supply_files(notification_id)
+        self._load_supply_notification_comment(notification_id)
+
+    def _load_supply_files(self, notification_id):
+        """Загружает список файлов для уведомления."""
+        try:
+            files = self.supply_notification_service.get_notification_files(notification_id)
+            self.supply_files_table.setRowCount(0)
+            for file_info in files:
+                row = self.supply_files_table.rowCount()
+                self.supply_files_table.insertRow(row)
+                self.supply_files_table.setItem(row, 0, QTableWidgetItem(str(file_info['id'])))
+                self.supply_files_table.setItem(row, 1, QTableWidgetItem(file_info['filename']))
+                self.supply_files_table.setItem(row, 2, QTableWidgetItem(file_info['file_type']))
+                self.supply_files_table.setItem(row, 3, QTableWidgetItem(file_info['uploaded_at'].strftime('%Y-%m-%d %H:%M:%S')))
+        except Exception as e:
+            logging.error(f"Ошибка загрузки файлов отгрузки: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить список файлов: {e}")
+
+    def _upload_supply_file(self, notification_id):
+        """Загружает новый файл для уведомления."""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Выберите файл для загрузки")
+        if not filepath:
+            return
+
+        file_type, ok = QInputDialog.getText(self, "Тип файла", "Введите тип файла (например, 'invoice', 'packing_list'):")
+        if not ok or not file_type:
+            return
+
+        try:
+            with open(filepath, 'rb') as f:
+                file_data = f.read()
+            
+            filename = os.path.basename(filepath)
+            self.supply_notification_service.add_notification_file(notification_id, filename, file_data, file_type)
+            self._load_supply_files(notification_id)
+            QMessageBox.information(self, "Успех", "Файл успешно загружен.")
+        except Exception as e:
+            logging.error(f"Ошибка загрузки файла: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл: {e}")
+
+    def _download_supply_file(self):
+        """Скачивает выбранный файл."""
+        selected_rows = self.supply_files_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Внимание", "Выберите файл для скачивания.")
+            return
+
+        file_id = int(self.supply_files_table.item(selected_rows[0].row(), 0).text())
+        
+        try:
+            file_data, filename = self.supply_notification_service.get_file_content(file_id)
+            save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", filename)
+            if save_path:
+                with open(save_path, 'wb') as f:
+                    f.write(file_data)
+                QMessageBox.information(self, "Успех", f"Файл '{filename}' успешно сохранен.")
+        except Exception as e:
+            logging.error(f"Ошибка скачивания файла: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось скачать файл: {e}")
+
+    def _delete_supply_file(self, notification_id):
+        """Удаляет выбранный файл."""
+        selected_rows = self.supply_files_table.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "Внимание", "Выберите файл для удаления.")
+            return
+
+        file_id = int(self.supply_files_table.item(selected_rows[0].row(), 0).text())
+        filename = self.supply_files_table.item(selected_rows[0].row(), 1).text()
+
+        reply = QMessageBox.question(self, "Подтверждение", f"Вы уверены, что хотите удалить файл '{filename}'?", QMessageBox.Yes | QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            try:
+                self.supply_notification_service.delete_notification_file(file_id)
+                self._load_supply_files(notification_id)
+                QMessageBox.information(self, "Успех", "Файл удален.")
+            except Exception as e:
+                logging.error(f"Ошибка удаления файла: {e}", exc_info=True)
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить файл: {e}")
+
+    def _load_supply_notification_comment(self, notification_id):
+        """Загружает комментарий из ap_supply_notifications."""
+        try:
+            notification_data = self.supply_notification_service.get_notification_by_id(notification_id)
+            if notification_data and 'comments' in notification_data:
+                self.supply_comment_edit.setText(notification_data['comments'])
+            else:
+                self.supply_comment_edit.clear()
+        except Exception as e:
+            logging.error(f"Ошибка при загрузке комментария к отгрузке: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить комментарий: {e}")
+
+    def _save_supply_notification_comment(self, notification_id):
+        """Сохраняет комментарий в ap_supply_notifications."""
+        try:
+            notification_data = self.supply_notification_service.get_notification_by_id(notification_id)
+            if not notification_data:
+                QMessageBox.warning(self, "Внимание", "Не удалось найти данные об отгрузке для сохранения комментария.")
+                return
+
+            update_data = {
+                'product_groups': notification_data.get('product_groups', []),
+                'planned_arrival_date': notification_data.get('planned_arrival_date'),
+                'vehicle_number': notification_data.get('vehicle_number', ''),
+                'comments': self.supply_comment_edit.toPlainText()
+            }
+
+            self.supply_notification_service.update_notification(notification_id, update_data)
+            QMessageBox.information(self, "Успех", "Комментарий успешно сохранен.")
+        except Exception as e:
+            logging.error(f"Ошибка при сохранении комментария к отгрузке: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить комментарий: {e}")
+
+    # --- END NEW METHODS FOR ORDER DOCUMENTS TAB ---
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
