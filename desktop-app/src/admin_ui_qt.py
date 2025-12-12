@@ -3131,6 +3131,10 @@ class AdminWindowQt(QMainWindow):
         # Сохраняем ID для использования в обработчиках
         frame.notification_id = notification_id
 
+        # --- Блок для управления файлами ---
+        files_group = QGroupBox("Файлы отгрузки")
+        files_layout = QVBoxLayout(files_group)
+
         # Кнопки управления
         controls = QHBoxLayout()
         btn_upload_doc = QPushButton("Загрузить")
@@ -3140,7 +3144,7 @@ class AdminWindowQt(QMainWindow):
         controls.addWidget(btn_download_doc)
         controls.addWidget(btn_delete_doc)
         controls.addStretch()
-        layout.addLayout(controls)
+        files_layout.addLayout(controls)
 
         # Таблица файлов
         files_table = QTableWidget(0, 1)
@@ -3150,17 +3154,61 @@ class AdminWindowQt(QMainWindow):
         files_table.setSelectionMode(QTableWidget.SingleSelection)
         files_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         files_table.setStyleSheet("QTableWidget::item:selected { background-color: #ADD8E6; }")
-        layout.addWidget(files_table)
+        files_layout.addWidget(files_table)
         frame.files_table = files_table # Сохраняем ссылку на таблицу
+        layout.addWidget(files_group)
 
-        # Привязка обработчиков (используем методы от уведомлений, передавая ID)
-        # Мы используем self.current_notification_id, который устанавливается в load_notification_details
-        # Здесь мы его переопределим для контекста заказа
+        # --- Блок для управления комментарием ---
+        comment_group = QGroupBox("Комментарий к отгрузке")
+        comment_layout = QVBoxLayout(comment_group)
+        
+        comment_edit = QTextEdit()
+        comment_layout.addWidget(comment_edit)
+        
+        btn_save_comment = QPushButton("Сохранить комментарий")
+        comment_layout.addWidget(btn_save_comment)
+        comment_group.setLayout(comment_layout)
+        layout.addWidget(comment_group)
+
+        # Привязка обработчиков
         btn_upload_doc.clicked.connect(lambda: self.upload_notification_doc(notification_id))
         btn_download_doc.clicked.connect(lambda: self.download_notification_doc(frame))
         btn_delete_doc.clicked.connect(lambda: self.delete_notification_doc(frame))
+        
+        # --- Новые обработчики для комментария ---
+        def load_comment():
+            try:
+                notif_data = self.supply_notification_service.get_notification_by_id(notification_id)
+                if notif_data:
+                    comment_edit.setText(notif_data.get('comments', ''))
+            except Exception as e:
+                logging.error(f"Ошибка загрузки комментария: {e}", exc_info=True)
 
+        def save_comment():
+            try:
+                notification_data = self.supply_notification_service.get_notification_by_id(notification_id)
+                if not notification_data:
+                    QMessageBox.warning(self, "Внимание", "Не удалось найти данные об отгрузке.")
+                    return
+
+                update_data = {
+                    'product_groups': notification_data.get('product_groups', []),
+                    'planned_arrival_date': notification_data.get('planned_arrival_date'),
+                    'vehicle_number': notification_data.get('vehicle_number', ''),
+                    'comments': comment_edit.toPlainText()
+                }
+                self.supply_notification_service.update_notification(notification_id, update_data)
+                QMessageBox.information(self, "Успех", "Комментарий успешно сохранен.")
+            except Exception as e:
+                logging.error(f"Ошибка сохранения комментария: {e}", exc_info=True)
+                QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить комментарий: {e}")
+
+        btn_save_comment.clicked.connect(save_comment)
+
+        # Загрузка данных
         self.load_notification_files(notification_id, target_table=files_table)
+        load_comment()
+
         return frame
 
     def _build_tasks_page(self):
