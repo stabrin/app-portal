@@ -1283,7 +1283,7 @@ class LabelEditorDialog(QDialog):
     def __init__(self, parent, user_info, catalog_service, layout_data=None):
         super().__init__(parent)
         self.user_info = user_info
-        self.catalog_service = catalog_service
+        self.catalogs_service = catalog_service
         self.is_new_layout = not bool(layout_data)
         self.template = json.loads(json.dumps(layout_data or {})) # Глубокая копия
         title = "Новый макет" if self.is_new_layout else f"Редактор: {self.template.get('name', '')}"
@@ -2112,7 +2112,7 @@ class LabelEditorDialog(QDialog):
 
 
 
-            self.catalog_service.upsert_print_layout(self.template)
+            self.catalogs_service.upsert_print_layout(self.template)
 
 
             super().accept()
@@ -4188,7 +4188,7 @@ class AdminWindowQt(QMainWindow):
         """Обновляет данные в таблице локальных клиентов."""
         try:
             self.local_clients_table.setRowCount(0)
-            clients = self.catalog_service.get_local_clients()
+            clients = self.catalogs_service.get_local_clients()
             for client in clients:
                 row = self.local_clients_table.rowCount()
                 self.local_clients_table.insertRow(row)
@@ -4206,7 +4206,7 @@ class AdminWindowQt(QMainWindow):
         if not ok2: return
 
         try:
-            self.catalog_service.upsert_local_client({'name': name, 'inn': inn})
+            self.catalogs_service.upsert_local_client({'name': name, 'inn': inn})
             self._refresh_local_clients()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось добавить клиента: {e}")
@@ -4226,7 +4226,7 @@ class AdminWindowQt(QMainWindow):
         if not ok2: return
 
         try:
-            self.catalog_service.upsert_local_client({'id': client_id, 'name': name, 'inn': inn})
+            self.catalogs_service.upsert_local_client({'id': client_id, 'name': name, 'inn': inn})
             self._refresh_local_clients()
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось обновить клиента: {e}")
@@ -4241,7 +4241,7 @@ class AdminWindowQt(QMainWindow):
 
         if QMessageBox.question(self, "Подтверждение", f"Удалить клиента '{client_name}'?") == QMessageBox.Yes:
             try:
-                self.catalog_service.delete_local_client(int(client_id))
+                self.catalogs_service.delete_local_client(int(client_id))
                 self._refresh_local_clients()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить клиента: {e}")
@@ -4249,8 +4249,8 @@ class AdminWindowQt(QMainWindow):
     def _export_local_clients(self):
         """Выгружает справочник локальных клиентов в Excel."""
         try:
-            df = self.catalog_service.get_local_clients_template()
-            clients = self.catalog_service.get_local_clients()
+            df = self.catalogs_service.get_local_clients_template()
+            clients = self.catalogs_service.get_local_clients()
             if clients:
                 df = pd.DataFrame(clients)
 
@@ -4267,7 +4267,7 @@ class AdminWindowQt(QMainWindow):
         if not filepath: return
         try:
             df = pd.read_excel(filepath, dtype={'id': str, 'inn': str})
-            self.catalog_service.process_local_clients_import(df)
+            self.catalogs_service.process_local_clients_import(df)
             self._refresh_local_clients()
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
@@ -4299,7 +4299,7 @@ class AdminWindowQt(QMainWindow):
         def refresh_data():
             try:
                 self.participants_table.setRowCount(0)
-                participants = self.catalog_service.get_participants_catalog()
+                participants = self.catalogs_service.get_participants_catalog()
                 for p in participants:
                     row = self.participants_table.rowCount()
                     self.participants_table.insertRow(row)
@@ -4381,7 +4381,7 @@ class AdminWindowQt(QMainWindow):
         """Обновляет данные в таблице товарных групп."""
         try:
             self.product_groups_table.setRowCount(0)
-            groups = self.catalog_service.get_product_groups()
+            groups = self.catalogs_service.get_product_groups()
             for group in groups:
                 row = self.product_groups_table.rowCount()
                 self.product_groups_table.insertRow(row)
@@ -4434,7 +4434,7 @@ class AdminWindowQt(QMainWindow):
                 if not is_new:
                     result['id'] = group_data['id']
                 
-                self.catalog_service.upsert_product_group(result)
+                self.catalogs_service.upsert_product_group(result)
                 self._refresh_product_groups()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить товарную группу: {e}")
@@ -4465,15 +4465,15 @@ class AdminWindowQt(QMainWindow):
 
         if QMessageBox.question(self, "Подтверждение", f"Удалить товарную группу '{group_name}'?") == QMessageBox.Yes:
             try:
-                self.catalog_service.delete_product_group(group_id)
+                self.catalogs_service.delete_product_group(group_id)
                 self._refresh_product_groups()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить товарную группу: {e}")
 
     def _export_product_groups(self):
         try:
-            df = self.catalog_service.get_product_groups_template()
-            groups = self.catalog_service.get_product_groups()
+            df = self.catalogs_service.get_product_groups_template()
+            groups = self.catalogs_service.get_product_groups()
             if groups:
                 df = pd.DataFrame(groups)
 
@@ -4489,7 +4489,7 @@ class AdminWindowQt(QMainWindow):
         if not filepath: return
         try:
             df = pd.read_excel(filepath, dtype={'id': str})
-            self.catalog_service.process_product_groups_import(df)
+            self.catalogs_service.process_product_groups_import(df)
             self._refresh_product_groups()
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
@@ -4543,7 +4543,7 @@ class AdminWindowQt(QMainWindow):
         """Обновляет данные в таблице товарных групп."""
         try:
             self.product_groups_table.setRowCount(0)
-            groups = self.catalog_service.get_product_groups()
+            groups = self.catalogs_service.get_product_groups()
             for group in groups:
                 row = self.product_groups_table.rowCount()
                 self.product_groups_table.insertRow(row)
@@ -4596,7 +4596,7 @@ class AdminWindowQt(QMainWindow):
                 if not is_new:
                     result['id'] = group_data['id']
                 
-                self.catalog_service.upsert_product_group(result)
+                self.catalogs_service.upsert_product_group(result)
                 self._refresh_product_groups()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить товарную группу: {e}")
@@ -4627,15 +4627,15 @@ class AdminWindowQt(QMainWindow):
 
         if QMessageBox.question(self, "Подтверждение", f"Удалить товарную группу '{group_name}'?") == QMessageBox.Yes:
             try:
-                self.catalog_service.delete_product_group(group_id)
+                self.catalogs_service.delete_product_group(group_id)
                 self._refresh_product_groups()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить товарную группу: {e}")
 
     def _export_product_groups(self):
         try:
-            df = self.catalog_service.get_product_groups_template()
-            groups = self.catalog_service.get_product_groups()
+            df = self.catalogs_service.get_product_groups_template()
+            groups = self.catalogs_service.get_product_groups()
             if groups:
                 df = pd.DataFrame(groups)
 
@@ -4651,7 +4651,7 @@ class AdminWindowQt(QMainWindow):
         if not filepath: return
         try:
             df = pd.read_excel(filepath, dtype={'id': str})
-            self.catalog_service.process_product_groups_import(df)
+            self.catalogs_service.process_product_groups_import(df)
             self._refresh_product_groups()
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
@@ -4705,7 +4705,7 @@ class AdminWindowQt(QMainWindow):
         """Обновляет данные в таблице товаров."""
         try:
             self.products_table.setRowCount(0)
-            products = self.catalog_service.get_products()
+            products = self.catalogs_service.get_products()
             for prod in products:
                 row = self.products_table.rowCount()
                 self.products_table.insertRow(row)
@@ -4757,7 +4757,7 @@ class AdminWindowQt(QMainWindow):
                 if not result.get('gtin') or not result.get('name'):
                     raise ValueError("GTIN и Наименование являются обязательными полями.")
                 
-                self.catalog_service.upsert_product(result)
+                self.catalogs_service.upsert_product(result)
                 self._refresh_products()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить товар: {e}")
@@ -4785,15 +4785,15 @@ class AdminWindowQt(QMainWindow):
         gtin = self.products_table.item(sel_row, 0).text()
         if QMessageBox.question(self, "Подтверждение", f"Удалить товар с GTIN '{gtin}'?") == QMessageBox.Yes:
             try:
-                self.catalog_service.delete_product(gtin)
+                self.catalogs_service.delete_product(gtin)
                 self._refresh_products()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить товар: {e}")
 
     def _export_products(self):
         try:
-            df = self.catalog_service.get_products_template()
-            products = self.catalog_service.get_products()
+            df = self.catalogs_service.get_products_template()
+            products = self.catalogs_service.get_products()
             if products:
                 df = pd.DataFrame(products)
 
@@ -4809,7 +4809,7 @@ class AdminWindowQt(QMainWindow):
         if not filepath: return
         try:
             df = pd.read_excel(filepath, dtype={'gtin': str})
-            self.catalog_service.process_products_import(df)
+            self.catalogs_service.process_products_import(df)
             self._refresh_products()
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
@@ -4864,7 +4864,7 @@ class AdminWindowQt(QMainWindow):
         """Обновляет данные в таблице сценариев."""
         try:
             self.scenarios_table.setRowCount(0)
-            scenarios = self.catalog_service.get_marking_scenarios()
+            scenarios = self.catalogs_service.get_marking_scenarios()
             for s in scenarios:
                 row = self.scenarios_table.rowCount()
                 self.scenarios_table.insertRow(row)
@@ -4882,7 +4882,7 @@ class AdminWindowQt(QMainWindow):
         dialog = ScenarioEditorDialog(self, scenario_data)
         if dialog.exec():
             try:
-                self.catalog_service.upsert_marking_scenario(dialog.result)
+                self.catalogs_service.upsert_marking_scenario(dialog.result)
                 self._refresh_scenarios()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить сценарий: {e}")
@@ -4913,7 +4913,7 @@ class AdminWindowQt(QMainWindow):
 
         if QMessageBox.question(self, "Подтверждение", f"Удалить сценарий '{scenario_name}'?") == QMessageBox.Yes:
             try:
-                self.catalog_service.delete_marking_scenario(scenario_id)
+                self.catalogs_service.delete_marking_scenario(scenario_id)
                 self._refresh_scenarios()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить сценарий: {e}")
@@ -5289,7 +5289,7 @@ class AdminWindowQt(QMainWindow):
         logging.debug("Starting refresh of print layouts.")
         try:
             self.print_layouts_table.setRowCount(0)
-            layouts = self.catalog_service.get_print_layouts()
+            layouts = self.catalogs_service.get_print_layouts()
             logging.debug(f"Retrieved {len(layouts)} layouts from catalog_service.")
             self.print_layouts_table.setRowCount(len(layouts))
             for i, layout_data in enumerate(layouts):
@@ -5349,7 +5349,7 @@ class AdminWindowQt(QMainWindow):
             return
         # Создаем глубокую копию, чтобы изменения в диалоге не затрагивали данные в таблице до сохранения
         data_copy = json.loads(json.dumps(layout_data))
-        dialog = LabelEditorDialog(self, self.user_info, self.catalog_service, data_copy)
+        dialog = LabelEditorDialog(self, self.user_info, self.catalogs_service, data_copy)
         if dialog.exec():
             self._refresh_print_layouts()
 
@@ -5365,7 +5365,7 @@ class AdminWindowQt(QMainWindow):
 
         if QMessageBox.question(self, "Подтверждение", f"Вы уверены, что хотите удалить макет '{layout_name}'?") == QMessageBox.Yes:
             try:
-                self.catalog_service.delete_print_layout(layout_name)
+                self.catalogs_service.delete_print_layout(layout_name)
                 self._refresh_print_layouts()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось удалить макет: {e}")
@@ -5899,7 +5899,7 @@ class NotificationEditorDialog(QDialog):
 
         # Инициализация сервисов
         self.service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-        self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+        self.catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
 
         self._build_ui()
         self._load_catalogs()
@@ -5953,10 +5953,10 @@ class NotificationEditorDialog(QDialog):
     def _load_catalogs(self):
         """Загружает данные для выпадающих списков."""
         try:
-            self.scenarios = self.catalog_service.get_marking_scenarios()
+            self.scenarios = self.catalogs_service.get_marking_scenarios()
             self.scenario_combo.addItems([s['name'] for s in self.scenarios])
 
-            self.product_groups = self.catalog_service.get_product_groups()
+            self.product_groups = self.catalogs_service.get_product_groups()
             self.product_group_combo.addItems([pg['display_name'] for pg in self.product_groups])
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить справочники: {e}")
@@ -5970,7 +5970,7 @@ class NotificationEditorDialog(QDialog):
         source = 'api' if scenario.get('scenario_data', {}).get('dm_source') == 'Заказ в ДМ.Код' else 'local'
         self.client_combo.clear()
         try:
-            self.clients = self.catalog_service.get_local_clients() if source == 'local' else self.catalog_service.get_participants_catalog()
+            self.clients = self.catalogs_service.get_local_clients() if source == 'local' else self.catalogs_service.get_participants_catalog()
             self.client_combo.addItems([c['name'] for c in self.clients])
             self.client_source = source
         except Exception as e:
@@ -6014,7 +6014,7 @@ class LentaUploadDialog(QDialog):
 
         # Инициализация сервисов
         self.service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-        self.catalog_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+        self.catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
 
         self._build_ui()
         self._load_catalogs()
@@ -6073,13 +6073,13 @@ class LentaUploadDialog(QDialog):
 
     def _load_catalogs(self):
         try:
-            self.scenarios = self.catalog_service.get_marking_scenarios()
+            self.scenarios = self.catalogs_service.get_marking_scenarios()
             self.scenario_combo.addItems([s['name'] for s in self.scenarios])
 
-            self.clients = self.catalog_service.get_local_clients()
+            self.clients = self.catalogs_service.get_local_clients()
             self.client_combo.addItems([c['name'] for c in self.clients])
 
-            self.product_groups = self.catalog_service.get_product_groups()
+            self.product_groups = self.catalogs_service.get_product_groups()
             self.product_group_combo.addItems([pg['display_name'] for pg in self.product_groups])
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить справочники: {e}")
