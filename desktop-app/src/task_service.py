@@ -75,27 +75,43 @@ class TaskService:
                     raise ValueError(f"Задача #{task_id} не найдена.")
                 order_id = task_data['order_id']
 
-                # 2. Получить сценарий заказа, чтобы определить источник КМ
+                # 2. Получить ID сценария из заказа
                 cur.execute("SELECT scenario_id FROM orders WHERE id = %s", (order_id,))
                 order_data = cur.fetchone()
-                dm_source = order_data['scenario_id'] if order_data and order_data.get('scenario_id') else None
+                scenario_id = order_data['scenario_id'] if order_data and order_data.get('scenario_id') else None
+
+                if not scenario_id:
+                    logging.warning(f"Для заказа #{order_id} не указан ID сценария. Пул не будет наполнен.")
+                    return
+
+                # 3. Получить детали сценария и извлечь dm_source
+                cur.execute("SELECT scenario_data FROM public.ap_marking_scenarios WHERE id = %s", (scenario_id,))
+                scenario_data_row = cur.fetchone()
+                scenario_data = scenario_data_row['scenario_data'] if scenario_data_row and scenario_data_row.get('scenario_data') else {}
                 
-                logging.info(f"Для заказа #{order_id} (задача #{task_id}) источник КМ: {dm_source}")
+                if isinstance(scenario_data, str):
+                    try:
+                        scenario_data = json.loads(scenario_data)
+                    except json.JSONDecodeError:
+                        scenario_data = {}
+
+                dm_source = scenario_data.get('dm_source')
+                logging.info(f"Для заказа #{order_id} (сценарий ID: {scenario_id}) источник КМ: '{dm_source}'")
 
                 codes_to_insert = []
-                # 3. Извлечь коды в зависимости от источника
-                if dm_source == 'dmkod':
+                # 4. Извлечь коды в зависимости от источника
+                if dm_source == 'Заказ в ДМ.Код':
                     cur.execute("SELECT api_codes_json FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
                     all_details = cur.fetchall()
                     for detail in all_details:
                         if detail['api_codes_json']:
                             codes_to_insert.extend(detail['api_codes_json'])
-                elif dm_source == 'items':
+                elif dm_source == 'Файлы клиента (csv, txt)':
                     cur.execute("SELECT datamatrix FROM items WHERE order_id = %s AND datamatrix IS NOT NULL", (order_id,))
                     fetched_codes = cur.fetchall()
                     codes_to_insert.extend([row['datamatrix'] for row in fetched_codes])
                 else:
-                    logging.warning(f"Неизвестный или не указанный dm_source ('{dm_source}') для задачи #{task_id}. Пул не будет наполнен.")
+                    logging.warning(f"Неизвестный или неподдерживаемый dm_source ('{dm_source}') для задачи #{task_id}. Пул не будет наполнен.")
                     return # Не считаем это ошибкой, просто выходим
 
                 if not codes_to_insert:
@@ -104,11 +120,11 @@ class TaskService:
 
                 logging.info(f"Найдено {len(codes_to_insert)} кодов для задачи #{task_id}.")
 
-                # 4. Очистить старые записи для этой задачи (для идемпотентности)
+                # 5. Очистить старые записи для этой задачи (для идемпотентности)
                 cur.execute("DELETE FROM task_datamatrix_pool WHERE task_id = %s", (task_id,))
                 logging.info(f"Старые записи в пуле для задачи #{task_id} удалены.")
 
-                # 5. Вставить новые коды
+                # 6. Вставить новые коды
                 from psycopg2.extras import execute_values
                 insert_data = [(task_id, code, 'available') for code in set(codes_to_insert)] # Используем set для удаления дублей
                 
