@@ -577,7 +577,7 @@ class TaskEditorFrameQt(QWidget):
             refinement_layout.addStretch()
             refinement_layout.setContentsMargins(0, 0, 0, 0)
             
-            self.refinement_label = QLabel("Уточнения для SSCC:")
+            self.refinement_label = QLabel("Дополнительно:")
             marking_layout.addRow(self.refinement_label, refinement_widget)
             self.refinement_widget = refinement_widget # To control visibility
             # --- END NEW ---
@@ -659,6 +659,28 @@ class TaskEditorFrameQt(QWidget):
         status = self.task_data.get('status')
         self.btn_take_in_work.setEnabled(status == 'new')
         self.btn_complete.setEnabled(status == 'in_progress')
+
+
+    def _update_status(self, new_status):
+        """Обновляет статус задачи и инициирует соответствующие серверные процессы."""
+        task_id = self.task_data['id']
+        try:
+            # Предполагается, что update_task_status на сервисе теперь будет запускать
+            # наполнение пула при статусе 'in_progress'
+            self.task_service.update_task_status(task_id, new_status)
+            self.task_data['status'] = new_status  # Обновляем локальные данные
+
+            message = f"Статус задачи обновлен на '{new_status}'."
+            if new_status == 'in_progress':
+                message += "\nЗапущено наполнение пула кодов DataMatrix."
+            
+            QMessageBox.information(self, "Успех", message)
+
+            # Обновляем UI
+            self.main_app_window.load_tasks()
+            self._load_task_details() # Перезагружаем детали, чтобы обновить состояние кнопок
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось обновить статус: {e}")
 
 
     def _save_changes(self):

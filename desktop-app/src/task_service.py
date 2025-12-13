@@ -58,11 +58,84 @@ class TaskService:
                 cur.execute("SELECT * FROM production_tasks WHERE order_id = %s", (order_id,))
                 return cur.fetchone()
 
+    def _populate_datamatrix_pool(self, task_id, conn):
+        """
+        Наполняет пул кодов DataMatrix для задачи.
+        Вызывается при переводе задачи в статус 'in_progress'.
+        Все операции выполняются с переданным соединением 'conn'.
+        """
+        logging.info(f"Начало наполнения пула DataMatrix для задачи #{task_id}.")
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            try:
+                # 1. Получить order_id для данной задачи
+                cur.execute("SELECT order_id FROM production_tasks WHERE id = %s", (task_id,))
+                task_data = cur.fetchone()
+                if not task_data:
+                    logging.error(f"Задача #{task_id} не найдена. Наполнение пула прервано.")
+                    raise ValueError(f"Задача #{task_id} не найдена.")
+                order_id = task_data['order_id']
+
+                # 2. Получить сценарий заказа, чтобы определить источник КМ
+                cur.execute("SELECT scenario FROM orders WHERE id = %s", (order_id,))
+                order_data = cur.fetchone()
+                scenario = json.loads(order_data['scenario']) if order_data and order_data.get('scenario') else {}
+                dm_source = scenario.get('dm_source')
+                
+                logging.info(f"Для заказа #{order_id} (задача #{task_id}) источник КМ: {dm_source}")
+
+                codes_to_insert = []
+                # 3. Извлечь коды в зависимости от источника
+                if dm_source == 'dmkod':
+                    cur.execute("SELECT api_codes_json FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
+                    all_details = cur.fetchall()
+                    for detail in all_details:
+                        if detail['api_codes_json']:
+                            codes_to_insert.extend(detail['api_codes_json'])
+                elif dm_source == 'items':
+                    cur.execute("SELECT datamatrix FROM items WHERE order_id = %s AND datamatrix IS NOT NULL", (order_id,))
+                    fetched_codes = cur.fetchall()
+                    codes_to_insert.extend([row['datamatrix'] for row in fetched_codes])
+                else:
+                    logging.warning(f"Неизвестный или не указанный dm_source ('{dm_source}') для задачи #{task_id}. Пул не будет наполнен.")
+                    return # Не считаем это ошибкой, просто выходим
+
+                if not codes_to_insert:
+                    logging.warning(f"Не найдено кодов для наполнения пула для задачи #{task_id}.")
+                    return
+
+                logging.info(f"Найдено {len(codes_to_insert)} кодов для задачи #{task_id}.")
+
+                # 4. Очистить старые записи для этой задачи (для идемпотентности)
+                cur.execute("DELETE FROM task_datamatrix_pool WHERE task_id = %s", (task_id,))
+                logging.info(f"Старые записи в пуле для задачи #{task_id} удалены.")
+
+                # 5. Вставить новые коды
+                from psycopg2.extras import execute_values
+                insert_data = [(task_id, code, 'available') for code in set(codes_to_insert)] # Используем set для удаления дублей
+                
+                execute_values(
+                    cur,
+                    "INSERT INTO task_datamatrix_pool (task_id, datamatrix, status) VALUES %s",
+                    insert_data
+                )
+                
+                logging.info(f"Успешно вставлено {len(insert_data)} кодов в task_datamatrix_pool для задачи #{task_id}.")
+
+            except Exception as e:
+                logging.error(f"Критическая ошибка при наполнении пула DataMatrix для задачи #{task_id}: {e}")
+                raise # Перевыбрасываем исключение, чтобы транзакция откатилась
+
     def update_task_status(self, task_id, status):
-        """Обновляет статус задачи."""
+        """Обновляет статус задачи и запускает связанные процессы."""
         with self._get_connection() as conn:
+            # Все операции выполняются в одной транзакции
             with conn.cursor() as cur:
                 cur.execute("UPDATE production_tasks SET status = %s WHERE id = %s", (status, task_id))
+            
+            # Если задача переводится в работу, наполняем пул кодов
+            if status == 'in_progress':
+                self._populate_datamatrix_pool(task_id, conn)
+
             conn.commit()
             logging.info(f"Статус задачи #{task_id} обновлен на '{status}'.")
 
