@@ -58,9 +58,9 @@ class TaskService:
                 cur.execute("SELECT * FROM production_tasks WHERE order_id = %s", (order_id,))
                 return cur.fetchone()
 
-    def get_task_by_employee_pass(self, access_code):
+    def get_task_by_employee_pass(self, access_code, operator_name):
         """
-        Проверяет код-пропуск сотрудника и, в случае успеха, возвращает
+        Проверяет код-пропуск, СОХРАНЯЕТ ФИО ОПЕРАТОРА, и возвращает
         всю необходимую информацию о задаче для начала работы.
         """
         with self._get_connection() as conn:
@@ -78,7 +78,14 @@ class TaskService:
                 employee_id = employee_data['id']
                 task_id = employee_data['task_id']
 
-                # 2. Получить основную информацию о задаче и заказе
+                # 2. Обновить ФИО сотрудника
+                cur.execute(
+                    "UPDATE task_employees SET employee_name = %s WHERE id = %s",
+                    (operator_name, employee_id)
+                )
+                logging.info(f"Сохранено ФИО '{operator_name}' для сотрудника #{employee_id}")
+
+                # 3. Получить основную информацию о задаче и заказе
                 cur.execute(
                     """
                     SELECT
@@ -102,11 +109,11 @@ class TaskService:
                 if not task_info:
                     return {'is_valid': False, 'error': 'Задача, связанная с пропуском, не найдена'}
 
-                # 3. Проверить, что задача в статусе 'in_progress'
+                # 4. Проверить, что задача в статусе 'in_progress'
                 if task_info['status'] != 'in_progress':
                     return {'is_valid': False, 'error': f"Задача не находится в статусе 'in_progress' (текущий статус: {task_info['status']})"}
 
-                # 4. Получить список уникальных GTIN для этой задачи
+                # 5. Получить список уникальных GTIN для этой задачи
                 cur.execute(
                     "SELECT DISTINCT gtin FROM task_datamatrix_pool WHERE task_id = %s ORDER BY gtin",
                     (task_id,)
@@ -117,13 +124,17 @@ class TaskService:
                 if not available_gtins:
                     return {'is_valid': False, 'error': 'В пуле кодов для этой задачи нет доступных GTIN.'}
 
-                # 5. Собрать и вернуть результат
+                # 6. Собрать результат
                 result = {
                     'is_valid': True,
                     'employee_id': employee_id,
                     'gtins': available_gtins,
                     **task_info # Распаковываем словарь с информацией о задаче
                 }
+                
+                # 7. Зафиксировать изменения в БД
+                conn.commit()
+
                 return result
 
     def _populate_datamatrix_pool(self, task_id, conn):

@@ -26,35 +26,52 @@ class OperatorLoginWindow(QDialog):
         
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        
-        label = QLabel("Отсканируйте ваш пропуск для начала работы")
-        label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(label)
-        
+        form_layout = QFormLayout()
+
+        # 1. Поле для ФИО
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Введите или отсканируйте ФИО")
+        form_layout.addRow("ФИО Оператора:", self.name_input)
+
+        # 2. Поле для кода-пропуска
         self.access_code_input = QLineEdit()
-        self.access_code_input.setPlaceholderText("Ожидание сканирования кода...")
-        self.access_code_input.returnPressed.connect(self.process_login)
-        layout.addWidget(self.access_code_input)
+        self.access_code_input.setPlaceholderText("Ожидание сканирования кода-пропуска...")
+        # Подсказка системе ввода, что здесь предпочтительна латиница
+        self.access_code_input.setInputMethodHints(Qt.ImhNoPredictiveText | Qt.ImhLatinOnly)
+        form_layout.addRow("Код-пропуск:", self.access_code_input)
         
-        self.setLayout(layout)
+        layout.addLayout(form_layout)
+
+        # Логика переключения фокуса и отправки
+        self.name_input.returnPressed.connect(self.access_code_input.setFocus)
+        self.access_code_input.returnPressed.connect(self.process_login)
         
     def process_login(self):
         """
-        Обрабатывает введенный код доступа.
+        Обрабатывает введенные данные и выполняет вход.
         """
+        operator_name = self.name_input.text().strip()
+        if not operator_name:
+            QMessageBox.warning(self, "Ошибка", "Поле 'ФИО Оператора' обязательно для заполнения.")
+            self.name_input.setFocus()
+            return
+
         access_code = self.access_code_input.text().strip()
         if not access_code:
+            QMessageBox.warning(self, "Ошибка", "Отсканируйте или введите код-пропуск.")
+            self.access_code_input.setFocus()
             return
             
-        logging.info(f"Попытка входа с кодом-пропуском: {access_code}")
+        logging.info(f"Попытка входа: Оператор '{operator_name}', код-пропуск: {access_code}")
         
         try:
-            # Шаг 2.1 плана: валидация пропуска и получение данных
-            task_info = self.task_service.get_task_by_employee_pass(access_code)
+            # Передаем ФИО в сервисный метод для сохранения
+            task_info = self.task_service.get_task_by_employee_pass(access_code, operator_name)
             
             if task_info and task_info.get('is_valid'):
                 logging.info(f"Успешный вход для сотрудника #{task_info['employee_id']} в задачу #{task_info['task_id']}")
-                self.task_info = task_info # Сохраняем информацию для передачи
+                self.task_info = task_info
+                self.task_info['operator_name'] = operator_name # Добавляем ФИО в результат для UI
                 self.accept() # Закрываем диалог с успешным результатом
 
             else:
@@ -62,6 +79,7 @@ class OperatorLoginWindow(QDialog):
                 logging.warning(f"Неудачная попытка входа с кодом: {access_code}. Причина: {error_message}")
                 QMessageBox.warning(self, "Ошибка входа", f"{error_message}\nПопробуйте еще раз.")
                 self.access_code_input.clear()
+                self.access_code_input.setFocus()
                 
         except Exception as e:
             logging.error(f"Ошибка при проверке кода-пропуска: {e}", exc_info=True)
@@ -73,6 +91,6 @@ class OperatorLoginWindow(QDialog):
         return self.task_info
 
     def showEvent(self, event):
-        """Гарантирует, что поле ввода в фокусе при показе окна."""
+        """Гарантирует, что поле ввода ФИО в фокусе при показе окна."""
         super().showEvent(event)
-        self.access_code_input.setFocus()
+        self.name_input.setFocus()
