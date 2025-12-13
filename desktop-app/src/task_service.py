@@ -76,10 +76,9 @@ class TaskService:
                 order_id = task_data['order_id']
 
                 # 2. Получить сценарий заказа, чтобы определить источник КМ
-                cur.execute("SELECT scenario FROM orders WHERE id = %s", (order_id,))
+                cur.execute("SELECT scenario_id FROM orders WHERE id = %s", (order_id,))
                 order_data = cur.fetchone()
-                scenario = json.loads(order_data['scenario']) if order_data and order_data.get('scenario') else {}
-                dm_source = scenario.get('dm_source')
+                dm_source = order_data['scenario_id'] if order_data and order_data.get('scenario_id') else None
                 
                 logging.info(f"Для заказа #{order_id} (задача #{task_id}) источник КМ: {dm_source}")
 
