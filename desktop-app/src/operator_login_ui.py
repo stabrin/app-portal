@@ -2,7 +2,7 @@
 
 import logging
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QLineEdit, QMessageBox
+    QDialog, QVBoxLayout, QLabel, QLineEdit, QMessageBox, QFormLayout
 )
 from PySide6.QtCore import Qt
 
