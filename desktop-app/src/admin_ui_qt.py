@@ -39,6 +39,8 @@ from psycopg2.extras import RealDictCursor # ИСПРАВЛЕНИЕ: Добав�
 from .sscc_service import generate_sscc, read_and_increment_counter # НОВОЕ: Импорт для генерации SSCC
 from .order_service import OrderService # НОВЫЙ СЕРВИС
 from .task_service import TaskService # НОВЫЙ СЕРВИС
+from .operator_login_ui import OperatorLoginWindow
+from .operator_work_ui import OperatorWorkWindow
 import base64
 import os
 import re # ИСПРАВЛЕНИЕ: Добавляем импорт модуля re
@@ -2882,6 +2884,25 @@ class AdminWindowQt(QMainWindow):
             # Для всех остальных пунктов пока показываем заглушку
             self.content_stack.setCurrentIndex(self.stack_indices['placeholder'])
 
+    def _open_operator_mode(self):
+        """Открывает диалог входа для оператора."""
+        logging.info("Открытие окна входа в режим оператора.")
+        
+        login_dialog = OperatorLoginWindow(self.task_service, self)
+        
+        if login_dialog.exec(): # exec() returns QDialog.Accepted on accept()
+            task_info = login_dialog.get_task_info()
+            if task_info:
+                logging.info(f"Вход в режим оператора успешен. Задача: {task_info['task_id']}")
+                # Создаем и показываем основное окно оператора
+                # Оно становится модальным для главного окна, блокируя его
+                self.operator_window = OperatorWorkWindow(self.task_service, task_info, self)
+                self.operator_window.show()
+            else:
+                 logging.error("Диалог входа вернул 'Accepted', но информация о задаче пуста.")
+        else:
+            logging.info("Вход в режим оператора отменен.")
+
     def _build_welcome_page(self):
         """Страница приветствия при открытии админ-интерфейса."""
         widget = QWidget()
@@ -2896,6 +2917,25 @@ class AdminWindowQt(QMainWindow):
         welcome_label.setFont(welcome_font)
         welcome_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(welcome_label)
+
+        # --- NEW: Operator Mode Button ---
+        operator_mode_btn = QPushButton("Режим оператора")
+        operator_mode_btn.setMinimumHeight(40)
+        operator_font = operator_mode_btn.font()
+        operator_font.setPointSize(14)
+        operator_mode_btn.setFont(operator_font)
+        operator_mode_btn.clicked.connect(self._open_operator_mode)
+        
+        # Add some spacing and constrain the button width
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_layout.addWidget(operator_mode_btn)
+        btn_layout.addStretch()
+        operator_mode_btn.setMaximumWidth(300)
+
+        layout.addSpacing(20)
+        layout.addLayout(btn_layout)
+        # --- END NEW ---
 
         layout.addStretch()
         widget.setLayout(layout)

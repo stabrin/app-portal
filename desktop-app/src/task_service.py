@@ -58,6 +58,74 @@ class TaskService:
                 cur.execute("SELECT * FROM production_tasks WHERE order_id = %s", (order_id,))
                 return cur.fetchone()
 
+    def get_task_by_employee_pass(self, access_code):
+        """
+        Проверяет код-пропуск сотрудника и, в случае успеха, возвращает
+        всю необходимую информацию о задаче для начала работы.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1. Найти сотрудника и связанную задачу по коду-пропуску
+                cur.execute(
+                    "SELECT id, task_id FROM task_employees WHERE access_code = %s",
+                    (access_code,)
+                )
+                employee_data = cur.fetchone()
+
+                if not employee_data:
+                    return {'is_valid': False, 'error': 'Код-пропуск не найден'}
+
+                employee_id = employee_data['id']
+                task_id = employee_data['task_id']
+
+                # 2. Получить основную информацию о задаче и заказе
+                cur.execute(
+                    """
+                    SELECT
+                        pt.id AS task_id,
+                        pt.task_type,
+                        pt.status,
+                        pt.settings_json,
+                        o.id AS order_id,
+                        o.client_name
+                    FROM
+                        production_tasks pt
+                    JOIN
+                        orders o ON pt.order_id = o.id
+                    WHERE
+                        pt.id = %s
+                    """,
+                    (task_id,)
+                )
+                task_info = cur.fetchone()
+
+                if not task_info:
+                    return {'is_valid': False, 'error': 'Задача, связанная с пропуском, не найдена'}
+
+                # 3. Проверить, что задача в статусе 'in_progress'
+                if task_info['status'] != 'in_progress':
+                    return {'is_valid': False, 'error': f"Задача не находится в статусе 'in_progress' (текущий статус: {task_info['status']})"}
+
+                # 4. Получить список уникальных GTIN для этой задачи
+                cur.execute(
+                    "SELECT DISTINCT gtin FROM task_datamatrix_pool WHERE task_id = %s ORDER BY gtin",
+                    (task_id,)
+                )
+                gtins_data = cur.fetchall()
+                available_gtins = [row['gtin'] for row in gtins_data]
+
+                if not available_gtins:
+                    return {'is_valid': False, 'error': 'В пуле кодов для этой задачи нет доступных GTIN.'}
+
+                # 5. Собрать и вернуть результат
+                result = {
+                    'is_valid': True,
+                    'employee_id': employee_id,
+                    'gtins': available_gtins,
+                    **task_info # Распаковываем словарь с информацией о задаче
+                }
+                return result
+
     def _populate_datamatrix_pool(self, task_id, conn):
         """
         Наполняет пул кодов DataMatrix для задачи.
