@@ -98,43 +98,59 @@ class TaskService:
                 dm_source = scenario_data.get('dm_source')
                 logging.info(f"Для заказа #{order_id} (сценарий ID: {scenario_id}) источник КМ: '{dm_source}'")
 
-                codes_to_insert = []
-                # 4. Извлечь коды в зависимости от источника
+                insert_data = []
+                # 4. Извлечь коды и GTIN в зависимости от источника
                 if dm_source == 'Заказ в ДМ.Код':
-                    cur.execute("SELECT api_codes_json FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
+                    cur.execute("SELECT gtin, api_codes_json FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
                     all_details = cur.fetchall()
                     for detail in all_details:
-                        if detail['api_codes_json']:
-                            codes_to_insert.extend(detail['api_codes_json'])
+                        gtin = detail.get('gtin')
+                        codes_json = detail.get('api_codes_json')
+                        if not gtin or not codes_json:
+                            continue
+                        
+                        # api_codes_json может быть строкой, парсим ее
+                        if isinstance(codes_json, str):
+                            try:
+                                codes_json = json.loads(codes_json)
+                            except json.JSONDecodeError:
+                                logging.warning(f"Не удалось распарсить JSON с кодами для GTIN {gtin}.")
+                                continue
+                        
+                        codes = codes_json.get('codes', [])
+                        for code in codes:
+                            insert_data.append((task_id, gtin, code, 'available'))
+
                 elif dm_source == 'Файлы клиента (csv, txt)':
-                    cur.execute("SELECT datamatrix FROM items WHERE order_id = %s AND datamatrix IS NOT NULL", (order_id,))
-                    fetched_codes = cur.fetchall()
-                    codes_to_insert.extend([row['datamatrix'] for row in fetched_codes])
+                    cur.execute("SELECT gtin, datamatrix FROM items WHERE order_id = %s AND datamatrix IS NOT NULL AND gtin IS NOT NULL", (order_id,))
+                    fetched_items = cur.fetchall()
+                    for item in fetched_items:
+                        insert_data.append((task_id, item['gtin'], item['datamatrix'], 'available'))
                 else:
                     logging.warning(f"Неизвестный или неподдерживаемый dm_source ('{dm_source}') для задачи #{task_id}. Пул не будет наполнен.")
-                    return # Не считаем это ошибкой, просто выходим
-
-                if not codes_to_insert:
-                    logging.warning(f"Не найдено кодов для наполнения пула для задачи #{task_id}.")
                     return
 
-                logging.info(f"Найдено {len(codes_to_insert)} кодов для задачи #{task_id}.")
+                if not insert_data:
+                    logging.warning(f"Не найдено данных для наполнения пула для задачи #{task_id}.")
+                    return
+
+                logging.info(f"Найдено {len(insert_data)} записей для вставки в пул для задачи #{task_id}.")
 
                 # 5. Очистить старые записи для этой задачи (для идемпотентности)
                 cur.execute("DELETE FROM task_datamatrix_pool WHERE task_id = %s", (task_id,))
                 logging.info(f"Старые записи в пуле для задачи #{task_id} удалены.")
 
-                # 6. Вставить новые коды
+                # 6. Вставить новые записи
                 from psycopg2.extras import execute_values
-                insert_data = [(task_id, code, 'available') for code in set(codes_to_insert)] # Используем set для удаления дублей
+                unique_insert_data = list(set(insert_data)) # Удаляем полные дубликаты (task_id, gtin, code, status)
                 
                 execute_values(
                     cur,
-                    "INSERT INTO task_datamatrix_pool (task_id, datamatrix, status) VALUES %s",
-                    insert_data
+                    "INSERT INTO task_datamatrix_pool (task_id, gtin, datamatrix, status) VALUES %s",
+                    unique_insert_data
                 )
                 
-                logging.info(f"Успешно вставлено {len(insert_data)} кодов в task_datamatrix_pool для задачи #{task_id}.")
+                logging.info(f"Успешно вставлено {len(unique_insert_data)} кодов в task_datamatrix_pool для задачи #{task_id}.")
 
             except Exception as e:
                 logging.error(f"Критическая ошибка при наполнении пула DataMatrix для задачи #{task_id}: {e}")
