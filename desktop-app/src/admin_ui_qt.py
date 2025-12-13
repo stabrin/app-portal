@@ -564,6 +564,24 @@ class TaskEditorFrameQt(QWidget):
             self.sscc_source_combo.addItems(["Генерируем сами", "Предоставляет клиент"])
             marking_layout.addRow(self.sscc_source_label, self.sscc_source_combo)
 
+            # --- NEW: SSCC refinement checkboxes ---
+            self.refine_prod_date_checkbox = QCheckBox("Уточнить дату производства")
+            self.refine_batch_checkbox = QCheckBox("Уточнить партию")
+            self.refine_country_checkbox = QCheckBox("Уточнить страну")
+
+            refinement_widget = QWidget()
+            refinement_layout = QHBoxLayout(refinement_widget)
+            refinement_layout.addWidget(self.refine_prod_date_checkbox)
+            refinement_layout.addWidget(self.refine_batch_checkbox)
+            refinement_layout.addWidget(self.refine_country_checkbox)
+            refinement_layout.addStretch()
+            refinement_layout.setContentsMargins(0, 0, 0, 0)
+            
+            self.refinement_label = QLabel("Уточнения для SSCC:")
+            marking_layout.addRow(self.refinement_label, refinement_widget)
+            self.refinement_widget = refinement_widget # To control visibility
+            # --- END NEW ---
+
             main_layout.addWidget(self.marking_settings_group)
 
             # Connect signal for dynamic visibility
@@ -603,6 +621,10 @@ class TaskEditorFrameQt(QWidget):
             # SSCC widgets
             self.sscc_source_label.setVisible(is_aggregation_enabled)
             self.sscc_source_combo.setVisible(is_aggregation_enabled)
+            # --- NEW ---
+            self.refinement_label.setVisible(is_aggregation_enabled)
+            self.refinement_widget.setVisible(is_aggregation_enabled)
+            # --- END NEW ---
             # Nesting level widgets
             self.nesting_level_label.setVisible(is_aggregation_enabled)
             self.nesting_level_spinbox.setVisible(is_aggregation_enabled)
@@ -624,6 +646,11 @@ class TaskEditorFrameQt(QWidget):
             self.employee_count_spinbox.setValue(settings_json.get('employee_count', 3))
             self.nesting_level_spinbox.setValue(settings_json.get('nesting_level', 1))
             self.sscc_source_combo.setCurrentText(settings_json.get('sscc_source', 'Генерируем сами'))
+            # --- NEW ---
+            self.refine_prod_date_checkbox.setChecked(settings_json.get('refine_prod_date', False))
+            self.refine_batch_checkbox.setChecked(settings_json.get('refine_batch', False))
+            self.refine_country_checkbox.setChecked(settings_json.get('refine_country', False))
+            # --- END NEW ---
             # Trigger initial visibility update
             self._on_aggregation_type_changed(self.aggregation_type_combo.currentText())
         # --- END NEW ---
@@ -661,12 +688,22 @@ class TaskEditorFrameQt(QWidget):
                 if self.aggregation_type_combo.currentText() != 'Без агрегации':
                     settings_data['nesting_level'] = self.nesting_level_spinbox.value()
                     settings_data['sscc_source'] = self.sscc_source_combo.currentText()
+                    # --- NEW ---
+                    settings_data['refine_prod_date'] = self.refine_prod_date_checkbox.isChecked()
+                    settings_data['refine_batch'] = self.refine_batch_checkbox.isChecked()
+                    settings_data['refine_country'] = self.refine_country_checkbox.isChecked()
+                    # --- END NEW ---
                 else:
                     # Clean up keys that are not applicable
                     if 'nesting_level' in settings_data:
                         del settings_data['nesting_level']
                     if 'sscc_source' in settings_data:
                         del settings_data['sscc_source']
+                    # --- NEW ---
+                    if 'refine_prod_date' in settings_data: del settings_data['refine_prod_date']
+                    if 'refine_batch' in settings_data: del settings_data['refine_batch']
+                    if 'refine_country' in settings_data: del settings_data['refine_country']
+                    # --- END NEW ---
             # --- END NEW ---
 
             self.task_service.update_task_settings(task_id, settings_data)
