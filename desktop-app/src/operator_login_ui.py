@@ -33,7 +33,12 @@ class OperatorLoginWindow(QDialog):
         self.name_input.setPlaceholderText("Введите или отсканируйте ФИО")
         form_layout.addRow("ФИО Оператора:", self.name_input)
 
-        # 2. Поле для кода-пропуска
+        # 2. Поле для рабочего места
+        self.workstation_input = QLineEdit()
+        self.workstation_input.setPlaceholderText("Отсканируйте код рабочего места")
+        form_layout.addRow("Рабочее место:", self.workstation_input)
+
+        # 3. Поле для кода-пропуска
         self.access_code_input = QLineEdit()
         self.access_code_input.setPlaceholderText("Ожидание сканирования кода-пропуска...")
         # Подсказка системе ввода, что здесь предпочтительна латиница
@@ -43,7 +48,8 @@ class OperatorLoginWindow(QDialog):
         layout.addLayout(form_layout)
 
         # Логика переключения фокуса и отправки
-        self.name_input.returnPressed.connect(self.access_code_input.setFocus)
+        self.name_input.returnPressed.connect(self.workstation_input.setFocus)
+        self.workstation_input.returnPressed.connect(self.access_code_input.setFocus)
         self.access_code_input.returnPressed.connect(self.process_login)
         
     def process_login(self):
@@ -56,17 +62,23 @@ class OperatorLoginWindow(QDialog):
             self.name_input.setFocus()
             return
 
+        workstation_id = self.workstation_input.text().strip()
+        if not workstation_id:
+            QMessageBox.warning(self, "Ошибка", "Отсканируйте код рабочего места.")
+            self.workstation_input.setFocus()
+            return
+
         access_code = self.access_code_input.text().strip()
         if not access_code:
             QMessageBox.warning(self, "Ошибка", "Отсканируйте или введите код-пропуск.")
             self.access_code_input.setFocus()
             return
             
-        logging.info(f"Попытка входа: Оператор '{operator_name}', код-пропуск: {access_code}")
+        logging.info(f"Попытка входа: Оператор '{operator_name}', РМ: '{workstation_id}', код-пропуск: {access_code}")
         
         try:
-            # Передаем ФИО в сервисный метод для сохранения
-            task_info = self.task_service.get_task_by_employee_pass(access_code, operator_name)
+            # Передаем ФИО и РМ в сервисный метод
+            task_info = self.task_service.get_task_by_employee_pass(access_code, operator_name, workstation_id)
             
             if task_info and task_info.get('is_valid'):
                 logging.info(f"Успешный вход для сотрудника #{task_info['employee_id']} в задачу #{task_info['task_id']}")
