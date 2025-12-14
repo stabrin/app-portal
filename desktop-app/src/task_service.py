@@ -2,6 +2,7 @@ import json
 import logging
 import random
 import string
+import psycopg2
 from .db_connector import get_client_db_connection
 from psycopg2.extras import RealDictCursor
 
