@@ -70,7 +70,8 @@ def update_client_db_schema(conn):
                                                         order_id INTEGER,
                                                         start_time TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                                                         end_time TIMESTAMP WITH TIME ZONE,
-                                                        workstation_id VARCHAR(100) );
+                                                        workstation_id VARCHAR(100),
+                                                        last_activity TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP );
         """).format(ma_sessions=sql.Identifier(ma_work_sessions_table), ma_tokens=sql.Identifier(ma_employee_tokens_table)),
 
         sql.SQL("""

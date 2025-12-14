@@ -58,84 +58,189 @@ class TaskService:
                 cur.execute("SELECT * FROM production_tasks WHERE order_id = %s", (order_id,))
                 return cur.fetchone()
 
-    def get_task_by_employee_pass(self, access_code, operator_name):
+    def get_task_by_employee_pass(self, access_code, operator_name, workstation_id):
         """
         Проверяет код-пропуск, СОХРАНЯЕТ ФИО ОПЕРАТОРА, и возвращает
         всю необходимую информацию о задаче для начала работы.
+        Также создает новую рабочую сессию.
         """
         with self._get_connection() as conn:
+            # Все операции в одной транзакции
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # 1. Найти сотрудника и связанную задачу по коду-пропуску
-                cur.execute(
-                    "SELECT id, task_id FROM task_employees WHERE access_code = %s",
-                    (access_code,)
-                )
-                employee_data = cur.fetchone()
+                try:
+                    # 1. Найти сотрудника и связанную задачу по коду-пропуску
+                    cur.execute(
+                        "SELECT id, task_id FROM task_employees WHERE access_code = %s",
+                        (access_code,)
+                    )
+                    employee_data = cur.fetchone()
 
-                if not employee_data:
-                    return {'is_valid': False, 'error': 'Код-пропуск не найден'}
+                    if not employee_data:
+                        return {'is_valid': False, 'error': 'Код-пропуск не найден'}
 
-                employee_id = employee_data['id']
-                task_id = employee_data['task_id']
+                    employee_id = employee_data['id']
+                    task_id = employee_data['task_id']
 
-                # 2. Обновить ФИО сотрудника
-                cur.execute(
-                    "UPDATE task_employees SET employee_name = %s WHERE id = %s",
-                    (operator_name, employee_id)
-                )
-                logging.info(f"Сохранено ФИО '{operator_name}' для сотрудника #{employee_id}")
+                    # 2. Обновить ФИО сотрудника
+                    cur.execute(
+                        "UPDATE task_employees SET employee_name = %s WHERE id = %s",
+                        (operator_name, employee_id)
+                    )
+                    logging.info(f"Сохранено ФИО '{operator_name}' для сотрудника #{employee_id}")
 
-                # 3. Получить основную информацию о задаче и заказе
-                cur.execute(
-                    """
-                    SELECT
-                        pt.id AS task_id,
-                        pt.task_type,
-                        pt.status,
-                        pt.settings_json,
-                        o.id AS order_id,
-                        o.client_name
-                    FROM
-                        production_tasks pt
-                    JOIN
-                        orders o ON pt.order_id = o.id
-                    WHERE
-                        pt.id = %s
-                    """,
-                    (task_id,)
-                )
-                task_info = cur.fetchone()
+                    # 3. Получить основную информацию о задаче и заказе
+                    cur.execute(
+                        """
+                        SELECT
+                            pt.id AS task_id,
+                            pt.task_type,
+                            pt.status,
+                            pt.settings_json,
+                            o.id AS order_id,
+                            o.client_name
+                        FROM
+                            production_tasks pt
+                        JOIN
+                            orders o ON pt.order_id = o.id
+                        WHERE
+                            pt.id = %s
+                        """,
+                        (task_id,)
+                    )
+                    task_info = cur.fetchone()
 
-                if not task_info:
-                    return {'is_valid': False, 'error': 'Задача, связанная с пропуском, не найдена'}
+                    if not task_info:
+                        return {'is_valid': False, 'error': 'Задача, связанная с пропуском, не найдена'}
+                    
+                    order_id = task_info['order_id']
 
-                # 4. Проверить, что задача в статусе 'in_progress'
-                if task_info['status'] != 'in_progress':
-                    return {'is_valid': False, 'error': f"Задача не находится в статусе 'in_progress' (текущий статус: {task_info['status']})"}
+                    # 4. Проверить, что задача в статусе 'in_progress'
+                    if task_info['status'] != 'in_progress':
+                        return {'is_valid': False, 'error': f"Задача не находится в статусе 'in_progress' (текущий статус: {task_info['status']})"}
 
-                # 5. Получить список уникальных GTIN для этой задачи
-                cur.execute(
-                    "SELECT DISTINCT gtin FROM task_datamatrix_pool WHERE task_id = %s ORDER BY gtin",
-                    (task_id,)
-                )
-                gtins_data = cur.fetchall()
-                available_gtins = [row['gtin'] for row in gtins_data]
+                    # 5. Стартуем сессию (проверка на дубли внутри)
+                    session_id = self.start_session(
+                        employee_id=employee_id,
+                        employee_name=operator_name,
+                        order_id=order_id,
+                        workstation_id=workstation_id,
+                        cursor=cur  # Передаем курсор для выполнения в той же транзакции
+                    )
 
-                if not available_gtins:
-                    return {'is_valid': False, 'error': 'В пуле кодов для этой задачи нет доступных GTIN.'}
+                    # 6. Получить список уникальных GTIN для этой задачи
+                    cur.execute(
+                        "SELECT DISTINCT gtin FROM task_datamatrix_pool WHERE task_id = %s ORDER BY gtin",
+                        (task_id,)
+                    )
+                    gtins_data = cur.fetchall()
+                    available_gtins = [row['gtin'] for row in gtins_data]
 
-                # 6. Собрать результат
-                result = {
-                    'is_valid': True,
-                    'employee_id': employee_id,
-                    'gtins': available_gtins,
-                    **task_info # Распаковываем словарь с информацией о задаче
-                }
+                    if not available_gtins:
+                        # Откатывать сессию не нужно, но нужно вернуть ошибку
+                        return {'is_valid': False, 'error': 'В пуле кодов для этой задачи нет доступных GTIN.'}
+
+                    # 7. Собрать результат
+                    result = {
+                        'is_valid': True,
+                        'session_id': session_id,
+                        'employee_id': employee_id,
+                        'gtins': available_gtins,
+                        **task_info # Распаковываем словарь с информацией о задаче
+                    }
+                    
+                    # 8. Зафиксировать изменения в БД
+                    conn.commit()
+
+                    return result
                 
-                # 7. Зафиксировать изменения в БД
-                conn.commit()
+                except psycopg2.Error as e:
+                    conn.rollback()
+                    # Возвращаем специфичную ошибку для UI
+                    if "SESSION_EXISTS" in str(e):
+                        logging.warning(f"Попытка повторного входа с пропуском {access_code}. Активная сессия уже существует.")
+                        return {'is_valid': False, 'error': 'Для данного пропуска уже существует активная сессия. Завершите ее перед новым входом.'}
+                    logging.error(f"Ошибка при проверке пропуска и создании сессии: {e}")
+                    raise
 
-                return result
+    def start_session(self, employee_id, employee_name, order_id, workstation_id, cursor):
+        """
+        Создает новую рабочую сессию. Проверяет наличие уже активной сессии.
+        Использует переданный курсор для выполнения в рамках существующей транзакции.
+        """
+        # 1. Проверить, нет ли уже активной сессии для этого сотрудника
+        cursor.execute(
+            "SELECT id FROM ma_work_sessions WHERE employee_token_id = %s AND end_time IS NULL",
+            (employee_id,)
+        )
+        active_session = cursor.fetchone()
+        if active_session:
+            # Используем специальное исключение или код ошибки, чтобы обработать в UI
+            raise psycopg2.Error("SESSION_EXISTS: Активная сессия для этого сотрудника уже существует.")
+
+        # 2. Создать новую сессию
+        cursor.execute(
+            """
+            INSERT INTO ma_work_sessions (employee_token_id, employee_name, order_id, workstation_id)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (employee_id, employee_name, order_id, workstation_id)
+        )
+        session_id = cursor.fetchone()['id']
+        logging.info(f"Создана новая сессия #{session_id} для сотрудника #{employee_id} на рабочем месте '{workstation_id}'.")
+        return session_id
+
+    def update_session_activity(self, session_id):
+        """Обновляет время последней активности для сессии."""
+        if not session_id:
+            return
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE ma_work_sessions SET last_activity = CURRENT_TIMESTAMP WHERE id = %s AND end_time IS NULL",
+                        (session_id,)
+                    )
+                conn.commit()
+        except Exception as e:
+            # Эту ошибку можно игнорировать, чтобы не прерывать основную операцию
+            logging.warning(f"Не удалось обновить активность сессии #{session_id}: {e}")
+            
+    def close_session(self, session_id):
+        """Корректно закрывает рабочую сессию."""
+        if not session_id:
+            return
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "UPDATE ma_work_sessions SET end_time = CURRENT_TIMESTAMP WHERE id = %s",
+                        (session_id,)
+                    )
+                conn.commit()
+            logging.info(f"Сессия #{session_id} была закрыта.")
+        except Exception as e:
+            logging.error(f"Ошибка при закрытии сессии #{session_id}: {e}")
+
+    def close_inactive_sessions(self):
+        """Закрывает все сессии, неактивные более 30 минут."""
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE ma_work_sessions
+                        SET end_time = last_activity + INTERVAL '30 minutes'
+                        WHERE end_time IS NULL AND last_activity < CURRENT_TIMESTAMP - INTERVAL '30 minutes'
+                        RETURNING id;
+                        """
+                    )
+                    closed_sessions = [row[0] for row in cur.fetchall()]
+                    if closed_sessions:
+                        logging.info(f"Автоматически закрыты неактивные сессии: {closed_sessions}")
+                conn.commit()
+        except Exception as e:
+            logging.error(f"Ошибка при автоматическом закрытии неактивных сессий: {e}")
 
     def _populate_datamatrix_pool(self, task_id, conn):
         """
