@@ -1338,6 +1338,39 @@ class PrintableObjectItem(QGraphicsRectItem):
                     self.scene().parent().on_item_moved(self.object_id)
         return super().itemChange(change, value)
 
+    def _upload_image(self):
+        """Открывает диалог для загрузки изображения и сохранения его в БД."""
+        logging.debug("Запуск процесса загрузки изображения в редакторе макетов.")
+
+        filepath, _ = QFileDialog.getOpenFileName(
+            self, "Выберите изображение", "", 
+            "Изображения (*.png *.jpg *.jpeg *.bmp);;Все файлы (*.*)"
+        )
+        if not filepath:
+            logging.debug("Выбор файла отменен.")
+            return
+
+        image_name, ok = QInputDialog.getText(self, "Имя изображения", "Введите уникальное имя для этого изображения:")
+        if not ok or not image_name:
+            logging.debug("Ввод имени отменен.")
+            return
+
+        try:
+            with open(filepath, 'rb') as f:
+                image_data = f.read()
+
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO ap_images (name, image_data) VALUES (%s, %s) ON CONFLICT (name) DO UPDATE SET image_data = EXCLUDED.image_data;",
+                        (image_name, image_data)
+                    )
+                conn.commit()
+            
+            QMessageBox.information(self, "Успех", f"Изображение '{image_name}' успешно загружено.")
+        except Exception as e:
+            logging.error(f"Ошибка при загрузке изображения: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить изображение: {e}")
 
 class LabelEditorDialog(QDialog):
     """Диалоговое окно для визуального редактора макетов этикеток."""
@@ -1402,6 +1435,10 @@ class LabelEditorDialog(QDialog):
         btn_add_dm.clicked.connect(lambda: self._add_object('datamatrix'))
         btn_add_image = QPushButton("Добавить Изображение")
         btn_add_image.clicked.connect(lambda: self._add_object('image'))
+        # --- НОВЫЙ БЛОК: Кнопка загрузки изображения ---
+        btn_upload_image = QPushButton("Загрузить изображение...")
+        btn_upload_image.clicked.connect(self._upload_image)
+        # --- КОНЕЦ НОВОГО БЛОКА ---
         btn_add_text_image = QPushButton("Добавить Текст+Картинка")
         btn_add_text_image.clicked.connect(lambda: self._add_object('text_with_image'))
         tools_layout.addWidget(btn_add_text)
@@ -1409,6 +1446,7 @@ class LabelEditorDialog(QDialog):
         tools_layout.addWidget(btn_add_sscc)
         tools_layout.addWidget(btn_add_dm)
         tools_layout.addWidget(btn_add_image)
+        tools_layout.addWidget(btn_upload_image) # Добавляем кнопку в layout
         tools_layout.addWidget(btn_add_text_image)
         tools_layout.addStretch()
 
@@ -6335,6 +6373,44 @@ class LentaUploadDialog(QDialog):
                     new_order_id = int(match.group(1))
                 else:
                     raise ValueError(f"Не удалось извлечь ID заказа из сообщения: '{message}'")
+
+            if not success:
+                raise Exception(f"Не удалось создать заказ: {message}")
+            logging.debug(f"[LentaUpload] Order created/updated with ID: {new_order_id}")
+
+            # Шаг 4: Вставка в aggregation_tasks с реальным order_id
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    df_unique['order_id'] = new_order_id
+                    df_unique['container_id'] = container_id
+                    df_unique['owner'] = client['name']
+                    
+                    from psycopg2.extras import execute_values
+                    tasks_to_insert = df_unique[['order_id', 'container_id', 'gtin', 'sscc', 'owner']]
+                    insert_query_tasks = f"INSERT INTO aggregation_tasks ({', '.join(tasks_to_insert.columns)}) VALUES %s"
+                    logging.debug(f"[LentaUpload] Preparing to insert {len(tasks_to_insert)} rows into aggregation_tasks.")
+                    execute_values(cur, insert_query_tasks, [tuple(x) for x in tasks_to_insert.to_numpy()])
+                    logging.debug(f"[LentaUpload] Insertion into aggregation_tasks finished.")
+                    conn.commit()
+                logging.debug("[LentaUpload] Transaction for aggregation_tasks committed.")
+
+            QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
+            self.accept()
+        except Exception as e:
+            logging.exception("[LentaUpload] An error occurred during processing.")
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке: {e}")
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
+    w.show()
+    sys.exit(app.exec())
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
+    w.show()
+    sys.exit(app.exec())
 
             if not success:
                 raise Exception(f"Не удалось создать заказ: {message}")
