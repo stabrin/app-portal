@@ -283,7 +283,7 @@ class TaskService:
                 dm_source = scenario_data.get('dm_source')
                 logging.info(f"Для заказа #{order_id} (сценарий ID: {scenario_id}) источник КМ: '{dm_source}'")
 
-                insert_data = []
+                raw_data = []
                 # 4. Извлечь коды и GTIN в зависимости от источника
                 if dm_source == 'Заказ в ДМ.Код':
                     cur.execute("SELECT gtin, api_codes_json FROM dmkod_aggregation_details WHERE order_id = %s", (order_id,))
@@ -293,27 +293,48 @@ class TaskService:
                         codes_json = detail.get('api_codes_json')
                         if not gtin or not codes_json:
                             continue
-                        
-                        # api_codes_json может быть строкой, парсим ее
                         if isinstance(codes_json, str):
                             try:
                                 codes_json = json.loads(codes_json)
                             except json.JSONDecodeError:
                                 logging.warning(f"Не удалось распарсить JSON с кодами для GTIN {gtin}.")
                                 continue
-                        
                         codes = codes_json.get('codes', [])
                         for code in codes:
-                            insert_data.append((task_id, gtin, code, 'available'))
+                            raw_data.append({'gtin': gtin, 'datamatrix': code})
 
                 elif dm_source == 'Файлы клиента (csv, txt)':
                     cur.execute("SELECT gtin, datamatrix FROM items WHERE order_id = %s AND datamatrix IS NOT NULL AND gtin IS NOT NULL", (order_id,))
                     fetched_items = cur.fetchall()
                     for item in fetched_items:
-                        insert_data.append((task_id, item['gtin'], item['datamatrix'], 'available'))
+                        raw_data.append({'gtin': item['gtin'], 'datamatrix': item['datamatrix']})
                 else:
                     logging.warning(f"Неизвестный или неподдерживаемый dm_source ('{dm_source}') для задачи #{task_id}. Пул не будет наполнен.")
                     return
+
+                if not raw_data:
+                    logging.warning(f"Не найдено кодов для наполнения пула для задачи #{task_id}.")
+                    return
+
+                # Обогащение данных
+                unique_gtins = sorted(list(set(item['gtin'] for item in raw_data)))
+                gtin_to_product_info = {}
+                if unique_gtins:
+                    cur.execute("SELECT gtin, name, description_1, description_2, description_3 FROM products WHERE gtin = ANY(%s)", (unique_gtins,))
+                    for row in cur.fetchall():
+                        gtin_to_product_info[row['gtin']] = row
+
+                insert_data = []
+                gtin_counters = {gtin: 0 for gtin in unique_gtins}
+                for item in raw_data:
+                    gtin = item['gtin']
+                    product_info = gtin_to_product_info.get(gtin, {})
+                    gtin_index = unique_gtins.index(gtin)
+                    dm_index = gtin_counters[gtin]
+                    serial_number = f"{task_id}_{gtin_index}_{dm_index}"
+                    gtin_counters[gtin] += 1
+
+                    insert_data.append((task_id, gtin, item['datamatrix'], 'available', product_info.get('name'), product_info.get('description_1'), product_info.get('description_2'), product_info.get('description_3'), serial_number))
 
                 if not insert_data:
                     logging.warning(f"Не найдено данных для наполнения пула для задачи #{task_id}.")
@@ -331,7 +352,7 @@ class TaskService:
                 
                 execute_values(
                     cur,
-                    "INSERT INTO task_datamatrix_pool (task_id, gtin, datamatrix, status) VALUES %s",
+                    "INSERT INTO task_datamatrix_pool (task_id, gtin, datamatrix, status, name, description_1, description_2, description_3, serial_number) VALUES %s",
                     unique_insert_data
                 )
                 
