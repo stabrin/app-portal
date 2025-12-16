@@ -1358,7 +1358,7 @@ class LabelEditorDialog(QDialog):
             'custom_text': { "type": "text", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "", "font_name": "arial" },
             'qr': { "type": "barcode", "barcode_type": "QR", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "QR: Конфигурация рабочего места" },
             'sscc': { "type": "barcode", "barcode_type": "SSCC", "x_mm": 10, "y_mm": 10, "width_mm": 50, "height_mm": 20, "data_source": "packages.sscc_code" },
-            'datamatrix': { "type": "barcode", "barcode_type": "DataMatrix", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "items.datamatrix" },
+            'datamatrix': { "type": "barcode", "barcode_type": "DataMatrix", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "task_datamatrix_pool.datamatrix" },
             'image': { "type": "image", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "" },
             'text_with_image': { "type": "text_with_image", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 60, "height_mm": 30, "data_source": "", "image_source": "", "font_name": "arial" }
         }
@@ -1373,7 +1373,7 @@ class LabelEditorDialog(QDialog):
             "QR: Конфигурация сервера"
         ]
         self.available_sscc_sources = ["packages.sscc_code"]
-        self.available_datamatrix_sources = ["items.datamatrix"]
+        self.available_datamatrix_sources = ["task_datamatrix_pool.datamatrix"]
         self._build_editor_ui()
         self._load_template_to_ui()
         self._redraw_canvas()
