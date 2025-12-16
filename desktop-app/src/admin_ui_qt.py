@@ -6430,20 +6430,6 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
     w.show()
-    sys.exit(app.exec())
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
-    w.show()
-    sys.exit(app.exec())
-                logging.debug("[LentaUpload] Transaction for aggregation_tasks committed.")
-
-            QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
-            self.accept()
-        except Exception as e:
-            logging.exception("[LentaUpload] An error occurred during processing.")
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке: {e}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
