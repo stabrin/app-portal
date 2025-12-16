@@ -526,7 +526,13 @@ def update_client_db_schema(conn):
                 packaging_date DATE,
                 best_before_date DATE,
                 expiry_date DATE,
-                origin_country VARCHAR(3)
+                origin_country VARCHAR(3),
+                name TEXT,
+                description_1 TEXT,
+                description_2 TEXT,
+                description_3 TEXT,
+                quantity INTEGER,
+                serial_number INTEGER
             );
         """),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_datamatrix_pool_status ON task_datamatrix_pool(status);"),
