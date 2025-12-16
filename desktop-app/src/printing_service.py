@@ -672,7 +672,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             "QR: Конфигурация сервера"
         ]
         self.available_sscc_sources = ["packages.sscc_code"]
-        self.available_datamatrix_sources = ["items.datamatrix"]
+        self.available_datamatrix_sources = ["task_datamatrix_pool.datamatrix"]
 
         if not self.user_info.get("client_db_config"):
             logging.error("Отсутствует конфигурация БД клиента.")
