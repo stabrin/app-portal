@@ -1716,55 +1716,21 @@ class LabelEditorDialog(QDialog):
 
         self._redraw_canvas()
 
+    def _load_template_to_ui(self):
 
+        if self.template.get('objects'):
 
+            self.selected_object_id = 0
 
+        else:
 
-        def _load_template_to_ui(self):
+            self.selected_object_id = None
 
+        self._update_image_sources()
 
+        self._update_properties_panel()
 
-
-
-            if self.template.get('objects'):
-
-
-
-
-
-                self.selected_object_id = 0
-
-
-
-
-
-            else:
-
-
-
-
-
-                self.selected_object_id = None
-
-
-
-
-
-            self._update_image_sources()
-
-
-
-
-
-            self._update_properties_panel()
-
-
-
-
-
-            self._redraw_canvas()  
-
-
+        self._redraw_canvas()  
 
 
 
