@@ -4282,6 +4282,9 @@ class AdminWindowQt(QMainWindow):
         # Остальные справочники
         self._build_local_clients_tab(notebook)
         self._build_product_groups_tab(notebook)
+        # --- ИЗМЕНЕНИЕ: Добавляем вкладку для управления макетами ---
+        self._build_layout_management_page(notebook)
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
         self._build_products_tab(notebook)
         self._build_scenarios_tab(notebook)
 
@@ -5395,10 +5398,10 @@ class AdminWindowQt(QMainWindow):
 
         return widget
 
-    def _build_print_management_page(self):
+    def _build_layout_management_page(self, parent_notebook):
         """Создает страницу для управления макетами печати."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
 
         controls_layout = QHBoxLayout()
         btn_create = QPushButton("Создать макет")
@@ -5426,10 +5429,12 @@ class AdminWindowQt(QMainWindow):
         self.print_layouts_table.doubleClicked.connect(self._edit_selected_layout)
         layout.addWidget(self.print_layouts_table)
 
-        # Первая загрузка данных
+        parent_notebook.addTab(tab, "Макеты печати")
+
+        # Загрузка данных
         self._refresh_print_layouts()
 
-        return widget
+        return tab
 
     def _refresh_print_layouts(self):
         """Загружает список макетов в таблицу."""
