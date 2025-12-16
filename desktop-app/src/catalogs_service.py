@@ -20,6 +20,7 @@ class CatalogsService:
         """
         self.api_service = ApiService(user_info)
         self.get_db_connection = db_connection_func
+        self._ensure_images_table_exists()
 
     def get_participants_catalog(self):
         """Получает справочник участников, используя ApiService."""
@@ -384,5 +385,48 @@ class CatalogsService:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM label_templates WHERE name = %s", (layout_name,))
             conn.commit()
+
+    # --- Методы для изображений в макетах ---
+
+    def _ensure_images_table_exists(self):
+        """Проверяет и при необходимости создает таблицу для хранения изображений."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.label_images')")
+                if cur.fetchone()[0] is None:
+                    logger.warning("Таблица 'label_images' не найдена. Создание таблицы...")
+                    cur.execute("""
+                        CREATE TABLE label_images (
+                            name TEXT NOT NULL PRIMARY KEY,
+                            image_data BYTEA,
+                            uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                        )
+                    """)
+                    conn.commit()
+                    logger.info("Таблица 'label_images' успешно создана.")
+
+    def upload_image(self, name: str, data: bytes):
+        """Загружает или обновляет изображение в БД."""
+        if not name:
+            raise ValueError("Имя изображения не может быть пустым.")
+        
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO label_images (name, image_data, uploaded_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (name) DO UPDATE SET
+                        image_data = EXCLUDED.image_data,
+                        uploaded_at = NOW();
+                """, (name, data))
+            conn.commit()
+        logger.info(f"Изображение '{name}' успешно загружено.")
+
+    def get_image_names(self):
+        """Возвращает список имен всех изображений из БД."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT name FROM label_images ORDER BY name")
+                return [row[0] for row in cur.fetchall()]
 
     

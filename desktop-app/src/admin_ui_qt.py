@@ -1338,40 +1338,6 @@ class PrintableObjectItem(QGraphicsRectItem):
                     self.scene().parent().on_item_moved(self.object_id)
         return super().itemChange(change, value)
 
-    def _upload_image(self):
-        """Открывает диалог для загрузки изображения и сохранения его в БД."""
-        logging.debug("Запуск процесса загрузки изображения в редакторе макетов.")
-
-        filepath, _ = QFileDialog.getOpenFileName(
-            self, "Выберите изображение", "", 
-            "Изображения (*.png *.jpg *.jpeg *.bmp);;Все файлы (*.*)"
-        )
-        if not filepath:
-            logging.debug("Выбор файла отменен.")
-            return
-
-        image_name, ok = QInputDialog.getText(self, "Имя изображения", "Введите уникальное имя для этого изображения:")
-        if not ok or not image_name:
-            logging.debug("Ввод имени отменен.")
-            return
-
-        try:
-            with open(filepath, 'rb') as f:
-                image_data = f.read()
-
-            with get_client_db_connection(self.user_info) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "INSERT INTO ap_images (name, image_data) VALUES (%s, %s) ON CONFLICT (name) DO UPDATE SET image_data = EXCLUDED.image_data;",
-                        (image_name, image_data)
-                    )
-                conn.commit()
-            
-            QMessageBox.information(self, "Успех", f"Изображение '{image_name}' успешно загружено.")
-        except Exception as e:
-            logging.error(f"Ошибка при загрузке изображения: {e}", exc_info=True)
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить изображение: {e}")
-
     def _delete_selected_object(self):
         """Удаляет выделенный объект с холста и из шаблона."""
         if self.selected_object_id is None:
@@ -1754,25 +1720,49 @@ class LabelEditorDialog(QDialog):
 
 
 
-    def _load_template_to_ui(self):
+        def _load_template_to_ui(self):
 
 
-        if self.template.get('objects'):
 
 
-            self.selected_object_id = 0
+
+            if self.template.get('objects'):
 
 
-        else:
 
 
-            self.selected_object_id = None
+
+                self.selected_object_id = 0
 
 
-        self._update_properties_panel()
 
 
-        self._redraw_canvas() 
+
+            else:
+
+
+
+
+
+                self.selected_object_id = None
+
+
+
+
+
+            self._update_image_sources()
+
+
+
+
+
+            self._update_properties_panel()
+
+
+
+
+
+            self._redraw_canvas()  
 
 
 
@@ -1985,52 +1975,79 @@ class LabelEditorDialog(QDialog):
 
 
 
-        elif obj_type == 'image':
-
-
-            self.prop_data_source_combo.setVisible(True)
-
-
-            self.prop_data_source_combo.setEditable(True)
-
-
-            self.prop_data_source_combo.clear()
-
-
-            # TODO: Загружать список доступных картинок из БД
-
-
-            self.prop_data_source_combo.addItem(obj_data.get('data_source', '')) # Добавляем текущее значение
-
-
-            self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+                elif obj_type == 'image':
 
 
 
 
 
-        elif obj_type == 'text_with_image':
+                    self.prop_data_source_combo.setVisible(True)
 
 
-            self.prop_data_source_entry.setVisible(True)
 
 
-            self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
+
+                    self.prop_data_source_combo.setEditable(True)
 
 
-            self.prop_image_source_widget.setVisible(True)
 
 
-            self.props_layout.labelForField(self.prop_image_source_widget).setVisible(True)
+
+                    # Список уже обновлен через _update_image_sources
 
 
-            self.prop_image_source_combo.clear()
 
 
-            # TODO: Загружать список доступных картинок из БД
+
+                    self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
 
 
-            self.prop_image_source_combo.addItem(obj_data.get('image_source', ''))
+
+
+
+        
+
+
+
+
+
+                elif obj_type == 'text_with_image':
+
+
+
+
+
+                    self.prop_data_source_entry.setVisible(True)
+
+
+
+
+
+                    self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
+
+
+
+
+
+                    self.prop_image_source_widget.setVisible(True)
+
+
+
+
+
+                    self.props_layout.labelForField(self.prop_image_source_widget).setVisible(True)
+
+
+
+
+
+                    # Список уже обновлен через _update_image_sources
+
+
+
+
+
+                    self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
 
 
             self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
@@ -2210,34 +2227,703 @@ class LabelEditorDialog(QDialog):
             
 
 
-    def accept(self):
+        def accept(self):
 
 
-        try:
+            
 
 
-            if not self.template.get('name'):
+            try:
 
 
-                QMessageBox.warning(self, "Ошибка", "Название макета не может быть пустым.")
+            
 
 
-                return
+                if not self.template.get('name'):
 
 
+            
 
 
-
-            self.catalogs_service.upsert_print_layout(self.template)
-
-
-            super().accept()
+                    QMessageBox.warning(self, "Ошибка", "Название макета не может быть пустым.")
 
 
-        except Exception as e:
+            
 
 
-            QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить макет: {e}")
+                    return
+
+
+            
+
+
+    
+
+
+            
+
+
+                self.catalogs_service.upsert_print_layout(self.template)
+
+
+            
+
+
+                super().accept()
+
+
+            
+
+
+            except Exception as e:
+
+
+            
+
+
+                QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить макет: {e}")
+
+
+            
+
+
+    
+
+
+            
+
+
+            def _upload_image(self):
+
+
+            
+
+
+    
+
+
+            
+
+
+                """Открывает диалог для загрузки нового изображения в каталог."""
+
+
+            
+
+
+    
+
+
+            
+
+
+                filepath, _ = QFileDialog.getOpenFileName(self, "Выберите изображение", "", "Images (*.png *.jpg *.bmp *.svg)")
+
+
+            
+
+
+    
+
+
+            
+
+
+                if not filepath:
+
+
+            
+
+
+    
+
+
+            
+
+
+                    return
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                # Предлагаем имя файла по умолчанию, но даем пользователю его изменить
+
+
+            
+
+
+    
+
+
+            
+
+
+                default_name = os.path.basename(filepath)
+
+
+            
+
+
+    
+
+
+            
+
+
+                name, ok = QInputDialog.getText(self, "Имя изображения", "Введите уникальное имя для изображения в каталоге:", text=default_name)
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                if not ok or not name.strip():
+
+
+            
+
+
+    
+
+
+            
+
+
+                    return
+
+
+            
+
+
+    
+
+
+            
+
+
+                
+
+
+            
+
+
+    
+
+
+            
+
+
+                name = name.strip()
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                try:
+
+
+            
+
+
+    
+
+
+            
+
+
+                    with open(filepath, 'rb') as f:
+
+
+            
+
+
+    
+
+
+            
+
+
+                        image_data = f.read()
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self.catalogs_service.upload_image(name, image_data)
+
+
+            
+
+
+    
+
+
+            
+
+
+                    QMessageBox.information(self, "Успех", f"Изображение '{name}' успешно загружено.")
+
+
+            
+
+
+    
+
+
+            
+
+
+                    
+
+
+            
+
+
+    
+
+
+            
+
+
+                    # Обновляем выпадающие списки с изображениями
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self._update_image_sources()
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                except Exception as e:
+
+
+            
+
+
+    
+
+
+            
+
+
+                    logging.error(f"Ошибка при загрузке изображения: {e}", exc_info=True)
+
+
+            
+
+
+    
+
+
+            
+
+
+                    QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить изображение: {e}")
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+            def _update_image_sources(self):
+
+
+            
+
+
+    
+
+
+            
+
+
+                """Загружает список имен изображений из БД и обновляет выпадающие списки."""
+
+
+            
+
+
+    
+
+
+            
+
+
+                try:
+
+
+            
+
+
+    
+
+
+            
+
+
+                    image_names = self.catalogs_service.get_image_names()
+
+
+            
+
+
+    
+
+
+            
+
+
+                    
+
+
+            
+
+
+    
+
+
+            
+
+
+                    # Сохраняем текущие значения, чтобы восстановить их после обновления
+
+
+            
+
+
+    
+
+
+            
+
+
+                    current_data_source = self.prop_data_source_combo.currentText()
+
+
+            
+
+
+    
+
+
+            
+
+
+                    current_image_source = self.prop_image_source_combo.currentText()
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                    # Обновляем оба комбобокса
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self.prop_data_source_combo.clear()
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self.prop_data_source_combo.addItems(image_names)
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self.prop_data_source_combo.setCurrentText(current_data_source)
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self.prop_image_source_combo.clear()
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self.prop_image_source_combo.addItems(image_names)
+
+
+            
+
+
+    
+
+
+            
+
+
+                    self.prop_image_source_combo.setCurrentText(current_image_source)
+
+
+            
+
+
+    
+
+
+            
+
+
+                    
+
+
+            
+
+
+    
+
+
+            
+
+
+                    logging.debug(f"Обновлены источники изображений: {image_names}")
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
+
+
+            
+
+
+                except Exception as e:
+
+
+            
+
+
+    
+
+
+            
+
+
+                    logging.error(f"Не удалось обновить источники изображений: {e}", exc_info=True)
+
+
+            
+
+
+    
+
+
+            
+
+
+                    # Не показываем ошибку пользователю, чтобы не прерывать работу
+
+
+            
+
+
+    
+
+
+            
+
+
+        
+
+
+            
+
+
+    
 
 
 
