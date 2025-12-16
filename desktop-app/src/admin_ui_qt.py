@@ -1893,250 +1893,84 @@ class LabelEditorDialog(QDialog):
 
         self.prop_is_custom_text.blockSignals(False)
 
+        # Настраиваем панель под конкретный тип объекта
+        if obj_type == 'text':
 
+            self.prop_is_custom_text.setVisible(True)
 
+            if obj_data.get('is_custom_text'):
 
+                self.prop_data_source_entry.setVisible(True)
 
-                # Настраиваем панель под конкретный тип объекта
+                self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
 
+            else:
 
+                self.prop_data_source_combo.setVisible(True)
 
+                self.prop_data_source_combo.setEditable(False)
 
+                self.prop_data_source_combo.clear()
 
-                if obj_type == 'text':
+                self.prop_data_source_combo.addItems(self.available_text_sources)
 
+                self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
 
 
 
+        elif obj_type == 'barcode':
 
-                    self.prop_is_custom_text.setVisible(True)
+            self.prop_data_source_combo.setVisible(True)
 
+            self.prop_data_source_combo.setEditable(False)
 
+            self.prop_data_source_combo.clear()
 
+            barcode_type = obj_data.get('barcode_type', '').upper()
 
+            sources = {
 
-                    if obj_data.get('is_custom_text'):
+                'QR': self.available_qr_sources,
 
+                'SSCC': self.available_sscc_sources,
 
+                'DATAMATRIX': self.available_datamatrix_sources
 
+            }.get(barcode_type, [])
 
+            self.prop_data_source_combo.addItems(sources)
 
-                        self.prop_data_source_entry.setVisible(True)
+            self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
 
 
 
+        elif obj_type == 'image':
 
+            self.prop_data_source_combo.setVisible(True)
 
-                        self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
+            self.prop_data_source_combo.setEditable(True)
 
+            # Список уже обновлен через _update_image_sources
 
+            self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
 
 
 
-                    else:
+        elif obj_type == 'text_with_image':
 
+            self.prop_data_source_entry.setVisible(True)
 
+            self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
 
+            self.prop_image_source_widget.setVisible(True)
 
+            self.props_layout.labelForField(self.prop_image_source_widget).setVisible(True)
 
-                        self.prop_data_source_combo.setVisible(True)
+            # Список уже обновлен через _update_image_sources
 
-
-
-
-
-                        self.prop_data_source_combo.setEditable(False)
-
-
-
-
-
-                        self.prop_data_source_combo.clear()
-
-
-
-
-
-                        self.prop_data_source_combo.addItems(self.available_text_sources)
-
-
-
-
-
-                        self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
-
-
-
-
-
-        
-
-
-
-
-
-                elif obj_type == 'barcode':
-
-
-
-
-
-                    self.prop_data_source_combo.setVisible(True)
-
-
-
-
-
-                    self.prop_data_source_combo.setEditable(False)
-
-
-
-
-
-                    self.prop_data_source_combo.clear()
-
-
-
-
-
-                    barcode_type = obj_data.get('barcode_type', '').upper()
-
-
-
-
-
-                    sources = {
-
-
-
-
-
-                        'QR': self.available_qr_sources,
-
-
-
-
-
-                        'SSCC': self.available_sscc_sources,
-
-
-
-
-
-                        'DATAMATRIX': self.available_datamatrix_sources
-
-
-
-
-
-                    }.get(barcode_type, [])
-
-
-
-
-
-                    self.prop_data_source_combo.addItems(sources)
-
-
-
-
-
-                    self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
-
-
-
-
-
-        
-
-
-
-
-
-                elif obj_type == 'image':
-
-
-
-
-
-                    self.prop_data_source_combo.setVisible(True)
-
-
-
-
-
-                    self.prop_data_source_combo.setEditable(True)
-
-
-
-
-
-                    # Список уже обновлен через _update_image_sources
-
-
-
-
-
-                    self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
-
-
-
-
-
-        
-
-
-
-
-
-                elif obj_type == 'text_with_image':
-
-
-
-
-
-                    self.prop_data_source_entry.setVisible(True)
-
-
-
-
-
-                    self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
-
-
-
-
-
-                    self.prop_image_source_widget.setVisible(True)
-
-
-
-
-
-                    self.props_layout.labelForField(self.prop_image_source_widget).setVisible(True)
-
-
-
-
-
-                    # Список уже обновлен через _update_image_sources
-
-
-
-
-
-                    self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
-
-
-
-
+            self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
 
         logging.debug("Properties panel updated successfully.")
-
-
-
-
-
     def _apply_properties(self):
 
 
