@@ -1004,7 +1004,7 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                     # --- ВОССТАНОВЛЕННЫЙ БЛОК: Загружаем текстовые поля, если они есть в макете ---
                     for source in data_sources:
                         # Пропускаем уже обработанные поля и DataMatrix
-                        if source and '.' in source and not source.startswith('QR:') and source != 'items.datamatrix' and \
+                        if source and '.' in source and not source.startswith('QR:') and source != 'task_datamatrix_pool.datamatrix' and \
                            source not in ["packages.sscc_code", "ap_workplaces.warehouse_name", "ap_workplaces.workplace_number"]:
                             table, field = source.split('.')
                             query = sql.SQL("SELECT {} FROM {} WHERE {} IS NOT NULL LIMIT 1").format(
@@ -1029,12 +1029,12 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
                             if image_source_key: base_test_data[image_source_key] = image_source_key
 
                     # --- ИЗМЕНЕНИЕ: Загружаем DataMatrix, только если он нужен ---
-                    datamatrix_needed = "items.datamatrix" in data_sources
+                    datamatrix_needed = "task_datamatrix_pool.datamatrix" in data_sources
                     datamatrix_codes = []
-                    logging.debug(f"Проверка 'items.datamatrix' в data_sources: {datamatrix_needed}")
+                    logging.debug(f"Проверка 'task_datamatrix_pool.datamatrix' в data_sources: {datamatrix_needed}")
                     if datamatrix_needed:
                         # --- ВОССТАНОВЛЕННАЯ ЛОГИКА: Загружаем ВСЕ коды для предпросмотра ---
-                        cur.execute("SELECT datamatrix FROM items WHERE order_id=1")
+                        cur.execute("SELECT datamatrix FROM task_datamatrix_pool WHERE order_id=1")
                         results = cur.fetchall()
                         logging.debug(f"Получено {len(results)} строк с DataMatrix кодами из БД.")
                         if results:
@@ -1046,11 +1046,11 @@ class LabelEditorWindow(tk.Toplevel if tk else object):
             if datamatrix_codes:
                 for dm_code in datamatrix_codes:
                     item_data = base_test_data.copy()
-                    item_data['items.datamatrix'] = dm_code
+                    item_data['task_datamatrix_pool.datamatrix'] = dm_code
                     final_test_data_list.append(item_data)
             else:
                 # Если кодов нет, создаем одну этикетку с DM-заглушкой
-                base_test_data['items.datamatrix'] = f"0104604060006532215!\"#%&'()*+,-./:;<=>?_1234567890ABCDEFGHIJKLM{chr(29)}91EE06{chr(29)}92QUFBQUFBPT0="
+                base_test_data['task_datamatrix_pool.datamatrix'] = f"0104604060006532215!\"#%&'()*+,-./:;<=>?_1234567890ABCDEFGHIJKLM{chr(29)}91EE06{chr(29)}92QUFBQUFBPT0="
                 final_test_data_list.append(base_test_data)
 
             return final_test_data_list
