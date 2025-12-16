@@ -1936,40 +1936,79 @@ class LabelEditorDialog(QDialog):
 
 
 
-        elif obj_type == 'barcode':
+                elif obj_type == 'barcode':
 
 
-            self.prop_data_source_combo.setVisible(True)
 
 
-            self.prop_data_source_combo.setEditable(False)
+
+                    self.prop_data_source_combo.setVisible(True)
 
 
-            self.prop_data_source_combo.clear()
 
 
-            barcode_type = obj_data.get('barcode_type', '').upper()
+
+                    self.prop_data_source_combo.setEditable(False)
 
 
-            sources = {
 
 
-                'QR': self.available_qr_sources,
+
+                    self.prop_data_source_combo.clear()
 
 
-                'SSCC': self.available_sscc_sources,
 
 
-                'DATAMATRIX': self.available_datamatrix_sources
+
+                    barcode_type = obj_data.get('barcode_type', '').upper()
 
 
-            }.get(barcode_type, [])
 
 
-            self.prop_data_source_combo.addItems(sources)
+
+                    sources = {
 
 
-            self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+
+
+                        'QR': self.available_qr_sources,
+
+
+
+
+
+                        'SSCC': self.available_sscc_sources,
+
+
+
+
+
+                        'DATAMATRIX': self.available_datamatrix_sources
+
+
+
+
+
+                    }.get(barcode_type, [])
+
+
+
+
+
+                    self.prop_data_source_combo.addItems(sources)
+
+
+
+
+
+                    self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+
+
+
+
+        
 
 
 
@@ -2048,9 +2087,6 @@ class LabelEditorDialog(QDialog):
 
 
                     self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
-
-
-            self.prop_image_source_combo.setCurrentText(obj_data.get('image_source', ''))
 
 
 
