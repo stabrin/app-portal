@@ -6425,38 +6425,6 @@ if __name__ == '__main__':
     w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
     w.show()
     sys.exit(app.exec())
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
-    w.show()
-    sys.exit(app.exec())
-
-            if not success:
-                raise Exception(f"Не удалось создать заказ: {message}")
-            logging.debug(f"[LentaUpload] Order created/updated with ID: {new_order_id}")
-
-            # Шаг 4: Вставка в aggregation_tasks с реальным order_id
-            with get_client_db_connection(self.user_info) as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    df_unique['order_id'] = new_order_id
-                    df_unique['container_id'] = container_id
-                    df_unique['owner'] = client['name']
-                    
-                    from psycopg2.extras import execute_values
-                    tasks_to_insert = df_unique[['order_id', 'container_id', 'gtin', 'sscc', 'owner']]
-                    insert_query_tasks = f"INSERT INTO aggregation_tasks ({', '.join(tasks_to_insert.columns)}) VALUES %s"
-                    logging.debug(f"[LentaUpload] Preparing to insert {len(tasks_to_insert)} rows into aggregation_tasks.")
-                    execute_values(cur, insert_query_tasks, [tuple(x) for x in tasks_to_insert.to_numpy()])
-                    logging.debug(f"[LentaUpload] Insertion into aggregation_tasks finished.")
-                    conn.commit()
-                logging.debug("[LentaUpload] Transaction for aggregation_tasks committed.")
-
-            QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
-            self.accept()
-        except Exception as e:
-            logging.exception("[LentaUpload] An error occurred during processing.")
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке: {e}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
