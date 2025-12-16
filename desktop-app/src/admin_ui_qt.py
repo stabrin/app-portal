@@ -1372,6 +1372,25 @@ class PrintableObjectItem(QGraphicsRectItem):
             logging.error(f"Ошибка при загрузке изображения: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить изображение: {e}")
 
+    def _delete_selected_object(self):
+        """Удаляет выделенный объект с холста и из шаблона."""
+        if self.selected_object_id is None:
+            QMessageBox.warning(self, "Внимание", "Нет выделенных объектов для удаления.")
+            return
+
+        reply = QMessageBox.question(self, "Подтверждение", "Вы уверены, что хотите удалить выделенный объект?", QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            del self.template['objects'][self.selected_object_id]
+            self.selected_object_id = None
+            self._redraw_canvas()
+            self._update_properties_panel() # Очищаем панель свойств
+        except IndexError:
+            QMessageBox.critical(self, "Ошибка", "Произошла ошибка при удалении объекта (индекс вне диапазона).")
+
+
 class LabelEditorDialog(QDialog):
     """Диалоговое окно для визуального редактора макетов этикеток."""
     def __init__(self, parent, user_info, catalog_service, layout_data=None):
@@ -6430,6 +6449,25 @@ if __name__ == '__main__':
                     execute_values(cur, insert_query_tasks, [tuple(x) for x in tasks_to_insert.to_numpy()])
                     logging.debug(f"[LentaUpload] Insertion into aggregation_tasks finished.")
                     conn.commit()
+                logging.debug("[LentaUpload] Transaction for aggregation_tasks committed.")
+
+            QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
+            self.accept()
+        except Exception as e:
+            logging.exception("[LentaUpload] An error occurred during processing.")
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке: {e}")
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
+    w.show()
+    sys.exit(app.exec())
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
+    w.show()
+    sys.exit(app.exec())
                 logging.debug("[LentaUpload] Transaction for aggregation_tasks committed.")
 
             QMessageBox.information(self, "Успех", f"Уведомление #{new_notif_id} создано и данные успешно обработаны.")
