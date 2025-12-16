@@ -1897,40 +1897,79 @@ class LabelEditorDialog(QDialog):
 
 
 
-        # Настраиваем панель под конкретный тип объекта
+                # Настраиваем панель под конкретный тип объекта
 
 
-        if obj_type == 'text':
 
 
-            self.prop_is_custom_text.setVisible(True)
+
+                if obj_type == 'text':
 
 
-            if obj_data.get('is_custom_text'):
 
 
-                self.prop_data_source_entry.setVisible(True)
+
+                    self.prop_is_custom_text.setVisible(True)
 
 
-                self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
 
 
-            else:
+
+                    if obj_data.get('is_custom_text'):
 
 
-                self.prop_data_source_combo.setVisible(True)
 
 
-                self.prop_data_source_combo.setEditable(False)
+
+                        self.prop_data_source_entry.setVisible(True)
 
 
-                self.prop_data_source_combo.clear()
 
 
-                self.prop_data_source_combo.addItems(self.available_text_sources)
+
+                        self.prop_data_source_entry.setText(obj_data.get('data_source', ''))
 
 
-                self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+
+
+                    else:
+
+
+
+
+
+                        self.prop_data_source_combo.setVisible(True)
+
+
+
+
+
+                        self.prop_data_source_combo.setEditable(False)
+
+
+
+
+
+                        self.prop_data_source_combo.clear()
+
+
+
+
+
+                        self.prop_data_source_combo.addItems(self.available_text_sources)
+
+
+
+
+
+                        self.prop_data_source_combo.setCurrentText(obj_data.get('data_source', ''))
+
+
+
+
+
+        
 
 
 
