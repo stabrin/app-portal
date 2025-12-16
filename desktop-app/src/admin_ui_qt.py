@@ -1354,8 +1354,7 @@ class LabelEditorDialog(QDialog):
         self.selected_object_id = None
         # --- НОВЫЙ БЛОК: Шаблоны и источники данных ---
         self.object_templates = {
-            'text': { "type": "text", "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "ap_workplaces.warehouse_name", "font_name": "arial" },
-            'custom_text': { "type": "text", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "", "font_name": "arial" },
+            'text': { "type": "text", "x_mm": 10, "y_mm": 10, "width_mm": 40, "height_mm": 15, "data_source": "task_datamatrix_pool.name", "font_name": "arial" },
             'qr': { "type": "barcode", "barcode_type": "QR", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "QR: Конфигурация рабочего места" },
             'sscc': { "type": "barcode", "barcode_type": "SSCC", "x_mm": 10, "y_mm": 10, "width_mm": 50, "height_mm": 20, "data_source": "packages.sscc_code" },
             'datamatrix': { "type": "barcode", "barcode_type": "DataMatrix", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "task_datamatrix_pool.datamatrix" },
@@ -1363,10 +1362,10 @@ class LabelEditorDialog(QDialog):
             'text_with_image': { "type": "text_with_image", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 60, "height_mm": 30, "data_source": "", "image_source": "", "font_name": "arial" }
         }
         self.available_text_sources = [
-            "ap_workplaces.warehouse_name",
-            "ap_workplaces.workplace_number",
-            "orders.client_name",
-            "packages.sscc_code"
+            "task_datamatrix_pool.name",
+            "task_datamatrix_pool.description_1",
+            "task_datamatrix_pool.description_2",
+            "task_datamatrix_pool.description_3"
         ]
         self.available_qr_sources = [
             "QR: Конфигурация рабочего места",
@@ -1406,7 +1405,6 @@ class LabelEditorDialog(QDialog):
         btn_add_text_image = QPushButton("Добавить Текст+Картинка")
         btn_add_text_image.clicked.connect(lambda: self._add_object('text_with_image'))
         tools_layout.addWidget(btn_add_text)
-        tools_layout.addWidget(btn_add_custom_text)
         tools_layout.addWidget(btn_add_qr)
         tools_layout.addWidget(btn_add_sscc)
         tools_layout.addWidget(btn_add_dm)
@@ -6365,6 +6363,11 @@ class LentaUploadDialog(QDialog):
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при обработке: {e}")
 
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
+    w.show()
+    sys.exit(app.exec())
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     w = AdminWindowQt({'client_db_config': {}, 'name': 'local-admin'})
