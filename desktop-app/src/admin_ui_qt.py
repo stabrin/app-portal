@@ -5388,11 +5388,6 @@ class AdminWindowQt(QMainWindow):
         self.print_mgmt_printer_combo.currentTextChanged.connect(load_paper_sizes)
         self.print_mgmt_order_combo.currentIndexChanged.connect(load_order_items)
         
-        # --- ИСПРАВЛЕНИЕ: Добавляем метод для печати ---
-        def print_action():
-            QMessageBox.information(self, "В разработке", "Функционал печати находится в разработке.")
-        btn_print.clicked.connect(print_action)
-
         return widget
 
     def _build_layout_management_page(self, parent_notebook):
@@ -5530,7 +5525,7 @@ class AdminWindowQt(QMainWindow):
         # --- Блок для управления файлами ---
         files_group = QGroupBox("Файлы отгрузки")
         files_layout = QVBoxLayout(files_group)
-
+        
         self.supply_files_table = QTableWidget()
         self.supply_files_table.setColumnCount(4)
         self.supply_files_table.setHorizontalHeaderLabels(["ID", "Имя файла", "Тип", "Дата загрузки"])
@@ -5546,7 +5541,7 @@ class AdminWindowQt(QMainWindow):
         btn_download.clicked.connect(lambda: self._download_supply_file())
         btn_delete = QPushButton("Удалить файл")
         btn_delete.clicked.connect(lambda: self._delete_supply_file(notification_id))
-
+        
         buttons_layout.addWidget(btn_upload)
         buttons_layout.addWidget(btn_download)
         buttons_layout.addWidget(btn_delete)
@@ -5564,11 +5559,11 @@ class AdminWindowQt(QMainWindow):
         btn_save_comment.clicked.connect(lambda: self._save_supply_notification_comment(notification_id))
         comment_layout.addWidget(btn_save_comment)
         layout.addWidget(comment_group)
-
+        
         layout.addStretch()
 
         self._set_tab_content(self.order_docs_tab, container_widget)
-
+        
         # Загружаем данные
         self._load_supply_files(notification_id)
         self._load_supply_notification_comment(notification_id)
