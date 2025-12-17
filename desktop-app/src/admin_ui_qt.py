@@ -1321,8 +1321,7 @@ class PrintableObjectItem(QGraphicsRectItem):
             return 'IMG'
         elif obj_type == 'text_with_image':
             return 'Текст+IMG'
-        return obj_type or "object"
-    
+        return obj_type or "object"    
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionHasChanged:
             # Обновляем координаты в исходном словаре данных
@@ -1376,8 +1375,7 @@ class LabelEditorDialog(QDialog):
             'qr': { "type": "barcode", "barcode_type": "QR", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "QR: Конфигурация рабочего места" },
             'sscc': { "type": "barcode", "barcode_type": "SSCC", "x_mm": 10, "y_mm": 10, "width_mm": 50, "height_mm": 20, "data_source": "packages.sscc_code" },
             'datamatrix': { "type": "barcode", "barcode_type": "DataMatrix", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "task_datamatrix_pool.datamatrix" },
-            'image': { "type": "image", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "" },
-            'text_with_image': { "type": "text_with_image", "is_custom_text": True, "x_mm": 10, "y_mm": 10, "width_mm": 60, "height_mm": 30, "data_source": "", "image_source": "", "font_name": "arial" }
+            'image': { "type": "image", "x_mm": 10, "y_mm": 10, "width_mm": 30, "height_mm": 30, "data_source": "" }
         }
         self.available_text_sources = [
             "task_datamatrix_pool.name",
@@ -1423,16 +1421,13 @@ class LabelEditorDialog(QDialog):
         # --- НОВЫЙ БЛОК: Кнопка загрузки изображения ---
         btn_upload_image = QPushButton("Загрузить изображение...")
         btn_upload_image.clicked.connect(self._upload_image)
-        # --- КОНЕЦ НОВОГО БЛОКА ---
-        btn_add_text_image = QPushButton("Добавить Текст+Картинка")
-        btn_add_text_image.clicked.connect(lambda: self._add_object('text_with_image'))
+        # --- КОНЕЦ НОВОГО БЛОКА ---        
         tools_layout.addWidget(btn_add_text)
         tools_layout.addWidget(btn_add_qr)
         tools_layout.addWidget(btn_add_sscc)
         tools_layout.addWidget(btn_add_dm)
         tools_layout.addWidget(btn_add_image)
         tools_layout.addWidget(btn_upload_image) # Добавляем кнопку в layout
-        tools_layout.addWidget(btn_add_text_image)
         tools_layout.addStretch()
 
         # --- ИЗМЕНЕНИЕ: Создаем все возможные виджеты для панели свойств ---
@@ -2001,18 +1996,6 @@ class LabelEditorDialog(QDialog):
 
 
                 obj_data['data_source'] = self.prop_data_source_combo.currentText()
-
-
-
-
-
-            elif obj_type == 'text_with_image':
-
-
-                obj_data['data_source'] = self.prop_data_source_entry.text()
-
-
-                obj_data['image_source'] = self.prop_image_source_combo.currentText()
 
 
 
