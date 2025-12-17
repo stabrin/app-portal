@@ -5320,6 +5320,11 @@ class AdminWindowQt(QMainWindow):
         self.print_mgmt_items_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.print_mgmt_items_table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.print_mgmt_items_table)
+
+        # 6. Кнопка печати
+        btn_print = QPushButton("Напечатать")
+        btn_print.clicked.connect(self._print_from_management_page)
+        layout.addWidget(btn_print)
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
         def load_printers():
