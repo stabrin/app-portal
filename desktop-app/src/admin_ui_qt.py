@@ -5289,6 +5289,9 @@ class AdminWindowQt(QMainWindow):
             layout.addWidget(QLabel("Библиотека 'pywin32' не установлена. Установите ее: pip install pywin32"))
             return widget
 
+        # --- ИСПРАВЛЕНИЕ: Создаем виджет здесь, после успешной проверки ---
+        widget = QWidget()
+
         layout = QVBoxLayout(widget)
         form_layout = QFormLayout()
     
