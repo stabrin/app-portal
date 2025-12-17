@@ -213,9 +213,11 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
             all_details_with_codes = cur.fetchall()
 
             logger.debug(f"Найдено {len(all_details_with_codes)} строк с кодами для обработки.")
-
+            
+            # --- ИСПРАВЛЕНИЕ: Не считать ошибкой, если кодов для импорта нет ---
             if not all_details_with_codes:
-                raise ValueError("Не найдено записей с кодами для импорта в базе данных.")
+                logs.append("Не найдено записей с кодами для импорта. Пропускаю шаг импорта.")
+                return logs # Завершаем функцию без ошибки
 
             # --- НОВАЯ ЛОГИКА: Обрабатываем каждый тираж отдельно ---
             for detail in all_details_with_codes:
@@ -299,12 +301,12 @@ def run_import_from_dmkod(user_info: dict, order_id: int) -> list:
                 if all_packages:
                     packages_df = pd.DataFrame(all_packages)
                     logs.append(f"  -> Загружаю {len(packages_df)} упаковок...")
-                    logger.debug(f"Вызов upsert_data_to_db для {len(packages_df)} упаковок.")
-                    upsert_data_to_db(cur, 'packages', packages_df, 'id')
+                    logger.debug(f"Вызов upsert_data_to_db для {len(packages_df)} упаковок.") # --- ИСПРАВЛЕНИЕ: Аргументы были перепутаны ---
+                    upsert_data_to_db(cur, packages_df, 'packages', 'id')
 
                 logs.append(f"  -> Загружаю {len(items_df)} товаров...")
-                logger.debug(f"Вызов upsert_data_to_db для {len(items_df)} товаров.")
-                upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
+                logger.debug(f"Вызов upsert_data_to_db для {len(items_df)} товаров.") # --- ИСПРАВЛЕНИЕ: Аргументы были перепутаны ---
+                upsert_data_to_db(cur, items_df, 'items', 'datamatrix')
 
         logs.append("\nПроцесс импорта и агрегации успешно завершен!")
         logger.info(f"run_import_from_dmkod: Успешное завершение для order_id={order_id}")
