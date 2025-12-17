@@ -145,6 +145,10 @@ class OrderService:
     def import_products_from_excel(self, filepath: str):
         """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
         df = pd.read_excel(filepath, dtype={'gtin': str})
+        # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
+        # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
+        df = df.where(pd.notna(df), None)
+
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 upsert_data_to_db(cur, 'products', df, 'gtin')
