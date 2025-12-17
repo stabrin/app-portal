@@ -108,7 +108,8 @@ def create_bartender_views(user_info: Dict[str, Any], order_id: int) -> dict:
                 CREATE OR REPLACE VIEW {view_name} AS
                 SELECT
                     o.client_name, o.order_date, i.datamatrix, i.gtin, i.serial,
-                    i.code_8005, i.crypto_part_91, i.crypto_part_92, i.crypto_part_93,
+                    i.r_id, i.artikul, i.code_8005, 
+                    i.crypto_part_91, i.crypto_part_92, i.crypto_part_93,
                     i.tirage_number, i.package_id, p.name AS product_name,
                     p.description_1, p.description_2, p.description_3
                 FROM items i
