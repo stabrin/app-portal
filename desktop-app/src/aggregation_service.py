@@ -468,15 +468,18 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                 
                 if new_gtins:
                     logs.append(f"Найдено {len(new_gtins)} новых GTIN. Создаю для них заглушки...")
+                    logging.debug(f"Creating stub products for GTINs: {new_gtins}")
                     new_products_data = [{'gtin': gtin, 'name': f'Товар (GTIN: {gtin})'} for gtin in new_gtins]
                     new_products_df = pd.DataFrame(new_products_data)
-                    upsert_data_to_db(cur, 'products', new_products_df, 'gtin')
+                    logging.debug(f"Calling upsert_data_to_db for new products. DataFrame is of type: {type(new_products_df)}")
+                    upsert_data_to_db(cur, new_products_df, 'products', 'gtin')
                 else:
                     logs.append("Все GTIN из загрузки уже есть в справочнике.")
 
                 packages_df = pd.DataFrame()
                 if aggregation_mode == 'level1':
                     logs.append(f"\nНачинаю агрегацию...")
+                    logging.debug("Starting aggregation for level1.")
                     all_packages = []
                     items_df['package_id'] = None
                     
@@ -496,14 +499,16 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                 
                 if not packages_df.empty:
                     logs.append(f"\nЗагружаю {len(packages_df)} упаковок в 'packages'...")
-                    upsert_data_to_db(cur, 'packages', packages_df, 'id')
+                    logging.debug(f"Calling upsert_data_to_db for packages. DataFrame is of type: {type(packages_df)}")
+                    upsert_data_to_db(cur, packages_df, 'packages', 'id')
                 
                 logs.append(f"Загружаю {len(items_df)} товаров в 'items'...")
                 # --- ИЗМЕНЕНИЕ: Добавляем r_id и artikul в список колонок для UPSERT ---
                 # Это гарантирует, что новые поля будут сохранены в БД.
                 # Функция upsert_data_to_db автоматически возьмет все колонки из DataFrame.
                 # Убедимся, что эти колонки есть в DataFrame для всех типов загрузки.
-                upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
+                logging.debug(f"Calling upsert_data_to_db for items. DataFrame is of type: {type(items_df)}")
+                upsert_data_to_db(cur, items_df, 'items', 'datamatrix')
                 
                 logs.append("\nОбновляю статус заказа на 'completed'...")
                 cur.execute("UPDATE orders SET status = 'completed' WHERE id = %s", (order_id,))
