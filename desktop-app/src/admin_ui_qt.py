@@ -5295,6 +5295,33 @@ class AdminWindowQt(QMainWindow):
         layout = QVBoxLayout(widget)
         form_layout = QFormLayout()
     
+        # --- ИСПРАВЛЕНИЕ: Возвращаем создание виджетов ---
+        # 1. Выбор принтера
+        self.print_mgmt_printer_combo = QComboBox()
+        form_layout.addRow("Выберите принтер:", self.print_mgmt_printer_combo)
+    
+        # 2. Выбор размера бумаги
+        self.print_mgmt_paper_combo = QComboBox()
+        form_layout.addRow("Выберите размер бумаги:", self.print_mgmt_paper_combo)
+    
+        # 3. Выбор макета
+        self.print_mgmt_layout_combo = QComboBox()
+        form_layout.addRow("Выберите макет:", self.print_mgmt_layout_combo)
+    
+        # 4. Выбор задания (заказа)
+        self.print_mgmt_order_combo = QComboBox()
+        form_layout.addRow("Выберите задание (заказ):", self.print_mgmt_order_combo)
+    
+        layout.addLayout(form_layout)
+    
+        # 5. Таблица с содержимым задания
+        self.print_mgmt_items_table = QTableWidget(0, 3)
+        self.print_mgmt_items_table.setHorizontalHeaderLabels(["GTIN", "Код DataMatrix", "SSCC"])
+        self.print_mgmt_items_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.print_mgmt_items_table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.print_mgmt_items_table)
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
         def load_printers():
             try:
                 printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1)]
