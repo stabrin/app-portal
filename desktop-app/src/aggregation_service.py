@@ -369,7 +369,13 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                             total_lines_skipped += 1
                             continue
                         
-                        parsed_data['r_id'] = row.get("Уникальный порядковый номер")
+                        r_id_str = row.get("Уникальный порядковый номер")
+                        try:
+                            parsed_data['r_id'] = int(r_id_str) if r_id_str else None
+                        except (ValueError, TypeError):
+                            logs.append(f"  -> Пропущена строка {index + 2}: не удалось преобразовать 'Уникальный порядковый номер' ('{r_id_str}') в число.")
+                            total_lines_skipped += 1
+                            continue
                         parsed_data['artikul'] = row.get("Номенклатура.Артикул")
                         parsed_data['order_id'] = order_id
                         parsed_data['tirage_number'] = tirazh_num
@@ -497,7 +503,7 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                 # Это гарантирует, что новые поля будут сохранены в БД.
                 # Функция upsert_data_to_db автоматически возьмет все колонки из DataFrame.
                 # Убедимся, что эти колонки есть в DataFrame для всех типов загрузки.
-                upsert_data_to_db(cur, items_df, 'items', 'datamatrix')
+                upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
                 
                 logs.append("\nОбновляю статус заказа на 'completed'...")
                 cur.execute("UPDATE orders SET status = 'completed' WHERE id = %s", (order_id,))
