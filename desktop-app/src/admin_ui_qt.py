@@ -5285,8 +5285,6 @@ class AdminWindowQt(QMainWindow):
         try:
             import win32print
             import win32ui
-            import win32con
-            from pywintypes import error as pywin_error
         except ImportError:
             widget = QWidget()
             layout = QVBoxLayout(widget)
@@ -5296,28 +5294,7 @@ class AdminWindowQt(QMainWindow):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         form_layout = QFormLayout()
-
-        self.paper_sizes_data = {}
-
-        # 1. Выбор принтера
-        self.print_mgmt_printer_combo = QComboBox()
-        form_layout.addRow("Выберите принтер:", self.print_mgmt_printer_combo)
-
-        # 2. Список размеров бумаги
-        self.print_mgmt_paper_list = QTableWidget(0, 2)
-        self.print_mgmt_paper_list.setHorizontalHeaderLabels(["Формат", "Размер (мм)"])
-        self.print_mgmt_paper_list.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.print_mgmt_paper_list.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.print_mgmt_paper_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.print_mgmt_paper_list.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-
-        # 3. Кнопка тестовой печати
-        btn_test_print = QPushButton("Напечатать тестовую страницу")
-
-        layout.addLayout(form_layout)
-        layout.addWidget(self.print_mgmt_paper_list)
-        layout.addWidget(btn_test_print)
-
+    
         def load_printers():
             try:
                 printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1)]
@@ -5328,59 +5305,7 @@ class AdminWindowQt(QMainWindow):
                         self.print_mgmt_printer_combo.setCurrentText(default_printer)
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось получить список принтеров:\n{e}")
-
-        def load_paper_sizes():
-            self.print_mgmt_paper_list.setRowCount(0)
-            self.paper_sizes_data.clear()
-            try:
-                h_server = win32print.OpenPrinter(None)
-                forms = win32print.EnumForms(h_server)
-                win32print.ClosePrinter(h_server)
-                for form in forms:
-                    if form['Name'].startswith('Tilda_'):
-                        name = form['Name']
-                        width_mm = form['Size']['cx'] / 1000.0
-                        height_mm = form['Size']['cy'] / 1000.0
-                        self.paper_sizes_data[name] = (width_mm, height_mm)
-                        row = self.print_mgmt_paper_list.rowCount()
-                        self.print_mgmt_paper_list.insertRow(row)
-                        self.print_mgmt_paper_list.setItem(row, 0, QTableWidgetItem(name))
-                        self.print_mgmt_paper_list.setItem(row, 1, QTableWidgetItem(f"{width_mm} x {height_mm}"))
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось получить размеры бумаги.\nПодробности в лог-файле: {e}")
-
-        def load_layouts():
-            try:
-                layouts = self.catalogs_service.get_print_layouts()
-                self.print_mgmt_layout_combo.clear() # Очищаем перед заполнением
-                for layout_data in layouts:
-                    self.print_mgmt_layout_combo.addItem(layout_data['name'], userData=layout_data)
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты: {e}")
-
-        def load_orders_for_print():
-            try:
-                orders = self.order_service.get_orders(is_archive=False)
-                for order in orders:
-                    display_text = f"Заказ №{order['id']} - {order['client_name']}"
-                    self.print_mgmt_order_combo.addItem(display_text, userData=order['id'])
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить заказы: {e}")
-
-        def load_order_items():
-            order_id = self.print_mgmt_order_combo.currentData()
-            self.print_mgmt_items_table.setRowCount(0)
-            if not order_id: return
-            try:
-                items = self.order_service.get_items_for_printing(order_id)
-                self.print_mgmt_items_table.setRowCount(len(items))
-                for i, item in enumerate(items):
-                    self.print_mgmt_items_table.setItem(i, 0, QTableWidgetItem(item.get('gtin', '')))
-                    self.print_mgmt_items_table.setItem(i, 1, QTableWidgetItem(item.get('datamatrix', '')))
-                    self.print_mgmt_items_table.setItem(i, 2, QTableWidgetItem(item.get('sscc', '')))
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить содержимое заказа: {e}")
-
+    
         # Загрузка данных и привязка обработчиков
         load_printers()
         load_layouts()
@@ -5389,9 +5314,6 @@ class AdminWindowQt(QMainWindow):
         self.print_mgmt_order_combo.currentIndexChanged.connect(load_order_items)
         
         return widget
-
-    def _build_layout_management_page(self, parent_notebook):
-        """Создает страницу для управления макетами печати."""
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
