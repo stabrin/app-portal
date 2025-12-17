@@ -145,13 +145,16 @@ class OrderService:
     def import_products_from_excel(self, filepath: str):
         """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
         df = pd.read_excel(filepath, dtype={'gtin': str})
+        logging.debug(f"Прочитано {len(df)} строк из Excel-файла: {filepath}")
         # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
         # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
         df = df.where(pd.notna(df), None)
 
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                upsert_data_to_db(cur, 'products', df, 'gtin')
+                # --- ИСПРАВЛЕНИЕ: Аргументы были перепутаны. Правильный порядок: cursor, dataframe, table_name, pk_column ---
+                logging.debug(f"Вызов upsert_data_to_db для таблицы 'products'. Тип DataFrame: {type(df)}. Первые 5 строк:\n{df.head().to_string()}")
+                upsert_data_to_db(cur, df, 'products', 'gtin')
             conn.commit()
         return len(df)
 
