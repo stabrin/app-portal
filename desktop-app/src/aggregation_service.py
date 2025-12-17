@@ -5,7 +5,7 @@ from typing import Optional, Dict, Any
 import codecs
 import pandas as pd
 from psycopg2.extras import RealDictCursor
-from psycopg2 import sql
+from psycopg2 import sql, extras
 import psycopg2
 
 from .db_connector import get_client_db_connection, get_client_db_direct_connection
@@ -549,4 +549,4 @@ def upsert_data_to_db(cursor, dataframe: pd.DataFrame, table_name: str, pk_colum
     )
     
     data_tuples = [tuple(x) for x in dataframe.to_numpy()]
-    execute_values(cursor, query, data_tuples, page_size=1000)
+    extras.execute_values(cursor, query, data_tuples, page_size=1000)
