@@ -4239,6 +4239,8 @@ class AdminWindowQt(QMainWindow):
         self._build_local_clients_tab(notebook)
         self._build_product_groups_tab(notebook)
         # --- ИЗМЕНЕНИЕ: Добавляем вкладку для управления макетами ---
+        self._build_layout_management_page(notebook)
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
         self._build_products_tab(notebook)
         self._build_scenarios_tab(notebook)
 
@@ -5280,7 +5282,15 @@ class AdminWindowQt(QMainWindow):
 
     def _build_print_management_page(self):
         """Создает страницу для управления печатью: выбор принтера, просмотр размеров бумаги и тестовая печать."""
-        widget = QWidget()
+        # --- ИСПРАВЛЕНИЕ: Возвращаем проверку на наличие pywin32 ---
+        try:
+            import win32print
+        except ImportError:
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            layout.addWidget(QLabel("Библиотека 'pywin32' не установлена. Установите ее: pip install pywin32"))
+            return widget
+
         layout = QVBoxLayout(widget)
         form_layout = QFormLayout()
     
