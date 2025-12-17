@@ -5352,8 +5352,9 @@ class AdminWindowQt(QMainWindow):
         def load_layouts():
             try:
                 layouts = self.catalogs_service.get_print_layouts()
-                for layout in layouts:
-                    self.print_mgmt_layout_combo.addItem(layout['name'], userData=layout)
+                self.print_mgmt_layout_combo.clear() # Очищаем перед заполнением
+                for layout_data in layouts:
+                    self.print_mgmt_layout_combo.addItem(layout_data['name'], userData=layout_data)
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты: {e}")
 
@@ -5387,6 +5388,11 @@ class AdminWindowQt(QMainWindow):
         self.print_mgmt_printer_combo.currentTextChanged.connect(load_paper_sizes)
         self.print_mgmt_order_combo.currentIndexChanged.connect(load_order_items)
         
+        # --- ИСПРАВЛЕНИЕ: Добавляем метод для печати ---
+        def print_action():
+            QMessageBox.information(self, "В разработке", "Функционал печати находится в разработке.")
+        btn_print.clicked.connect(print_action)
+
         return widget
 
     def _build_layout_management_page(self, parent_notebook):
