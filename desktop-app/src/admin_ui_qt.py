@@ -5497,7 +5497,8 @@ class AdminWindowQt(QMainWindow):
             self._refresh_print_layouts()
 
     def _delete_selected_layout(self):
-        """Удаляет выбранный макет."""        selected_items = self.print_layouts_table.selectedItems()
+        """Удаляет выбранный макет."""
+        selected_items = self.print_layouts_table.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "Внимание", "Выберите макет для удаления.")
             return
@@ -5515,14 +5516,15 @@ class AdminWindowQt(QMainWindow):
     # --- NEW METHODS FOR ORDER DOCUMENTS TAB ---
 
     def _setup_order_docs_tab(self, notification_id, scenario_data):
-        """Настраивает содержимое вкладки 'Документы' для выбранного уведомления."""        # Используем _set_tab_content для полной замены содержимого
+        """Настраивает содержимое вкладки 'Документы' для выбранного уведомления."""
+        # Используем _set_tab_content для полной замены содержимого
         container_widget = QWidget()
         layout = QVBoxLayout(container_widget)
 
         # --- Блок для управления файлами ---
         files_group = QGroupBox("Файлы отгрузки")
         files_layout = QVBoxLayout(files_group)
-        
+
         self.supply_files_table = QTableWidget()
         self.supply_files_table.setColumnCount(4)
         self.supply_files_table.setHorizontalHeaderLabels(["ID", "Имя файла", "Тип", "Дата загрузки"])
@@ -5538,7 +5540,7 @@ class AdminWindowQt(QMainWindow):
         btn_download.clicked.connect(lambda: self._download_supply_file())
         btn_delete = QPushButton("Удалить файл")
         btn_delete.clicked.connect(lambda: self._delete_supply_file(notification_id))
-        
+
         buttons_layout.addWidget(btn_upload)
         buttons_layout.addWidget(btn_download)
         buttons_layout.addWidget(btn_delete)
@@ -5556,11 +5558,11 @@ class AdminWindowQt(QMainWindow):
         btn_save_comment.clicked.connect(lambda: self._save_supply_notification_comment(notification_id))
         comment_layout.addWidget(btn_save_comment)
         layout.addWidget(comment_group)
-        
+
         layout.addStretch()
 
         self._set_tab_content(self.order_docs_tab, container_widget)
-        
+
         # Загружаем данные
         self._load_supply_files(notification_id)
         self._load_supply_notification_comment(notification_id)
