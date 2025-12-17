@@ -1014,7 +1014,7 @@ class CodeUploadFrameQt(QWidget):
         dm_type_layout = QHBoxLayout()
         dm_type_layout.addWidget(QLabel("Тип кодов DataMatrix:"))
         self.dm_type_combo = QComboBox()
-        self.dm_type_combo.addItems(["standard", "tobacco"])
+        self.dm_type_combo.addItems(["standard", "tobacco", "Росмен"])
         dm_type_layout.addWidget(self.dm_type_combo)
         dm_type_layout.addStretch()
         main_layout.addLayout(dm_type_layout)

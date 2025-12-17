@@ -343,7 +343,7 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                 with codecs.open(file_path, 'r', encoding='utf-8-sig') as f:
                     lines = f.readlines()
             else: # 'standard'
-                logs.append("  -> Использую стандартный метод чтения (open).")
+                logs.append(f"  -> Использую стандартный метод чтения (open) для типа '{dm_type}'.")
                 with open(file_path, 'r', encoding='utf-8') as f:
                     lines = f.readlines()
             
@@ -364,7 +364,7 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                         total_lines_skipped += 1
                         continue
                 else: # 'standard'
-                    parsed_data = parse_datamatrix(dm_string)
+                    parsed_data = parse_datamatrix(dm_string) # Для 'standard' и 'Росмен' используется один парсер
 
                 if not parsed_data.get('gtin'):
                     logs.append(f"  -> Пропущена строка {line_num}: не удалось распознать GTIN.")
