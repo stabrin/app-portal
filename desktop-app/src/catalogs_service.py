@@ -2,6 +2,7 @@
 
 import json
 import logging
+import psycopg2
 import pandas as pd
 from psycopg2.extras import RealDictCursor, execute_values
 from .api_service import ApiService
