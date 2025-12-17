@@ -4239,8 +4239,6 @@ class AdminWindowQt(QMainWindow):
         self._build_local_clients_tab(notebook)
         self._build_product_groups_tab(notebook)
         # --- ИЗМЕНЕНИЕ: Добавляем вкладку для управления макетами ---
-        self._build_layout_management_page(notebook)
-        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
         self._build_products_tab(notebook)
         self._build_scenarios_tab(notebook)
 
