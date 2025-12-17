@@ -5349,9 +5349,44 @@ class AdminWindowQt(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось получить размеры бумаги.\nПодробности в лог-файле: {e}")
 
-        self.print_mgmt_printer_combo.currentTextChanged.connect(load_paper_sizes)
-        load_printers()
+        def load_layouts():
+            try:
+                layouts = self.catalogs_service.get_print_layouts()
+                for layout in layouts:
+                    self.print_mgmt_layout_combo.addItem(layout['name'], userData=layout)
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты: {e}")
 
+        def load_orders_for_print():
+            try:
+                orders = self.order_service.get_orders(is_archive=False)
+                for order in orders:
+                    display_text = f"Заказ №{order['id']} - {order['client_name']}"
+                    self.print_mgmt_order_combo.addItem(display_text, userData=order['id'])
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить заказы: {e}")
+
+        def load_order_items():
+            order_id = self.print_mgmt_order_combo.currentData()
+            self.print_mgmt_items_table.setRowCount(0)
+            if not order_id: return
+            try:
+                items = self.order_service.get_items_for_printing(order_id)
+                self.print_mgmt_items_table.setRowCount(len(items))
+                for i, item in enumerate(items):
+                    self.print_mgmt_items_table.setItem(i, 0, QTableWidgetItem(item.get('gtin', '')))
+                    self.print_mgmt_items_table.setItem(i, 1, QTableWidgetItem(item.get('datamatrix', '')))
+                    self.print_mgmt_items_table.setItem(i, 2, QTableWidgetItem(item.get('sscc', '')))
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить содержимое заказа: {e}")
+
+        # Загрузка данных и привязка обработчиков
+        load_printers()
+        load_layouts()
+        load_orders_for_print()
+        self.print_mgmt_printer_combo.currentTextChanged.connect(load_paper_sizes)
+        self.print_mgmt_order_combo.currentIndexChanged.connect(load_order_items)
+        
         return widget
 
     def _build_layout_management_page(self, parent_notebook):
@@ -5462,8 +5497,7 @@ class AdminWindowQt(QMainWindow):
             self._refresh_print_layouts()
 
     def _delete_selected_layout(self):
-        """Удаляет выбранный макет."""
-        selected_items = self.print_layouts_table.selectedItems()
+        """Удаляет выбранный макет."""        selected_items = self.print_layouts_table.selectedItems()
         if not selected_items:
             QMessageBox.warning(self, "Внимание", "Выберите макет для удаления.")
             return
@@ -5481,8 +5515,7 @@ class AdminWindowQt(QMainWindow):
     # --- NEW METHODS FOR ORDER DOCUMENTS TAB ---
 
     def _setup_order_docs_tab(self, notification_id, scenario_data):
-        """Настраивает содержимое вкладки 'Документы' для выбранного уведомления."""
-        # Используем _set_tab_content для полной замены содержимого
+        """Настраивает содержимое вкладки 'Документы' для выбранного уведомления."""        # Используем _set_tab_content для полной замены содержимого
         container_widget = QWidget()
         layout = QVBoxLayout(container_widget)
 

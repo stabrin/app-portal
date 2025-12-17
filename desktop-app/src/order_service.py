@@ -403,6 +403,22 @@ class OrderService:
                 """, (order_id,))
                 return cur.fetchall()
 
+    def get_items_for_printing(self, order_id: int):
+        """Возвращает список товаров с кодами для печати."""
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                query = """
+                    SELECT 
+                        i.gtin,
+                        i.datamatrix,
+                        p.sscc
+                    FROM items i
+                    LEFT JOIN packages p ON i.package_id = p.id
+                    WHERE i.order_id = %s
+                    ORDER BY p.sscc, i.datamatrix;
+                """
+                cur.execute(query, (order_id,))
+                return cur.fetchall()
 
     def get_order_summary(self, order_id: int):
         """
