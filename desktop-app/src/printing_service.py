@@ -390,7 +390,7 @@ class PrintingService:
                     try:
                         with PrintingService._get_client_db_connection(user_info) as conn:
 
-                            with conn.cursor() as cur:
+                            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                                 cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
                                 result = cur.fetchone()
                         if result:
@@ -399,7 +399,7 @@ class PrintingService:
                             
                             # Центрируем изображение по вертикали в его области
                             paste_y = img_y + (img_h - img_obj.height) // 2
-                            temp_layer.paste(img_obj, (img_x, paste_y), img_obj)
+                            target_draw.paste(img_obj, (img_x, paste_y), img_obj)
                         else:
                             logging.warning(f"Изображение '{image_name}' не найдено для объекта text_with_image.")
                     except Exception as e:
@@ -421,11 +421,11 @@ class PrintingService:
                     try:
                         # Пытаемся получить изображение из БД
                         with PrintingService._get_client_db_connection(user_info) as conn:
-                            with conn.cursor() as cur:
+                            with conn.cursor(cursor_factory=RealDictCursor) as cur:
                                 cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
                                 result = cur.fetchone()
                         if result:
-                            image_bytes = result[0]
+                            image_bytes = result['image_data']
                             img_obj = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
                             # --- УЛУЧШЕНИЕ: Используем thumbnail для сохранения пропорций ---
                             # Это предотвратит искажение изображения, если его пропорции не совпадают с объектом.

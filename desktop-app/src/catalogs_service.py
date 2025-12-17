@@ -392,18 +392,18 @@ class CatalogsService:
         """Проверяет и при необходимости создает таблицу для хранения изображений."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT to_regclass('public.label_images')")
+                cur.execute("SELECT to_regclass('public.ap_images')")
                 if cur.fetchone()[0] is None:
-                    logger.warning("Таблица 'label_images' не найдена. Создание таблицы...")
+                    logger.warning("Таблица 'ap_images' не найдена. Создание таблицы...")
                     cur.execute("""
-                        CREATE TABLE label_images (
+                        CREATE TABLE ap_images (
                             name TEXT NOT NULL PRIMARY KEY,
                             image_data BYTEA,
                             uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                         )
                     """)
                     conn.commit()
-                    logger.info("Таблица 'label_images' успешно создана.")
+                    logger.info("Таблица 'ap_images' успешно создана.")
 
     def upload_image(self, name: str, data: bytes):
         """Загружает или обновляет изображение в БД."""
@@ -413,7 +413,7 @@ class CatalogsService:
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO label_images (name, image_data, uploaded_at)
+                    INSERT INTO ap_images (name, image_data, uploaded_at)
                     VALUES (%s, %s, NOW())
                     ON CONFLICT (name) DO UPDATE SET
                         image_data = EXCLUDED.image_data,
@@ -426,7 +426,7 @@ class CatalogsService:
         """Возвращает список имен всех изображений из БД."""
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT name FROM label_images ORDER BY name")
+                cur.execute("SELECT name FROM ap_images ORDER BY name")
                 return [row[0] for row in cur.fetchall()]
 
     
