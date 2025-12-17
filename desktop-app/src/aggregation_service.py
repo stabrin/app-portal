@@ -342,6 +342,42 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                 logs.append("  -> Использую специфический метод чтения для табачных кодов (codecs.open).")
                 with codecs.open(file_path, 'r', encoding='utf-8-sig') as f:
                     lines = f.readlines()
+            elif dm_type == 'Росмен':
+                logs.append("  -> Использую специфический метод чтения для 'Росмен' (pandas.read_csv).")
+                try:
+                    df = pd.read_csv(file_path, sep='\t', encoding='utf-8-sig', dtype=str)
+                    df = df.where(pd.notna(df), None) # Заменяем NaN на None для совместимости с БД
+                    logs.append(f"  [Отладка] Файл прочитан. Общее количество полученных строк: {len(df)}")
+
+                    required_cols = ["Полный код маркировки", "Уникальный порядковый номер", "Номенклатура.Артикул"]
+                    if not all(col in df.columns for col in required_cols):
+                        missing_cols = [col for col in required_cols if col not in df.columns]
+                        logs.append(f"ОШИБКА: В файле отсутствуют необходимые колонки: {', '.join(missing_cols)}. Файл пропущен.")
+                        continue
+
+                    for index, row in df.iterrows():
+                        total_lines_processed += 1
+                        dm_string = row.get("Полный код маркировки")
+                        if not dm_string:
+                            logs.append(f"  -> Пропущена строка {index + 2}: отсутствует значение в 'Полный код маркировки'.")
+                            total_lines_skipped += 1
+                            continue
+                        
+                        parsed_data = parse_datamatrix(dm_string)
+                        if not parsed_data.get('gtin'):
+                            logs.append(f"  -> Пропущена строка {index + 2}: не удалось распознать GTIN.")
+                            total_lines_skipped += 1
+                            continue
+                        
+                        parsed_data['r_id'] = row.get("Уникальный порядковый номер")
+                        parsed_data['artikul'] = row.get("Номенклатура.Артикул")
+                        parsed_data['order_id'] = order_id
+                        parsed_data['tirage_number'] = tirazh_num
+                        all_dm_data.append(parsed_data)
+                    continue # Переходим к следующему файлу, так как этот уже обработан
+                except Exception as e:
+                    logs.append(f"ОШИБКА при обработке файла 'Росмен' '{original_filename}': {e}. Файл пропущен.")
+                    continue
             else: # 'standard'
                 logs.append(f"  -> Использую стандартный метод чтения (open) для типа '{dm_type}'.")
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -410,7 +446,11 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                 
                 logs.append("Проверка на дубликаты пройдена успешно. Ранее обработанных кодов не найдено.")
                 unique_gtins_in_upload = items_df['gtin'].unique()
-                logs.append(f"\nПроверяю наличие {len(unique_gtins_in_upload)} уникальных GTIN в справочнике...")
+                # --- ИСПРАВЛЕНИЕ: Добавляем проверку на пустой список GTIN ---
+                if len(unique_gtins_in_upload) == 0:
+                    logs.append("\nВ загруженных файлах не найдено ни одного корректного GTIN. Процесс прерван.")
+                    return logs
+                logs.append(f"\nПроверяю наличие {len(unique_gtins_in_upload)} уникальных GTIN в справочнике 'products'...")
                 gtins_tuple = tuple(unique_gtins_in_upload)
                 if not gtins_tuple:
                      existing_gtins = set()
@@ -453,7 +493,11 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                     upsert_data_to_db(cur, 'packages', packages_df, 'id')
                 
                 logs.append(f"Загружаю {len(items_df)} товаров в 'items'...")
-                upsert_data_to_db(cur, 'items', items_df, 'datamatrix')
+                # --- ИЗМЕНЕНИЕ: Добавляем r_id и artikul в список колонок для UPSERT ---
+                # Это гарантирует, что новые поля будут сохранены в БД.
+                # Функция upsert_data_to_db автоматически возьмет все колонки из DataFrame.
+                # Убедимся, что эти колонки есть в DataFrame для всех типов загрузки.
+                upsert_data_to_db(cur, items_df, 'items', 'datamatrix')
                 
                 logs.append("\nОбновляю статус заказа на 'completed'...")
                 cur.execute("UPDATE orders SET status = 'completed' WHERE id = %s", (order_id,))
@@ -467,3 +511,31 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
         logs.append("Все изменения в базе данных отменены.")
     
     return logs
+
+def upsert_data_to_db(cursor, dataframe: pd.DataFrame, table_name: str, pk_column: str):
+    """
+    Универсальная функция для UPSERT данных из DataFrame в таблицу.
+    """
+    if dataframe is None or dataframe.empty:
+        return
+
+    columns = dataframe.columns.tolist()
+    
+    # Обработка составного первичного ключа
+    pk_list = pk_column if isinstance(pk_column, list) else [pk_column]
+    conflict_target = sql.SQL(', ').join(map(sql.Identifier, pk_list))
+
+    update_columns = [col for col in columns if col not in pk_list]
+    
+    set_clause = sql.SQL(', ').join(
+        sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col)) for col in update_columns
+    )
+    
+    action_on_conflict = sql.SQL("DO UPDATE SET {set_clause}").format(set_clause=set_clause) if update_columns else sql.SQL("DO NOTHING")
+    
+    query = sql.SQL("INSERT INTO {table} ({cols}) VALUES %s ON CONFLICT ({pk}) {action}").format(
+        table=sql.Identifier(table_name), cols=sql.SQL(', ').join(map(sql.Identifier, columns)), pk=conflict_target, action=action_on_conflict
+    )
+    
+    data_tuples = [tuple(x) for x in dataframe.to_numpy()]
+    execute_values(cursor, query, data_tuples, page_size=1000)

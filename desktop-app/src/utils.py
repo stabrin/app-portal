@@ -51,32 +51,25 @@ def resource_path(relative_path):
 
     return project_root_path(relative_path)
 
-def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_column: str):
+def upsert_data_to_db(cursor, dataframe: pd.DataFrame, table_name: str, pk_column):
     """
-    Универсальная функция для UPSERT данных.
+    Универсальная функция для UPSERT данных из DataFrame в таблицу.
     """
     if dataframe is None or dataframe.empty:
         return
 
     columns = dataframe.columns.tolist()
     
-    if isinstance(pk_column, list):
-        conflict_target = sql.SQL(', ').join(map(sql.Identifier, pk_column))
-        pk_list = pk_column
-    else:
-        conflict_target = sql.Identifier(pk_column)
-        pk_list = [pk_column]
+    # Обработка составного первичного ключа
+    pk_list = pk_column if isinstance(pk_column, list) else [pk_column]
+    conflict_target = sql.SQL(', ').join(map(sql.Identifier, pk_list))
 
     update_columns = [col for col in columns if col not in pk_list]
     
     set_clause = sql.SQL(', ').join(
         sql.SQL("{0} = EXCLUDED.{0}").format(sql.Identifier(col)) for col in update_columns
     )
-    
-    if not update_columns:
-        action_on_conflict = sql.SQL("DO NOTHING")
-    else:
-        action_on_conflict = sql.SQL("DO UPDATE SET {set_clause}").format(set_clause=set_clause)
+    action_on_conflict = sql.SQL("DO UPDATE SET {set_clause}").format(set_clause=set_clause) if update_columns else sql.SQL("DO NOTHING")
     
     query = sql.SQL("INSERT INTO {table} ({cols}) VALUES %s ON CONFLICT ({pk}) {action}").format(
         table=sql.Identifier(table_name),
@@ -84,6 +77,6 @@ def upsert_data_to_db(cursor, table_name: str, dataframe: pd.DataFrame, pk_colum
         pk=conflict_target,
         action=action_on_conflict
     )
-    df_prepared = dataframe.where(pd.notna(dataframe), None)
-    data_tuples = [tuple(x) for x in df_prepared.itertuples(index=False)]
+    
+    data_tuples = [tuple(x) for x in dataframe.to_numpy()]
     execute_values(cursor, query, data_tuples, page_size=1000)
