@@ -60,6 +60,24 @@ class PrintingService:
     """Сервис для генерации и печати документов."""
 
     @staticmethod
+    def _ensure_images_table_exists(conn):
+        """Проверяет и при необходимости создает таблицу для хранения изображений."""
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.ap_images')")
+            if cur.fetchone()[0] is None:
+                logging.warning("Таблица 'ap_images' не найдена. Создание таблицы...")
+                cur.execute("""
+                    CREATE TABLE ap_images (
+                        name TEXT NOT NULL PRIMARY KEY,
+                        image_data BYTEA,
+                        uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                    )
+                """)
+                conn.commit()
+                logging.info("Таблица 'ap_images' успешно создана.")
+
+
+    @staticmethod
     def _get_client_db_connection(user_info: Dict[str, Any]) -> Optional[psycopg2.extensions.connection]:
         """Создает подключение к базе данных клиента."""
         logging.debug("Попытка установить соединение с БД клиента.")
@@ -390,6 +408,7 @@ class PrintingService:
                     try:
                         with PrintingService._get_client_db_connection(user_info) as conn:
 
+                            PrintingService._ensure_images_table_exists(conn)
                             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                                 cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
                                 result = cur.fetchone()
@@ -421,6 +440,7 @@ class PrintingService:
                     try:
                         # Пытаемся получить изображение из БД
                         with PrintingService._get_client_db_connection(user_info) as conn:
+                            PrintingService._ensure_images_table_exists(conn)
                             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                                 cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
                                 result = cur.fetchone()

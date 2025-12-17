@@ -390,20 +390,7 @@ class CatalogsService:
 
     def _ensure_images_table_exists(self):
         """Проверяет и при необходимости создает таблицу для хранения изображений."""
-        with self.get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT to_regclass('public.ap_images')")
-                if cur.fetchone()[0] is None:
-                    logger.warning("Таблица 'ap_images' не найдена. Создание таблицы...")
-                    cur.execute("""
-                        CREATE TABLE ap_images (
-                            name TEXT NOT NULL PRIMARY KEY,
-                            image_data BYTEA,
-                            uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-                        )
-                    """)
-                    conn.commit()
-                    logger.info("Таблица 'ap_images' успешно создана.")
+        pass # Логика перенесена в printing_service для централизации
 
     def upload_image(self, name: str, data: bytes):
         """Загружает или обновляет изображение в БД."""
@@ -413,12 +400,11 @@ class CatalogsService:
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("""
-                    INSERT INTO ap_images (name, image_data, uploaded_at)
-                    VALUES (%s, %s, NOW())
+                    INSERT INTO ap_images (name, image_data)
+                    VALUES (%s, %s)
                     ON CONFLICT (name) DO UPDATE SET
-                        image_data = EXCLUDED.image_data,
-                        uploaded_at = NOW();
-                """, (name, data))
+                        image_data = EXCLUDED.image_data;
+                """, (name, psycopg2.Binary(data)))
             conn.commit()
         logger.info(f"Изображение '{name}' успешно загружено.")
 
