@@ -225,6 +225,8 @@ class PrintDialogQt(QDialog):
         self._build_ui()
         self._load_printers()
         self._load_layouts()
+        # --- ИСПРАВЛЕНИЕ: Загружаем размеры бумаги для принтера по умолчанию при инициализации ---
+        self._load_paper_sizes(self.printer_combo.currentText())
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
