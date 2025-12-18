@@ -5346,6 +5346,10 @@ class AdminWindowQt(QMainWindow):
         self.print_mgmt_order_combo.currentIndexChanged.connect(load_order_items)
         
         return widget
+
+    def _print_from_management_page(self):
+        """Заглушка для функции печати со страницы управления печатью."""
+        QMessageBox.information(self, "В разработке", "Функционал печати с этой страницы находится в разработке.")
         tab = QWidget()
         layout = QVBoxLayout(tab)
 
