@@ -256,6 +256,21 @@ class PrintingService:
 
         return font # Возвращаем самый маленький из попробованных, если ничего не подошло
     @staticmethod
+    def _get_sscc_human_readable(sscc: str) -> str:
+        """
+        Форматирует SSCC для человекочитаемого представления.
+        Пример: (00) 0 4604060 006532 5
+        """
+        if len(sscc) != 18:
+            return sscc # Возвращаем как есть, если длина неверная
+        
+        part1 = sscc[0]
+        part2 = sscc[1:8]
+        part3 = sscc[8:17]
+        part4 = sscc[17]
+        return f"(00) {part1} {part2} {part3} {part4}"
+
+    @staticmethod
     def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], text_cache: Optional[Dict] = None, static_layers_cache: Optional[Dict] = None) -> Optional[Image.Image]:
         """Генерирует изображение этикетки с помощью Pillow."""
         logging.info("Начало генерации изображения этикетки.")
@@ -520,12 +535,31 @@ class PrintingService:
                         try:
                             Code128 = barcode.get_barcode_class('code128')
                             code128_barcode = Code128(str(obj_data), writer=ImageWriter())
-                            # Настройки для генерации изображения
-                            options = {'module_height': 10.0, 'module_width': 0.25, 'font_size': 1, 'text_distance': 1.0, 'quiet_zone': 2.0}
+                            # --- ИЗМЕНЕНИЕ: Отключаем стандартный текст под ШК ---
+                            options = {
+                                'module_height': 10.0, 
+                                'module_width': 0.25, 
+                                'write_text': False, # Не рисуем текст библиотекой
+                                'quiet_zone': 2.0
+                            }
                             pil_image = code128_barcode.render(writer_options=options)
                             
-                            # Масштабируем до нужных размеров
-                            pil_image = pil_image.resize((width, height), Image.Resampling.LANCZOS)
+                            # --- НОВЫЙ БЛОК: Рисуем свой текст под ШК ---
+                            human_readable_text = PrintingService._get_sscc_human_readable(str(obj_data))
+                            try:
+                                text_font = ImageFont.truetype("arialbd.ttf", size=32) # Полужирный Arial
+                            except IOError:
+                                text_font = ImageFont.load_default()
+
+                            # Создаем новый холст, чуть выше, чтобы вместить текст
+                            new_height = pil_image.height + 40 # Добавляем 40 пикселей для текста
+                            final_barcode_image = Image.new('RGB', (pil_image.width, new_height), 'white')
+                            final_barcode_image.paste(pil_image, (0, 0))
+                            barcode_draw = ImageDraw.Draw(final_barcode_image)
+                            barcode_draw.text((pil_image.width / 2, pil_image.height + 5), human_readable_text, font=text_font, fill="black", anchor="mt")
+                            pil_image = final_barcode_image # Заменяем исходное изображение на новое с текстом
+                            # --- КОНЕЦ НОВОГО БЛОКА ---
+                            pil_image = pil_image.resize((width, height), Image.Resampling.LANCZOS) # Масштабируем до нужных размеров
                             label_image.paste(pil_image, (x, y))
                         except Exception as e:
                             logging.error(f"Ошибка генерации Code128: {e}", exc_info=True)
