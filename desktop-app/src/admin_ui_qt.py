@@ -5338,6 +5338,45 @@ class AdminWindowQt(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось получить список принтеров:\n{e}")
     
+        def load_layouts():
+            """Загружает макеты в соответствующий комбо-бокс."""
+            try:
+                layouts = self.catalogs_service.get_print_layouts()
+                self.print_mgmt_layout_combo.clear()
+                for layout in layouts:
+                    self.print_mgmt_layout_combo.addItem(layout['name'], userData=layout)
+            except Exception as e:
+                logging.error(f"Ошибка загрузки макетов для страницы печати: {e}", exc_info=True)
+
+        def load_paper_sizes(*args):
+            """Загружает размеры бумаги для выбранного принтера."""
+            printer_name = self.print_mgmt_printer_combo.currentText()
+            if not printer_name: return
+            
+            self.print_mgmt_paper_combo.clear()
+            try:
+                import win32print
+                h_printer = win32print.OpenPrinter(printer_name)
+                try:
+                    forms = win32print.EnumForms(h_printer)
+                    paper_names = [form['Name'] for form in forms if form['Name'].startswith('Tilda_')]
+                    self.print_mgmt_paper_combo.addItems(sorted(paper_names))
+                finally:
+                    win32print.ClosePrinter(h_printer)
+            except Exception as e:
+                logging.error(f"Ошибка получения размеров бумаги: {e}", exc_info=True)
+
+        def load_orders_for_print():
+            """Загружает список заказов, готовых к печати."""
+            try:
+                # Загружаем только заказы со статусом 'completed'
+                orders = [o for o in self.order_service.get_orders(is_archive=False) if o.get('status') == 'completed']
+                self.print_mgmt_order_combo.clear()
+                for order in orders:
+                    self.print_mgmt_order_combo.addItem(f"Заказ №{order['id']} - {order['client_name']}", userData=order['id'])
+            except Exception as e:
+                logging.error(f"Ошибка загрузки заказов для печати: {e}", exc_info=True)
+
         # Загрузка данных и привязка обработчиков
         load_printers()
         load_layouts()
