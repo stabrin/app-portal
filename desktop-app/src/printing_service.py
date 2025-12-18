@@ -513,7 +513,7 @@ class PrintingService:
                         except Exception as e:
                             logging.error(f"Ошибка генерации DataMatrix для данных '{data_str}': {e}", exc_info=True)
                             continue
-                    elif barcode_type == "CODE128":
+                    elif barcode_type in ["CODE128", "SSCC"]:
                         if not barcode:
                             logging.warning("Библиотека python-barcode не установлена. Пропуск Code128.")
                             continue
