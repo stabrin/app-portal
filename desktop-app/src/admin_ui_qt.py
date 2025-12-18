@@ -6200,19 +6200,15 @@ class AdminWindowQt(QMainWindow):
             self._save_sscc_to_file(ssccs)
         else: # QMessageBox.Yes
             try:
-                layouts = self.catalogs_service.get_print_layouts()
-                if not layouts:
-                    QMessageBox.warning(self, "Нет макетов", "Не найдено ни одного макета для печати.")
-                    return
-
-                dialog = LayoutSelectionDialog(layouts, self)
-                if dialog.exec():
-                    selected_layout = dialog.selected_layout
-                    if selected_layout:
-                        # Подготавливаем данные для печати
-                        items_to_print = [{'sscc_code': code} for code in ssccs]
-                        print_dialog = PrintDialogQt(self, self.user_info, "Печать SSCC", items_to_print, preselected_layout=selected_layout['name'])
-                        print_dialog.exec()
+                # --- ИЗМЕНЕНИЕ: Убираем лишний диалог выбора макета ---
+                # Сразу открываем основной диалог печати.
+                items_to_print = [{'sscc_code': code} for code in ssccs]
+                print_dialog = PrintDialogQt(self, self.user_info, "Печать SSCC", items_to_print)
+                
+                # Если пользователь прошел весь путь и нажал "Напечатать",
+                # то после этого предлагаем сохранить коды в файл.
+                if print_dialog.exec():
+                    self._save_sscc_to_file(ssccs)
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось запустить печать: {e}")
 
