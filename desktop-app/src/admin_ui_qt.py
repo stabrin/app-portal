@@ -4241,6 +4241,11 @@ class AdminWindowQt(QMainWindow):
         # --- ИЗМЕНЕНИЕ: Добавляем вкладку для управления макетами ---
         self._build_products_tab(notebook)
         self._build_scenarios_tab(notebook)
+        # --- НОВЫЙ ВЫЗОВ: Добавляем вкладку для макетов печати ---
+        self._build_print_layouts_tab(notebook)
+
+        # --- ИСПРАВЛЕНИЕ: Переносим вызов сюда, чтобы вкладка создавалась в правильном месте ---
+        self._build_print_layouts_tab(notebook)
 
         return widget
 
@@ -5406,45 +5411,6 @@ class AdminWindowQt(QMainWindow):
 
     def _print_from_management_page(self):
         """Заглушка для функции печати со страницы управления печатью."""
-        QMessageBox.information(self, "В разработке", "Функционал печати с этой страницы находится в разработке.")
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-
-        controls_layout = QHBoxLayout()
-        btn_create = QPushButton("Создать макет")
-        btn_create.clicked.connect(self._create_new_layout)
-        btn_edit = QPushButton("Редактировать макет")
-        btn_edit.clicked.connect(self._edit_selected_layout)
-        btn_delete = QPushButton("Удалить макет")
-        btn_delete.clicked.connect(self._delete_selected_layout)
-        btn_refresh = QPushButton("Обновить")
-        btn_refresh.clicked.connect(self._refresh_print_layouts)
-        
-        controls_layout.addWidget(btn_create)
-        controls_layout.addWidget(btn_edit)
-        controls_layout.addWidget(btn_delete)
-        controls_layout.addStretch()
-        controls_layout.addWidget(btn_refresh)
-        layout.addLayout(controls_layout)
-
-        self.print_layouts_table = QTableWidget(0, 2)
-        self.print_layouts_table.setHorizontalHeaderLabels(["Название макета", "Размер (мм)"])
-        self.print_layouts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.print_layouts_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.print_layouts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.print_layouts_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.print_layouts_table.doubleClicked.connect(self._edit_selected_layout)
-        layout.addWidget(self.print_layouts_table)
-
-        parent_notebook.addTab(tab, "Макеты печати")
-
-        # Загрузка данных
-        self._refresh_print_layouts()
-
-        return tab
-
-    def _refresh_print_layouts(self):
-        """Загружает список макетов в таблицу."""
         logging.debug("Starting refresh of print layouts.")
         try:
             self.print_layouts_table.setRowCount(0)
@@ -5465,6 +5431,10 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             logging.error(f"Failed to load print layouts: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты печати: {e}")
+
+    def _print_from_management_page(self):
+        """Заглушка для функции печати со страницы управления печатью."""
+        QMessageBox.information(self, "В разработке", "Функционал печати с этой страницы находится в разработке.")
 
     def _create_new_layout(self):
         """Открывает диалог для создания нового макета."""
