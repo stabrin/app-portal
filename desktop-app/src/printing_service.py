@@ -31,6 +31,13 @@ except ImportError:
     logging.warning("Библиотека pylibdmtx не установлена. Установите: pip install pylibdmtx")
     dmtx_encode = None
 
+try:
+    import barcode
+    from barcode.writer import ImageWriter
+except ImportError:
+    logging.warning("Библиотека python-barcode не установлена. Установите: pip install python-barcode")
+    barcode = None
+
 
 try:
     import win32print
@@ -504,6 +511,26 @@ class PrintingService:
                         logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
                         draw.rectangle([x, y, x + width, y + height], outline="red", fill="white")
                         draw.text((x + 5, y + 5), f"Unsupported:\n{barcode_type}", fill="red")
+
+                    # --- НОВЫЙ БЛОК: Генерация Code128 (для пропусков) ---
+                    elif barcode_type.upper() == "CODE128":
+                        if not barcode:
+                            logging.warning("Библиотека python-barcode не установлена. Пропуск Code128.")
+                            continue
+                        try:
+                            Code128 = barcode.get_barcode_class('code128')
+                            code128_barcode = Code128(str(obj_data), writer=ImageWriter())
+                            # Настройки для генерации изображения
+                            options = {'module_height': 10.0, 'module_width': 0.25, 'font_size': 1, 'text_distance': 1.0, 'quiet_zone': 2.0}
+                            pil_image = code128_barcode.render(writer_options=options)
+                            
+                            # Масштабируем до нужных размеров
+                            pil_image = pil_image.resize((width, height), Image.Resampling.LANCZOS)
+                            label_image.paste(pil_image, (x, y))
+                        except Exception as e:
+                            logging.error(f"Ошибка генерации Code128: {e}", exc_info=True)
+                            continue
+                    # --- КОНЕЦ НОВОГО БЛОКА ---
 
 
                 # --- НОВАЯ ЛОГИКА: Сохраняем статичный слой в кэш и накладываем его ---
