@@ -1,7 +1,7 @@
 import sys
 import os
 import glob
-from cx_Freeze import setup, Executable
+from cx_Freeze import setup, Executable, hooks
 import psycopg2
 
 # --- ЗАПОМНЕННЫЕ ПАРАМЕТРЫ ---
@@ -28,6 +28,11 @@ include_files = []
 include_files.append((os.path.join(BASE_DIR, "desktop-app", ".env"), ".env"))
 include_files.append((os.path.join(BASE_DIR, "secrets"), "secrets"))
 include_files.append((ICON_FILE, "ts.ico"))
+
+# Шрифты
+arialbd_path = os.path.join(BASE_DIR, "desktop-app", "src", "arialbd.ttf")
+if os.path.exists(arialbd_path):
+    include_files.append((arialbd_path, "arialbd.ttf"))
 
 # Б) ИСПРАВЛЕНИЕ ДЛЯ PSYCOPG2 (Поиск скрытых DLL)
 # Нам нужно найти libpq.dll, libssl*.dll, libcrypto*.dll
@@ -80,9 +85,9 @@ if os.path.exists(msvcr_path):
 
 # --- ПАКЕТЫ ---
 packages = [
-    "os", "sys", "PySide6", "pandas", "psycopg2", "PIL", 
+    "os", "sys", "PySide6", "pandas", "psycopg2", "PIL", "qrcode",
     "jinja2", "babel", "requests", "bcrypt", "dotenv", 
-    "barcode", "pylibdmtx", 
+    "barcode", "pylibdmtx",
     "src"
 ]
 
@@ -90,8 +95,8 @@ packages = [
 build_exe_options = {
     "packages": packages,
     "include_files": include_files,
-    "excludes": ["tkinter", "unittest"], 
-    "include_msvcr": True, 
+    "excludes": ["unittest", "tkinter"],
+    "include_msvcr": True,
 }
 
 # --- НАСТРОЙКИ MSI ---
