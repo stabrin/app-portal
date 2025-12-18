@@ -5377,6 +5377,24 @@ class AdminWindowQt(QMainWindow):
             except Exception as e:
                 logging.error(f"Ошибка загрузки заказов для печати: {e}", exc_info=True)
 
+        def load_order_items():
+            """Загружает содержимое выбранного заказа в таблицу."""
+            self.print_mgmt_items_table.setRowCount(0)
+            order_id = self.print_mgmt_order_combo.currentData()
+            if not order_id:
+                return
+            
+            try:
+                items = self.order_service.get_items_for_printing(order_id)
+                self.print_mgmt_items_table.setRowCount(len(items))
+                for i, item in enumerate(items):
+                    self.print_mgmt_items_table.setItem(i, 0, QTableWidgetItem(item.get('gtin', '')))
+                    self.print_mgmt_items_table.setItem(i, 1, QTableWidgetItem(item.get('datamatrix', '')))
+                    self.print_mgmt_items_table.setItem(i, 2, QTableWidgetItem(item.get('sscc', '')))
+            except Exception as e:
+                logging.error(f"Ошибка загрузки содержимого заказа {order_id}: {e}", exc_info=True)
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить содержимое заказа: {e}")
+
         # Загрузка данных и привязка обработчиков
         load_printers()
         load_layouts()
