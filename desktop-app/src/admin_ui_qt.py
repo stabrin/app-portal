@@ -4240,14 +4240,45 @@ class AdminWindowQt(QMainWindow):
         self._build_product_groups_tab(notebook)
         # --- ИЗМЕНЕНИЕ: Добавляем вкладку для управления макетами ---
         self._build_products_tab(notebook)
-        self._build_scenarios_tab(notebook)
-        # --- НОВЫЙ ВЫЗОВ: Добавляем вкладку для макетов печати ---
-        self._build_print_layouts_tab(notebook)
-
-        # --- ИСПРАВЛЕНИЕ: Переносим вызов сюда, чтобы вкладка создавалась в правильном месте ---
         self._build_print_layouts_tab(notebook)
 
         return widget
+
+    def _build_print_layouts_tab(self, parent_notebook):
+        """Создает вкладку для управления макетами печати."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Панель с кнопками
+        controls_layout = QHBoxLayout()
+        btn_add = QPushButton("Создать")
+        btn_add.clicked.connect(self._create_new_layout)
+        btn_edit = QPushButton("Редактировать")
+        btn_edit.clicked.connect(self._edit_selected_layout)
+        btn_delete = QPushButton("Удалить")
+        btn_delete.clicked.connect(self._delete_selected_layout)
+        btn_refresh = QPushButton("Обновить")
+        btn_refresh.clicked.connect(self._refresh_print_layouts)
+        
+        controls_layout.addWidget(btn_add)
+        controls_layout.addWidget(btn_edit)
+        controls_layout.addWidget(btn_delete)
+        controls_layout.addStretch()
+        controls_layout.addWidget(btn_refresh)
+        layout.addLayout(controls_layout)
+
+        # Таблица
+        self.print_layouts_table = QTableWidget(0, 2)
+        self.print_layouts_table.setHorizontalHeaderLabels(["Название макета", "Размер (мм)"])
+        self.print_layouts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.print_layouts_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.print_layouts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.print_layouts_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.print_layouts_table.doubleClicked.connect(self._edit_selected_layout)
+        layout.addWidget(self.print_layouts_table)
+        
+        parent_notebook.addTab(tab, "Макеты печати")
+        self._refresh_print_layouts() # Первоначальная загрузка
 
     def _build_local_clients_tab(self, parent_notebook):
         """Создает вкладку для управления локальными клиентами."""
