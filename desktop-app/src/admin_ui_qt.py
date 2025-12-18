@@ -5443,13 +5443,18 @@ class AdminWindowQt(QMainWindow):
 
     def _print_from_management_page(self):
         """Заглушка для функции печати со страницы управления печатью."""
+        QMessageBox.information(self, "В разработке", "Функция печати со страницы управления находится в разработке.")
+
+    def _refresh_print_layouts(self):
+        """Загружает список макетов в таблицу."""
         logging.debug("Starting refresh of print layouts.")
         try:
             self.print_layouts_table.setRowCount(0)
             layouts = self.catalogs_service.get_print_layouts()
             logging.debug(f"Retrieved {len(layouts)} layouts from catalog_service.")
-            self.print_layouts_table.setRowCount(len(layouts))
-            for i, layout_data in enumerate(layouts):
+            for layout_data in layouts:
+                row = self.print_layouts_table.rowCount()
+                self.print_layouts_table.insertRow(row)
                 name = layout_data.get('name', '')
                 size_str = f"{layout_data.get('width_mm', '?')} x {layout_data.get('height_mm', '?')}"
                 
@@ -5457,15 +5462,12 @@ class AdminWindowQt(QMainWindow):
                 # Сохраняем все данные макета в элементе таблицы
                 item_name.setData(Qt.UserRole, layout_data) 
                 
-                self.print_layouts_table.setItem(i, 0, item_name)
-                self.print_layouts_table.setItem(i, 1, QTableWidgetItem(size_str))
+                self.print_layouts_table.setItem(row, 0, item_name)
+                self.print_layouts_table.setItem(row, 1, QTableWidgetItem(size_str))
 
         except Exception as e:
             logging.error(f"Failed to load print layouts: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты печати: {e}")
-
-    def _refresh_print_layouts(self):
-        """Загружает список макетов в таблицу."""
 
     def _create_new_layout(self):
         """Открывает диалог для создания нового макета."""
