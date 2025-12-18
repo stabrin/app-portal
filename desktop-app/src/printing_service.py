@@ -504,16 +504,9 @@ class PrintingService:
                             barcode_image = barcode_image.resize((width, height), Image.Resampling.NEAREST)
                             label_image.paste(barcode_image, (x, y))
                         except Exception as e:
-                            logging.error(f"Ошибка генерации DataMatrix для данных '{data_str}': {e}")
+                            logging.error(f"Ошибка генерации DataMatrix для данных '{data_str}': {e}", exc_info=True)
                             continue
-                    
-                    else:
-                        logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
-                        draw.rectangle([x, y, x + width, y + height], outline="red", fill="white")
-                        draw.text((x + 5, y + 5), f"Unsupported:\n{barcode_type}", fill="red")
-
-                    # --- НОВЫЙ БЛОК: Генерация Code128 (для пропусков) ---
-                    elif barcode_type.upper() == "CODE128":
+                    elif barcode_type == "CODE128":
                         if not barcode:
                             logging.warning("Библиотека python-barcode не установлена. Пропуск Code128.")
                             continue
@@ -530,7 +523,10 @@ class PrintingService:
                         except Exception as e:
                             logging.error(f"Ошибка генерации Code128: {e}", exc_info=True)
                             continue
-                    # --- КОНЕЦ НОВОГО БЛОКА ---
+                    else:
+                        logging.warning(f"Тип штрихкода '{barcode_type}' не поддерживается.")
+                        draw.rectangle([x, y, x + width, y + height], outline="red", fill="white")
+                        draw.text((x + 5, y + 5), f"Unsupported:\n{barcode_type}", fill="red")
 
 
                 # --- НОВАЯ ЛОГИКА: Сохраняем статичный слой в кэш и накладываем его ---
