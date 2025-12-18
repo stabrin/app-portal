@@ -543,7 +543,7 @@ class PrintingService:
             raise
 
     @staticmethod
-    def print_label_direct(printer_name: str, paper_name: str, template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], pregenerated_image: Optional[Image.Image] = None) -> None:
+    def print_label_direct(printer_name: str, paper_name: Optional[str], template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], pregenerated_image: Optional[Image.Image] = None) -> None:
         """Отправляет этикетку на принтер напрямую через GDI."""
         logging.info(f"Прямая печать на принтер '{printer_name}'.")
         if not all([win32print, win32ui]):
@@ -563,6 +563,14 @@ class PrintingService:
                 logging.error("Не удалось сгенерировать изображение этикетки. Печать отменена.")
                 return
 
+            # --- НОВАЯ ЛОГИКА: Если имя бумаги не передано, пытаемся его сформировать из размеров макета ---
+            if not paper_name and template_json:
+                width_mm = template_json.get('width_mm')
+                height_mm = template_json.get('height_mm')
+                if width_mm and height_mm:
+                    paper_name = f"Tilda_{int(width_mm)}x{int(height_mm)}"
+                    logging.info(f"Имя бумаги не было передано. Сформировано автоматически: '{paper_name}'")
+
             # --- Открываем принтер и получаем его характеристики ---
             # --- ИЗМЕНЕНИЕ: Устанавливаем нужный размер бумаги перед печатью ---
             h_printer = win32print.OpenPrinter(printer_name)
@@ -571,12 +579,15 @@ class PrintingService:
                 printer_defaults = win32print.GetPrinter(h_printer, 2)
                 devmode = printer_defaults['pDevMode']
                 
-                # Устанавливаем имя формы (размер бумаги)
-                devmode.FormName = paper_name
-                # Указываем, что мы изменили FormName
-                devmode.Fields = devmode.Fields | win32con.DM_FORMNAME
-
+                # --- ИЗМЕНЕНИЕ: Устанавливаем размер бумаги, только если он задан ---
+                if paper_name:
+                    # Устанавливаем имя формы (размер бумаги)
+                    devmode.FormName = paper_name
+                    # Указываем, что мы изменили FormName
+                    devmode.Fields = devmode.Fields | win32con.DM_FORMNAME
+                    logging.info(f"Установка размера бумаги (FormName) на '{paper_name}'.")
             except Exception as e_devmode:
+                # Не прерываем печать, а просто логируем предупреждение
                 logging.warning(f"Не удалось установить размер бумаги '{paper_name}': {e_devmode}. Печать будет выполнена с настройками по умолчанию.")
 
             dc = win32ui.CreateDC()

@@ -225,19 +225,15 @@ class PrintDialogQt(QDialog):
         self._build_ui()
         self._load_printers()
         self._load_layouts()
-        # --- ИСПРАВЛЕНИЕ: Загружаем размеры бумаги для принтера по умолчанию при инициализации ---
-        self._load_paper_sizes(self.printer_combo.currentText())
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
         form_layout = QFormLayout()
 
         self.printer_combo = QComboBox()
-        self.paper_combo = QComboBox()
         self.layout_combo = QComboBox()
 
         form_layout.addRow("1. Выберите принтер:", self.printer_combo)
-        form_layout.addRow("2. Выберите размер бумаги:", self.paper_combo)
         form_layout.addRow("3. Выберите макет:", self.layout_combo)
         layout.addLayout(form_layout)
 
@@ -246,8 +242,6 @@ class PrintDialogQt(QDialog):
         button_box.accepted.connect(self.do_print)
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
-
-        self.printer_combo.currentTextChanged.connect(self._load_paper_sizes)
 
     def _load_printers(self):
         try:
@@ -259,18 +253,6 @@ class PrintDialogQt(QDialog):
                 self.printer_combo.setCurrentText(default_printer)
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить принтеры: {e}")
-
-    def _load_paper_sizes(self, printer_name):
-        self.paper_combo.clear()
-        try:
-            import win32print
-            h_printer = win32print.OpenPrinter(printer_name)
-            forms = win32print.EnumForms(h_printer)
-            paper_names = sorted([form['Name'] for form in forms if form['Name'].startswith('Tilda_')])
-            self.paper_combo.addItems(paper_names)
-            win32print.ClosePrinter(h_printer)
-        except Exception as e:
-            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить размеры бумаги: {e}")
 
     def _load_layouts(self):
         try:
@@ -287,10 +269,9 @@ class PrintDialogQt(QDialog):
         Запускает процесс генерации изображений и их предпросмотра/печати.
         """
         printer_name = self.printer_combo.currentText()
-        paper_name = self.paper_combo.currentText()
         layout_name = self.layout_combo.currentText()
 
-        if not all([printer_name, paper_name, layout_name]):
+        if not all([printer_name, layout_name]):
             QMessageBox.warning(self, "Внимание", "Все поля (принтер, бумага, макет) должны быть выбраны.")
             return
 
@@ -298,6 +279,9 @@ class PrintDialogQt(QDialog):
         if not selected_layout_data:
             QMessageBox.critical(self, "Ошибка", "Не удалось получить данные выбранного макета.")
             return
+
+        # --- ИЗМЕНЕНИЕ: Получаем имя бумаги из макета ---
+        paper_name = selected_layout_data.get('paper_name')
 
         try:
             # 1. Генерируем изображения
@@ -700,12 +684,13 @@ class OrderEditorFrameQt(QWidget):
 # --- НОВЫЙ БЛОК: Фрейм для редактирования задачи ---
 class TaskEditorFrameQt(QWidget):
     """Фрейм для просмотра и редактирования производственной задачи."""
-    def __init__(self, task_service, task_data, main_app_window, parent=None):
+    def __init__(self, task_service, task_data, main_app_window, user_info, parent=None):
         super().__init__(parent)
         self.task_service = task_service
         self.task_data = task_data
         self.main_app_window = main_app_window
-
+        self.user_info = user_info
+        
         logging.debug(f"TaskEditorFrameQt.__init__: Received task_data: {self.task_data}") # DEBUG LOG
 
         self._create_widgets()
@@ -972,7 +957,7 @@ class TaskEditorFrameQt(QWidget):
                                     f"Успешно сгенерировано {len(generated_codes)} пропусков для задачи #{task_id}.")
             
             # Открываем окно просмотра
-            dialog = EmployeePassesViewerDialog(self, self.task_service, task_id)
+            dialog = EmployeePassesViewerDialog(self, self.task_service, self.user_info, task_id)
             dialog.exec()
             
         except Exception as e:
@@ -2385,15 +2370,12 @@ class LabelEditorDialog(QDialog):
 
 
 class EmployeePassesViewerDialog(QDialog):
-
-
     """Диалог для просмотра и печати пропусков сотрудников."""
-
-
-    def __init__(self, parent, task_service, task_id):
+    def __init__(self, parent, task_service, user_info, task_id):
 
 
         super().__init__(parent)
+        self.user_info = user_info
 
 
         self.task_service = task_service
@@ -2533,7 +2515,7 @@ class EmployeePassesViewerDialog(QDialog):
                 ]
             }
             for code in self.pass_details["passes"]:
-                img = PrintingService.generate_label_image(template_json, {"sscc_code": code}, self.parent().user_info)
+                img = PrintingService.generate_label_image(template_json, {"sscc_code": code}, self.user_info)
                 if img:
                     pass_images.append(img)
 
@@ -2542,7 +2524,7 @@ class EmployeePassesViewerDialog(QDialog):
                 return
 
             # 2. Открываем стандартный диалог печати
-            print_dialog = PrintDialogQt(self, self.parent().user_info, "Печать пропусков", self.pass_details["passes"])
+            print_dialog = PrintDialogQt(self, self.user_info, "Печать пропусков", self.pass_details["passes"])
             print_dialog.exec()
         except Exception as e:
             logging.error(f"Ошибка при подготовке к предпросмотру: {e}", exc_info=True)
@@ -3563,7 +3545,7 @@ class AdminWindowQt(QMainWindow):
                 widget.deleteLater()
 
         # Создаем и добавляем новый фрейм редактора
-        editor_frame = TaskEditorFrameQt(self.task_service, task_data, self)
+        editor_frame = TaskEditorFrameQt(self.task_service, task_data, self, self.user_info)
         layout.addWidget(editor_frame)
         
         self.task_management_stack.setCurrentIndex(1)
