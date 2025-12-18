@@ -95,6 +95,7 @@ packages = [
 build_exe_options = {
     "packages": packages,
     "include_files": include_files,
+    "includes": ["PIL", "qrcode", "pylibdmtx", "barcode"],
     "excludes": ["unittest", "tkinter"],
     "include_msvcr": True,
 }
