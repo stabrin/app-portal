@@ -22,6 +22,7 @@ import io
 # --- NEW IMPORTS FOR BARCODE GENERATION ---
 from PIL import Image
 from PIL.ImageQt import ImageQt
+from .printing_service import PrintingService
 import barcode
 from barcode.writer import ImageWriter
 # --- END NEW IMPORTS ---
@@ -280,9 +281,51 @@ class PrintDialogQt(QDialog):
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты: {e}")
 
     def do_print(self):
-        # Эта функция будет добавлена в следующем шаге, когда мы реализуем предпросмотр
-        QMessageBox.information(self, "В разработке", "Предпросмотр и печать в разработке.")
-        self.accept()
+        """
+        Запускает процесс генерации изображений и их предпросмотра/печати.
+        """
+        printer_name = self.printer_combo.currentText()
+        paper_name = self.paper_combo.currentText()
+        layout_name = self.layout_combo.currentText()
+
+        if not all([printer_name, paper_name, layout_name]):
+            QMessageBox.warning(self, "Внимание", "Все поля (принтер, бумага, макет) должны быть выбраны.")
+            return
+
+        selected_layout_data = self.layout_combo.currentData()
+        if not selected_layout_data:
+            QMessageBox.critical(self, "Ошибка", "Не удалось получить данные выбранного макета.")
+            return
+
+        try:
+            # 1. Генерируем изображения
+            images_to_print = []
+            text_cache, static_layers_cache = {}, {} # Кэши для ускорения
+            
+            for item_data in self.items_to_print:
+                img = PrintingService.generate_label_image(
+                    selected_layout_data, item_data, self.user_info, text_cache, static_layers_cache
+                )
+                if img:
+                    images_to_print.append(img)
+
+            if not images_to_print:
+                QMessageBox.warning(self, "Нет данных", "Не удалось сгенерировать ни одного изображения для печати.")
+                return
+
+            # 2. Определяем callback для печати
+            def print_callback():
+                PrintingService.print_generated_images(printer_name, paper_name, images_to_print, self.user_info)
+                QMessageBox.information(self, "Успех", f"Задание на печать {len(images_to_print)} этикеток отправлено на принтер.")
+
+            # 3. Открываем диалог предпросмотра
+            preview_dialog = PreviewDialog(images_to_print, print_callback, self)
+            preview_dialog.exec()
+            self.accept() # Закрываем диалог печати после предпросмотра
+
+        except Exception as e:
+            logging.error(f"Ошибка в процессе печати: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка печати", f"Произошла ошибка: {e}")
 
 # --- НОВЫЙ БЛОК: Классы-заглушки для вкладок управления заказом ---
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
@@ -2468,69 +2511,6 @@ class EmployeePassesViewerDialog(QDialog):
         painter.end()
         QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
 
-    def _generate_pass_image(self, access_code: str) -> QPixmap:
-        """Генерирует QPixmap для одного пропуска."""
-        # Определяем размеры в мм и DPI
-        width_mm, height_mm = 60, 40
-        dpi = 300  # Стандартное высокое разрешение для термопринтеров
-
-        # Конвертируем мм в пиксели
-        width_px = int((width_mm / 25.4) * dpi)
-        height_px = int((height_mm / 25.4) * dpi)
-
-        # Создаем холст для рисования
-        pixmap = QPixmap(width_px, height_px)
-        pixmap.fill(Qt.white)
-
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing)
-
-        def mm_to_px(mm, res):
-            return (mm / 25.4) * res
-
-        # Данные для печати
-        font_main = QFont("Arial", pointSize=10)
-        font_small = QFont("Arial", pointSize=8)
-        client_name = self.pass_details.get('client_name', 'N/A')
-        container_number = self.pass_details.get('container_number', 'N/A')
-        print_date = datetime.now().strftime("%d.%m.%Y")
-
-        # Рисуем текст
-        painter.setFont(font_main)
-        painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(2, dpi), mm_to_px(56, dpi), mm_to_px(8, dpi)), Qt.AlignLeft, f"Клиент: {client_name}")
-        painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(8, dpi), mm_to_px(56, dpi), mm_to_px(8, dpi)), Qt.AlignLeft, f"Контейнер: {container_number}")
-        painter.setFont(font_small)
-        painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(14, dpi), mm_to_px(56, dpi), mm_to_px(6, dpi)), Qt.AlignLeft, f"Дата: {print_date}")
-
-        # Рисуем штрихкод
-        try:
-            # --- ИЗМЕНЕНИЕ: Используем python-barcode для генерации штрих-кода ---
-            Code128 = barcode.get_barcode_class('code128')
-            code128_barcode = Code128(access_code, writer=ImageWriter())
-            options = {
-                'module_height': 10.0,
-                'module_width': 0.25,
-                'font_size': 10,
-                'text_distance': 5.0,
-                'quiet_zone': 2.0
-            }
-            pil_image = code128_barcode.render(writer_options=options)
-            qimage = ImageQt(pil_image)
-            barcode_pixmap = QPixmap.fromImage(qimage)
-
-            # Масштабируем, если штрихкод получился слишком широким, сохраняя пропорции
-            desired_width_px = mm_to_px(50, dpi)
-            if barcode_pixmap.width() > desired_width_px:
-                barcode_pixmap = barcode_pixmap.scaledToWidth(desired_width_px, Qt.SmoothTransformation)
-
-            painter.drawPixmap(int(mm_to_px(3, dpi)), int(mm_to_px(20, dpi)), barcode_pixmap)
-        except Exception as e:
-            logging.error(f"Ошибка генерации штрихкода для предпросмотра: {e}", exc_info=True)
-            painter.drawText(QRectF(mm_to_px(2, dpi), mm_to_px(20, dpi), mm_to_px(56, dpi), mm_to_px(12, dpi)), Qt.AlignCenter, "Ошибка ШК")
-
-        painter.end()
-        return pixmap
-
     def _print_passes(self):
         """
         Генерирует изображения пропусков и открывает диалог предпросмотра.
@@ -2540,15 +2520,28 @@ class EmployeePassesViewerDialog(QDialog):
             return
 
         try:
-            pass_images = [self._generate_pass_image(code) for code in self.pass_details["passes"]]
+            # 1. Генерируем изображения
+            pass_images = []
+            template_json = {
+                "width_mm": 60, "height_mm": 40, "objects": [
+                    {"type": "text", "is_custom_text": True, "data_source": f"Клиент: {self.pass_details.get('client_name', 'N/A')}", "x_mm": 2, "y_mm": 2, "width_mm": 56, "height_mm": 8, "font_name": "arial"},
+                    {"type": "text", "is_custom_text": True, "data_source": f"Контейнер: {self.pass_details.get('container_number', 'N/A')}", "x_mm": 2, "y_mm": 8, "width_mm": 56, "height_mm": 8, "font_name": "arial"},
+                    {"type": "text", "is_custom_text": True, "data_source": f"Дата: {datetime.now().strftime('%d.%m.%Y')}", "x_mm": 2, "y_mm": 14, "width_mm": 56, "height_mm": 6, "font_name": "arial"},
+                    {"type": "barcode", "barcode_type": "Code128", "data_source": "sscc_code", "x_mm": 3, "y_mm": 20, "width_mm": 54, "height_mm": 12}
+                ]
+            }
+            for code in self.pass_details["passes"]:
+                img = PrintingService.generate_label_image(template_json, {"sscc_code": code}, self.parent().user_info)
+                if img:
+                    pass_images.append(img)
+
             if not pass_images:
                 QMessageBox.warning(self, "Ошибка генерации", "Не удалось создать изображения для пропусков.")
                 return
 
-            # Открываем новый диалог предпросмотра
-            preview_dialog = PassPreviewDialog(self, pass_images)
-            preview_dialog.exec()
-
+            # 2. Открываем стандартный диалог печати
+            print_dialog = PrintDialogQt(self, self.parent().user_info, "Печать пропусков", self.pass_details["passes"])
+            print_dialog.exec()
         except Exception as e:
             logging.error(f"Ошибка при подготовке к предпросмотру: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось подготовить пропуски к предпросмотру: {e}")
