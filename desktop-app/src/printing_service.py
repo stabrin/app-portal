@@ -322,11 +322,18 @@ class PrintingService:
                 if obj.get("is_custom_text") or (obj.get("type") == "text_with_image"):
                     obj_data = obj.get("data_source") # Для произвольного текста данные хранятся прямо в шаблоне
                 else:
+                    # --- ИСПРАВЛЕНИЕ: Упрощенная логика получения данных ---
+                    # 1. Сначала ищем данные по полному ключу (например, 'packages.sscc_code')
                     obj_data = data.get(obj["data_source"])
-                if obj_data is None and obj["data_source"] and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
-                    logging.debug(f"Данные для '{obj['data_source']}' не найдены в data, попытка получения из БД.")
-                    obj_data = PrintingService._fetch_data_from_db(user_info, obj["data_source"])
-                
+                    # 2. Если не нашли, ищем по короткому ключу (например, 'sscc_code')
+                    if obj_data is None:
+                        short_key = obj["data_source"].split('.')[-1]
+                        obj_data = data.get(short_key)
+                    # 3. И только если ничего не нашли, идем в БД
+                    if obj_data is None and obj["data_source"] and '.' in obj["data_source"] and not obj["data_source"].startswith("QR:"):
+                        logging.debug(f"Данные для '{obj['data_source']}' не найдены в data, попытка получения из БД.")
+                        obj_data = PrintingService._fetch_data_from_db(user_info, obj["data_source"])
+
                 if obj_data is None:
                     logging.warning(f"Данные для '{obj['data_source']}' не найдены. Пропуск объекта.")
                     continue
