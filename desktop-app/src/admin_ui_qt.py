@@ -1268,6 +1268,38 @@ class ScenarioEditorDialog(QDialog):
         super().accept()
 
 
+# --- НОВЫЙ КЛАСС: Диалог для выбора макета ---
+class LayoutSelectionDialog(QDialog):
+    """Диалог для выбора макета печати из списка."""
+    def __init__(self, layouts, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Выберите макет")
+        self.setMinimumWidth(350)
+        self.selected_layout = None
+
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.layout_combo = QComboBox()
+        for layout_data in layouts:
+            self.layout_combo.addItem(layout_data['name'], userData=layout_data)
+        
+        form_layout.addRow("Макет для печати:", self.layout_combo)
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def accept(self):
+        """Сохраняет выбранный макет перед закрытием."""
+        current_index = self.layout_combo.currentIndex()
+        if current_index >= 0:
+            self.selected_layout = self.layout_combo.itemData(current_index)
+        super().accept()
+
+
 # --- Новые классы для редактора макетов ---
 class PrintableObjectItem(QGraphicsRectItem):
     """Кастомный элемент на сцене, представляющий объект на этикетке."""
@@ -6009,14 +6041,44 @@ class AdminWindowQt(QMainWindow):
     @Slot(str)
     def on_sscc_generation_error(self, error_message: str):
         """Слот для обработки ошибки генерации SSCC."""
-        logging.error(f"[on_sscc_generation_error] Получена ошибка от воркера: {error_message}")
+        logging.error(f"[on_sscc_generation_error] Получена ошибка от воркера: {error_message}", exc_info=True)
         QMessageBox.critical(self, "Ошибка генерации", error_message)
 
     @Slot(list)
     def on_sscc_generation_finished(self, ssccs: list):
         """Слот, который вызывается после успешной генерации SSCC."""
         logging.debug(f"[on_sscc_generation_finished] Воркер завершил работу. Получено {len(ssccs)} кодов.")
-        self._save_sscc_to_file(ssccs)
+        self._handle_generated_ssccs(ssccs)
+
+    def _handle_generated_ssccs(self, ssccs: list):
+        """Обрабатывает сгенерированные SSCC: спрашивает пользователя о дальнейших действиях."""
+        if not ssccs:
+            QMessageBox.warning(self, "Внимание", "Не удалось сгенерировать SSCC коды.")
+            return
+
+        reply = QMessageBox.question(self, "Генерация завершена", 
+                                     f"Успешно сгенерировано {len(ssccs)} кодов SSCC.\n\nНапечатать коды?",
+                                     QMessageBox.Yes | QMessageBox.No)
+
+        if reply == QMessageBox.No:
+            self._save_sscc_to_file(ssccs)
+        else: # QMessageBox.Yes
+            try:
+                layouts = self.catalogs_service.get_print_layouts()
+                if not layouts:
+                    QMessageBox.warning(self, "Нет макетов", "Не найдено ни одного макета для печати.")
+                    return
+
+                dialog = LayoutSelectionDialog(layouts, self)
+                if dialog.exec():
+                    selected_layout = dialog.selected_layout
+                    if selected_layout:
+                        # Подготавливаем данные для печати
+                        items_to_print = [{'packages.sscc_code': code} for code in ssccs]
+                        print_dialog = PrintWorkplaceLabelsDialog(self, self.user_info, "Печать SSCC", items_to_print, preselected_layout=selected_layout['name'])
+                        print_dialog.exec()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось запустить печать: {e}")
 
     def _save_sscc_to_file(self, ssccs: list):
         """Предлагает сохранить сгенерированные SSCC в CSV файл."""
