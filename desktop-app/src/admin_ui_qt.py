@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
     QTableWidgetItem, QMessageBox, QApplication, QLabel, QFileDialog, QTextEdit,
     QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter, QTabWidget, QProgressDialog, QDialogButtonBox, QCheckBox,
-    QGroupBox, QRadioButton, QSpinBox,
+    QGroupBox, QRadioButton, QSpinBox, QScrollArea,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView,
     QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
 )
@@ -47,6 +47,11 @@ import re # ИСПРАВЛЕНИЕ: Добавляем импорт модуля
 import csv # Для работы с CSV
 # --- НОВЫЙ КЛАСС: Рабочий для проверки API в фоновом потоке ---
 class ApiStatusWorker(QObject):
+    """
+    Выполняет проверку токена API в фоновом потоке, чтобы не блокировать UI.
+    При успешной проверке (вызов любого метода, например, get_participants)
+    возвращает True. В случае ошибки - False.
+    """
     finished = Signal(bool)
 
     def __init__(self, user_info):
@@ -73,6 +78,10 @@ class ApiStatusWorker(QObject):
 
 # --- НОВЫЙ КЛАСС: Рабочий для проверки статуса БД в фоновом потоке ---
 class DbStatusWorker(QObject):
+    """
+    Выполняет проверку соединения с БД клиента в фоновом потоке.
+    Возвращает True, если соединение успешно установлено.
+    """
     finished = Signal(bool)
 
     def __init__(self, user_info):
@@ -92,6 +101,11 @@ class DbStatusWorker(QObject):
 
 # НОВЫЙ КЛАСС: Рабочий для генерации SSCC в фоновом потоке
 class SsccGeneratorWorker(QObject):
+    """
+    Выполняет генерацию кодов SSCC в фоновом потоке, чтобы не блокировать UI.
+    Резервирует диапазон ID в БД одним запросом и генерирует коды локально.
+    Возвращает список сгенерированных кодов или ошибку.
+    """
     finished = Signal(list)
     progress = Signal(int, str)
     error = Signal(str)
@@ -126,6 +140,149 @@ class SsccGeneratorWorker(QObject):
         except Exception as e:
             logging.error(f"Ошибка генерации SSCC: {e}\n{traceback.format_exc()}")
             self.error.emit(f"Ошибка генерации SSCC: {e}. Подробности в лог-файле.")
+
+# --- НОВЫЙ КЛАСС: Диалог предпросмотра этикеток ---
+class PreviewDialog(QDialog):
+    """Диалог для предпросмотра сгенерированных изображений этикеток."""
+    def __init__(self, images, print_callback, parent=None):
+        super().__init__(parent)
+        self.images = images
+        self.print_callback = print_callback
+        self.current_index = 0
+
+        self.setWindowTitle("Предпросмотр этикеток")
+        self.setMinimumSize(600, 500)
+
+        layout = QVBoxLayout(self)
+        self.info_label = QLabel()
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+
+        nav_layout = QHBoxLayout()
+        self.prev_button = QPushButton("<< Назад")
+        self.next_button = QPushButton("Далее >>")
+        self.print_button = QPushButton("Напечатать все")
+
+        nav_layout.addWidget(self.prev_button)
+        nav_layout.addStretch()
+        nav_layout.addWidget(self.print_button)
+        nav_layout.addStretch()
+        nav_layout.addWidget(self.next_button)
+
+        layout.addWidget(self.info_label, alignment=Qt.AlignCenter)
+        layout.addWidget(self.image_label, 1)
+        layout.addLayout(nav_layout)
+
+        self.prev_button.clicked.connect(self.show_previous)
+        self.next_button.clicked.connect(self.show_next)
+        self.print_button.clicked.connect(self.print_all)
+
+        self.show_image(0)
+
+    def show_image(self, index):
+        self.current_index = index
+        pil_image = self.images[index]
+        
+        # Конвертируем PIL Image в QPixmap
+        qimage = ImageQt(pil_image.convert("RGBA"))
+        pixmap = QPixmap.fromImage(qimage)
+
+        # Масштабируем для отображения
+        scaled_pixmap = pixmap.scaled(self.image_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self.image_label.setPixmap(scaled_pixmap)
+
+        self.info_label.setText(f"Этикетка {index + 1} из {len(self.images)}")
+        self.prev_button.setEnabled(index > 0)
+        self.next_button.setEnabled(index < len(self.images) - 1)
+
+    def show_previous(self):
+        if self.current_index > 0:
+            self.show_image(self.current_index - 1)
+
+    def show_next(self):
+        if self.current_index < len(self.images) - 1:
+            self.show_image(self.current_index + 1)
+
+    def print_all(self):
+        self.print_callback()
+        self.accept()
+
+# --- НОВЫЙ КЛАСС: Диалог печати ---
+class PrintDialogQt(QDialog):
+    """Аналог PrintWorkplaceLabelsDialog на PySide6."""
+    def __init__(self, parent, user_info, title, items_to_print, preselected_layout=None):
+        super().__init__(parent)
+        self.user_info = user_info
+        self.items_to_print = items_to_print
+        self.preselected_layout = preselected_layout
+        self.catalogs_service = CatalogsService(user_info, lambda: get_client_db_connection(user_info))
+        self.layouts = []
+
+        self.setWindowTitle(f"Печать: {title}")
+        self.setMinimumWidth(450)
+
+        self._build_ui()
+        self._load_printers()
+        self._load_layouts()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.printer_combo = QComboBox()
+        self.paper_combo = QComboBox()
+        self.layout_combo = QComboBox()
+
+        form_layout.addRow("1. Выберите принтер:", self.printer_combo)
+        form_layout.addRow("2. Выберите размер бумаги:", self.paper_combo)
+        form_layout.addRow("3. Выберите макет:", self.layout_combo)
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.button(QDialogButtonBox.Ok).setText("Печать")
+        button_box.accepted.connect(self.do_print)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+        self.printer_combo.currentTextChanged.connect(self._load_paper_sizes)
+
+    def _load_printers(self):
+        try:
+            import win32print
+            printers = [p[2] for p in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL, None, 1)]
+            self.printer_combo.addItems(printers)
+            default_printer = win32print.GetDefaultPrinter()
+            if default_printer in printers:
+                self.printer_combo.setCurrentText(default_printer)
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить принтеры: {e}")
+
+    def _load_paper_sizes(self, printer_name):
+        self.paper_combo.clear()
+        try:
+            import win32print
+            h_printer = win32print.OpenPrinter(printer_name)
+            forms = win32print.EnumForms(h_printer)
+            paper_names = sorted([form['Name'] for form in forms if form['Name'].startswith('Tilda_')])
+            self.paper_combo.addItems(paper_names)
+            win32print.ClosePrinter(h_printer)
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить размеры бумаги: {e}")
+
+    def _load_layouts(self):
+        try:
+            self.layouts = self.catalogs_service.get_print_layouts()
+            layout_names = [l['name'] for l in self.layouts]
+            self.layout_combo.addItems(layout_names)
+            if self.preselected_layout and self.preselected_layout in layout_names:
+                self.layout_combo.setCurrentText(self.preselected_layout)
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты: {e}")
+
+    def do_print(self):
+        # Эта функция будет добавлена в следующем шаге, когда мы реализуем предпросмотр
+        QMessageBox.information(self, "В разработке", "Предпросмотр и печать в разработке.")
+        self.accept()
 
 # --- НОВЫЙ БЛОК: Классы-заглушки для вкладок управления заказом ---
 # Определяем их здесь, вне основного класса AdminWindowQt, чтобы не нарушать его структуру.
@@ -6074,8 +6231,8 @@ class AdminWindowQt(QMainWindow):
                     selected_layout = dialog.selected_layout
                     if selected_layout:
                         # Подготавливаем данные для печати
-                        items_to_print = [{'packages.sscc_code': code} for code in ssccs]
-                        print_dialog = PrintWorkplaceLabelsDialog(self, self.user_info, "Печать SSCC", items_to_print, preselected_layout=selected_layout['name'])
+                        items_to_print = [{'sscc_code': code} for code in ssccs]
+                        print_dialog = PrintDialogQt(self, self.user_info, "Печать SSCC", items_to_print, preselected_layout=selected_layout['name'])
                         print_dialog.exec()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось запустить печать: {e}")
