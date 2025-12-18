@@ -5463,9 +5463,8 @@ class AdminWindowQt(QMainWindow):
             logging.error(f"Failed to load print layouts: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты печати: {e}")
 
-    def _print_from_management_page(self):
-        """Заглушка для функции печати со страницы управления печатью."""
-        QMessageBox.information(self, "В разработке", "Функционал печати с этой страницы находится в разработке.")
+    def _refresh_print_layouts(self):
+        """Загружает список макетов в таблицу."""
 
     def _create_new_layout(self):
         """Открывает диалог для создания нового макета."""
