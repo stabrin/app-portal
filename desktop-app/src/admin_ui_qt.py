@@ -257,9 +257,11 @@ class PrintDialogQt(QDialog):
     def _load_layouts(self):
         try:
             self.layouts = self.catalogs_service.get_print_layouts()
-            layout_names = [l['name'] for l in self.layouts]
-            self.layout_combo.addItems(layout_names)
-            if self.preselected_layout and self.preselected_layout in layout_names:
+            self.layout_combo.clear()
+            for layout in self.layouts:
+                self.layout_combo.addItem(layout['name'], userData=layout)
+            
+            if self.preselected_layout and self.preselected_layout in [l['name'] for l in self.layouts]:
                 self.layout_combo.setCurrentText(self.preselected_layout)
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты: {e}")
