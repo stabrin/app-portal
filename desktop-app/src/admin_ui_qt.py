@@ -132,9 +132,11 @@ class SsccGeneratorWorker(QObject):
 
                     for i in range(self.quantity):
                         box_id = start_id + i + 1
-                        # Генерация SSCC теперь происходит локально, без запросов к БД в цикле
-                        _, full_sscc = generate_sscc(box_id, gcp_for_sscc)
-                        generated_ssccs.append(full_sscc)
+                        # --- ИЗМЕНЕНИЕ: Генерируем обе версии кода ---
+                        sscc_18, sscc_20 = generate_sscc(box_id, gcp_for_sscc)
+                        # Для печати нужен 20-значный, а для выгрузки в файл - 18-значный.
+                        # Сохраняем кортеж, чтобы потом выбрать нужный.
+                        generated_ssccs.append((sscc_18, sscc_20))
 
                     conn.commit() # Фиксируем изменения счетчика в БД
             self.finished.emit(generated_ssccs)
@@ -6201,12 +6203,12 @@ class AdminWindowQt(QMainWindow):
         else: # QMessageBox.Yes
             try:
                 # --- ИЗМЕНЕНИЕ: Убираем лишний диалог выбора макета ---
-                # Сразу открываем основной диалог печати.
-                items_to_print = [{'sscc_code': code} for code in ssccs]
+                # Сразу открываем основной диалог печати, передавая 20-значные коды.
+                items_to_print = [{'sscc_code': code_20} for code_18, code_20 in ssccs]
                 print_dialog = PrintDialogQt(self, self.user_info, "Печать SSCC", items_to_print)
                 
                 # Если пользователь прошел весь путь и нажал "Напечатать",
-                # то после этого предлагаем сохранить коды в файл.
+                # то после этого предлагаем сохранить 18-значные коды в файл.
                 if print_dialog.exec():
                     self._save_sscc_to_file(ssccs)
             except Exception as e:
@@ -6230,7 +6232,8 @@ class AdminWindowQt(QMainWindow):
                 logging.debug("[_save_sscc_to_file] Начало записи в файл...")
                 with open(filepath, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerows([[sscc] for sscc in ssccs])
+                    # --- ИЗМЕНЕНИЕ: Выгружаем только 18-значную версию кода ---
+                    writer.writerows([[code_18] for code_18, code_20 in ssccs])
                 logging.debug("[_save_sscc_to_file] Запись в файл завершена успешно.")
                 QMessageBox.information(self, "Успех", f"SSCC коды успешно сохранены в файл:\n{filepath}")
             except Exception as e:
