@@ -6,7 +6,7 @@ import psycopg2
 
 # --- ПАРАМЕТРЫ ---
 APP_NAME = "TildaKod"
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 DESCRIPTION = "Приложение для печати этикеток и сканирования"
 AUTHOR = "Tabrin Sergey"
 UPGRADE_CODE = "{9503ec40-7cf9-4196-874e-3cafa334bc61}"
