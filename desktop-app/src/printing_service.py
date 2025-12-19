@@ -258,13 +258,18 @@ class PrintingService:
         Форматирует SSCC для человекочитаемого представления.
         Пример: (00) 0 4604060 006532 5
         """
-        if len(sscc) != 18:
+        # --- ИЗМЕНЕНИЕ: Обрабатываем как 18-значные, так и 20-значные коды ---
+        if len(sscc) == 20 and sscc.startswith("00"):
+            sscc_18 = sscc[2:] # Работаем с 18-значной частью
+        elif len(sscc) == 18:
+            sscc_18 = sscc
+        else:
             return sscc # Возвращаем как есть, если длина неверная
         
-        part1 = sscc[0]
-        part2 = sscc[1:8]
-        part3 = sscc[8:17]
-        part4 = sscc[17]
+        part1 = sscc_18[0]
+        part2 = sscc_18[1:8]
+        part3 = sscc_18[8:17]
+        part4 = sscc_18[17]
         return f"(00) {part1} {part2} {part3} {part4}"
 
     @staticmethod
@@ -706,4 +711,5 @@ class PrintingService:
                 images_to_print.append(img)
         
         if images_to_print:
+
             PrintingService.print_generated_images(printer_name, paper_name, images_to_print, user_info)

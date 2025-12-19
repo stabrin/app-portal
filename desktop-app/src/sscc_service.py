@@ -17,7 +17,7 @@ def calculate_sscc_check_digit(base_sscc: str) -> int:
 def generate_sscc(sscc_id: int, gcp: str) -> tuple[str, str]:
     """
     Вспомогательная функция для генерации SSCC.
-    Теперь принимает GCP как аргумент.
+    Возвращает кортеж (18-значный код, 20-значный код с AI для штрихкода).
     """
     if not gcp:
         raise ValueError("GCP (Global Company Prefix) не задан в конфигурации.")
@@ -35,8 +35,10 @@ def generate_sscc(sscc_id: int, gcp: str) -> tuple[str, str]:
     serial_part = str(serial_number).zfill(serial_number_length)
     base_sscc = str(extension_digit) + gcp + serial_part
     check_digit = calculate_sscc_check_digit(base_sscc)
-    full_sscc = base_sscc + str(check_digit)
-    return base_sscc, full_sscc
+    sscc_18 = base_sscc + str(check_digit)
+    # --- ИЗМЕНЕНИЕ: Формируем 20-значный код с AI (00) для кодирования ---
+    sscc_for_barcode = "00" + sscc_18
+    return sscc_18, sscc_for_barcode
 
 def read_and_increment_counter(cursor, counter_name: str, increment_by: int = 1) -> tuple[int, str | None, str]:
     """
