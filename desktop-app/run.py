@@ -84,7 +84,7 @@ def _get_main_callable():
 
 if __name__ == "__main__":
     main_callable = None
-    try:
+    try: 
         main_callable = _get_main_callable()
         main_callable()
     except Exception as e:
