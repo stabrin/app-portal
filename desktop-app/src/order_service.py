@@ -224,8 +224,11 @@ class OrderService:
         return df, report_name
 
     def import_data_from_external_sw(self, order_id: int, filepath: str):
-        """Обрабатывает CSV-файл от 'Дельта', обновляет базу данных."""
-        df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str})
+        """
+        Обрабатывает CSV-файл от 'Дельта', обновляет базу данных.
+        Принимает путь к файлу.
+        """
+        df = pd.read_csv(filepath, sep='\t', dtype={'Barcode': str, 'BoxSSCC': str, 'PaletSSCC': str}) # Читаем файл здесь
         df.columns = df.columns.str.strip()
         required_columns = ['DataMatrix', 'Barcode', 'StartDate', 'EndDate', 'BoxSSCC', 'PaletSSCC']
         if not all(col in df.columns for col in required_columns):

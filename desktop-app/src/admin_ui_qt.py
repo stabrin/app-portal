@@ -660,11 +660,8 @@ class OrderEditorFrameQt(QWidget):
         progress_dialog.show()
 
         try:
-            # --- ИСПРАВЛЕНИЕ: Читаем CSV в DataFrame перед передачей в сервис ---
-            # Это решает ошибку "AttributeError: 'str' object has no attribute 'empty'",
-            # так как сервис теперь будет получать DataFrame, а не путь к файлу (str).
-            df = pd.read_csv(filepath, sep='\t', dtype=str)
-            self.order_service.import_data_from_external_sw(self.order_id, df)
+            # --- ИСПРАВЛЕНИЕ: Передаем путь к файлу (filepath) напрямую в сервис. ---
+            self.order_service.import_data_from_external_sw(self.order_id, filepath)
             progress_dialog.setValue(100)
             QMessageBox.information(self, "Успех", "Данные из CSV-файла 'Дельта' успешно импортированы и обработаны.")
         except Exception as e:
