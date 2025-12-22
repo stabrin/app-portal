@@ -736,16 +736,39 @@ class ApiService:
     def get_utilisation_result(self, utilisation_upload_id: int):
         """
         Получает результат обработки ранее отправленных сведений об использовании.
+        --- ИЗМЕНЕНИЕ: Добавлена логика ожидания и повторных запросов. ---
+        Это решает проблему, когда API возвращает ошибку 400, потому что
+        результат еще не готов.
         """
         logger.info(f"Запрос результата для utilisation_upload_id: {utilisation_upload_id}")
-        try:
-            url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/result"
-            payload = {'utilisation_upload_id': int(utilisation_upload_id)}
-            response = self._api_request('get', url, json=payload, timeout=60)
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Ошибка при получении результата для utilisation_upload_id {utilisation_upload_id}: {e}", exc_info=True)
-            raise
+        
+        url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/upload/result"
+        payload = {'utilisation_upload_id': int(utilisation_upload_id)}
+        
+        max_retries = 10  # Максимальное количество попыток
+        retry_delay = 5   # Задержка в секундах между попытками
+
+        for attempt in range(max_retries):
+            try:
+                response = self._api_request('get', url, json=payload, timeout=60)
+                return response.json()
+            except requests.exceptions.HTTPError as e:
+                # Проверяем, является ли ошибка временной (результат еще не готов)
+                if e.response.status_code == 400:
+                    try:
+                        error_data = e.response.json()
+                        if error_data.get("errors", [{}])[0].get("code") == "no_utilisation_upload_result":
+                            logger.warning(f"Результат для {utilisation_upload_id} еще не готов. Попытка {attempt + 1}/{max_retries}. Ожидание {retry_delay} сек...")
+                            time.sleep(retry_delay)
+                            continue # Переходим к следующей попытке
+                    except (json.JSONDecodeError, IndexError):
+                        pass # Если не удалось распарсить ошибку, считаем ее критической
+                
+                # Если ошибка не 400 или код ошибки другой, пробрасываем ее дальше
+                logger.error(f"Критическая ошибка при получении результата для {utilisation_upload_id}: {e}", exc_info=True)
+                raise
+
+        raise TimeoutError(f"Не удалось получить результат для {utilisation_upload_id} после {max_retries} попыток.")
 
     def create_utilisation_report(self, payload: dict):
         """
