@@ -265,7 +265,9 @@ class OrderService:
                         lambda row: box_to_pallet_sscc_map.get(row['sscc']) if row['level'] == 1 else None, 
                         axis=1
                     )
-                    upsert_data_to_db(cur, 'packages', all_packages_df, 'sscc')
+                    # --- ИСПРАВЛЕНИЕ: Аргументы dataframe и table_name были перепутаны местами. ---
+                    # Правильный порядок: upsert_data_to_db(cursor, dataframe, table_name, pk_column)
+                    upsert_data_to_db(cur, all_packages_df, 'packages', 'sscc')
                     
                     cur.execute("""
                         UPDATE packages p_child SET parent_id = p_parent.id
@@ -291,7 +293,9 @@ class OrderService:
                 
                 columns_to_save = ['datamatrix', 'gtin', 'serial', 'crypto_part_91', 'crypto_part_92', 'crypto_part_93', 'order_id', 'package_id']
                 items_to_upload = items_df[columns_to_save]
-                upsert_data_to_db(cur, 'items', items_to_upload, 'datamatrix')
+                # --- ИСПРАВЛЕНИЕ: Аргументы dataframe и table_name были перепутаны местами. ---
+                # Правильный порядок: upsert_data_to_db(cursor, dataframe, table_name, pk_column)
+                upsert_data_to_db(cur, items_to_upload, 'items', 'datamatrix')
 
                 # 3. Подготовка данных для delta_result
                 df_for_json = df.copy()
@@ -323,7 +327,9 @@ class OrderService:
                 grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
 
                 delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
-                upsert_data_to_db(cur, 'delta_result', delta_result_df, ['order_id', 'printrun_id', 'production_date'])
+                # --- ИСПРАВЛЕНИЕ: Аргументы dataframe и table_name были перепутаны местами. ---
+                # Правильный порядок: upsert_data_to_db(cursor, dataframe, table_name, pk_column)
+                upsert_data_to_db(cur, delta_result_df, 'delta_result', ['order_id', 'printrun_id', 'production_date'])
 
             conn.commit()
 
