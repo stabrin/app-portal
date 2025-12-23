@@ -350,7 +350,7 @@ class ApiService:
                 upsert_df = pd.DataFrame(products_to_upsert)
                 with self.order_service._get_connection() as conn:
                     with conn.cursor() as cur:
-                        upsert_data_to_db(cur, 'products', upsert_df, 'gtin')
+                        upsert_data_to_db(cur, upsert_df, 'products', 'gtin')
                     conn.commit() # <-- ИСПРАВЛЕНИЕ: Добавлена фиксация транзакции
                 log("Успешно выполнена операция обновления/вставки в справочник товаров.")
             except Exception as e:
