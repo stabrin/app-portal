@@ -6196,37 +6196,34 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Внимание", "Не удалось сгенерировать SSCC коды.")
             return
 
-        reply = QMessageBox.question(self, "Генерация завершена", 
-                                     f"Успешно сгенерировано {len(ssccs)} кодов SSCC.\n\nНапечатать коды?",
-                                     QMessageBox.Yes | QMessageBox.No)
+        # Шаг 1: Сначала предлагаем сохранить файл.
+        file_saved = self._save_sscc_to_file(ssccs)
 
-        if reply == QMessageBox.No:
-            self._save_sscc_to_file(ssccs)
-        else: # QMessageBox.Yes
+        # Шаг 2: После сохранения (или отмены) спрашиваем про печать.
+        reply = QMessageBox.question(self, "Печать кодов",
+                                     "Напечатать сгенерированные коды?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
             try:
-                # --- ИЗМЕНЕНИЕ: Убираем лишний диалог выбора макета ---
                 # Сразу открываем основной диалог печати, передавая 20-значные коды.
                 items_to_print = [{'sscc_code': code_20} for code_18, code_20 in ssccs]
                 print_dialog = PrintDialogQt(self, self.user_info, "Печать SSCC", items_to_print)
-                
-                # Если пользователь прошел весь путь и нажал "Напечатать",
-                # то после этого предлагаем сохранить 18-значные коды в файл.
-                if print_dialog.exec():
-                    self._save_sscc_to_file(ssccs)
+                print_dialog.exec()
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Не удалось запустить печать: {e}")
 
-    def _save_sscc_to_file(self, ssccs: list):
-        """Предлагает сохранить сгенерированные SSCC в CSV файл."""
+    def _save_sscc_to_file(self, ssccs: list) -> bool:
+        """Предлагает сохранить сгенерированные SSCC в CSV файл. Возвращает True, если файл сохранен."""
         logging.debug(f"[_save_sscc_to_file] Слот запущен. Получено {len(ssccs)} SSCC кодов.")
 
         if not ssccs:
             logging.warning("[_save_sscc_to_file] Список SSCC пуст. Сохранение отменено.")
             QMessageBox.warning(self, "Внимание", "Не удалось сгенерировать SSCC коды.")
-            return
+            return False
 
         logging.debug("[_save_sscc_to_file] Открытие диалога сохранения файла...")
-        filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить SSCC коды", "sscc_codes.csv", "CSV Files (*.csv)")
+        filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить SSCC коды", "BI.csv", "CSV Files (*.csv)")
 
         if filepath:
             logging.debug(f"[_save_sscc_to_file] Файл для сохранения выбран: {filepath}")
@@ -6234,16 +6231,17 @@ class AdminWindowQt(QMainWindow):
                 logging.debug("[_save_sscc_to_file] Начало записи в файл...")
                 with open(filepath, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    # --- ИЗМЕНЕНИЕ: Выгружаем только 18-значную версию кода ---
                     writer.writerows([[code_18] for code_18, code_20 in ssccs])
                 logging.debug("[_save_sscc_to_file] Запись в файл завершена успешно.")
                 QMessageBox.information(self, "Успех", f"SSCC коды успешно сохранены в файл:\n{filepath}")
+                return True
             except Exception as e:
                 logging.error(f"[_save_sscc_to_file] Ошибка при записи в файл: {e}", exc_info=True)
                 QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось сохранить SSCC коды в файл: {e}")
         else:
             logging.debug("[_save_sscc_to_file] Диалог сохранения файла отменен пользователем.")
             QMessageBox.information(self, "Отмена", "Сохранение файла отменено.")
+        return False
 
     def _open_lenta_upload_dialog(self):
         """Открывает диалог для специальной загрузки 'Лента'."""
