@@ -1,7 +1,7 @@
 import sys
 import os
-import glob # Этот импорт больше не нужен, но можно оставить
-from cx_Freeze import setup, Executable, hooks
+import glob
+from cx_Freeze import setup, Executable
 import psycopg2
 
 # --- ПАРАМЕТРЫ ---
@@ -46,15 +46,15 @@ if os.path.exists(binary_libs_dir):
 for dll in found_dlls:
     include_files.append((dll, os.path.basename(dll)))
 
-# --- НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ СПОСОБ ВКЛЮЧЕНИЯ DLL ---
-# Pylibdmtx DLL. Используем встроенный механизм cx_Freeze.
-libdmtx_dll_path = hooks.find_library("libdmtx-64.dll")
-if libdmtx_dll_path:
-    include_files.append((libdmtx_dll_path, "libdmtx-64.dll"))
-else:
-    # Если find_library не сработал, используем ваш старый метод как запасной
-    libdmtx_dll_path = os.path.join(BASE_DIR, ".venv", "Lib", "site-packages", "pylibdmtx", "libdmtx-64.dll")
-    include_files.append((libdmtx_dll_path, "libdmtx-64.dll"))
+# --- ВОЗВРАЩАЕМ НАДЕЖНЫЙ СПОСОБ ПОИСКА DLL ---
+# Pylibdmtx DLL
+try:
+    import pylibdmtx
+    pylibdmtx_dir = os.path.dirname(pylibdmtx.__file__)
+    libdmtx_dll = os.path.join(pylibdmtx_dir, "libdmtx-64.dll")
+except ImportError:
+    libdmtx_dll = os.path.join(BASE_DIR, ".venv", "Lib", "site-packages", "pylibdmtx", "libdmtx-64.dll")
+include_files.append((libdmtx_dll, "libdmtx-64.dll"))
 
 # MSVCR120
 msvcr_path = os.path.join(BASE_DIR, "desktop-app", "msvcr120.dll")
