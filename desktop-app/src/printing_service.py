@@ -1,5 +1,6 @@
 import io
 import logging
+import json
 import textwrap
 from typing import Dict, Any, Optional
 from psycopg2 import sql
