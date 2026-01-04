@@ -1,13 +1,13 @@
 import io
 import logging
 import json
-import os
-import tempfile
 import textwrap
 from typing import Dict, Any, Optional
 from psycopg2 import sql
 import re
 from psycopg2.extras import RealDictCursor # Явно импортируем RealDictCursor
+
+from .db_connector import get_client_db_connection
 
 import psycopg2
 
@@ -22,13 +22,6 @@ except ImportError:
     Image = None
     ImageDraw = None
     ImageFont = None
-    ImageWin = None
-
-# Отдельно пробуем импортировать ImageTk (он может отсутствовать в PySide6 версии)
-try:
-    from PIL import ImageTk
-except ImportError:
-    # Не логируем как ошибку, так как для PySide6 это нормально
     ImageTk = None
 
 try:
@@ -82,53 +75,6 @@ class PrintingService:
 
 
     @staticmethod
-    def _get_client_db_connection(user_info: Dict[str, Any]) -> Optional[psycopg2.extensions.connection]:
-        """Создает подключение к базе данных клиента."""
-        logging.debug("Попытка установить соединение с БД клиента.")
-        db_config = user_info.get("client_db_config")
-        if not db_config:
-            logging.error("Отсутствует конфигурация БД в user_info.")
-            raise ValueError("Конфигурация базы данных клиента не предоставлена.")
-
-        conn_params = {
-            'host': db_config.get('db_host'),
-            'port': db_config.get('db_port'),
-            'dbname': db_config.get('db_name'),
-            'user': db_config.get('db_user'),
-            'password': db_config.get('db_password')
-        }
-
-        logging.debug(f"Параметры подключения к БД: {conn_params}")
-        if not all(conn_params.values()):
-            logging.error(f"Неполные параметры подключения: {conn_params}")
-            raise ValueError("Неполные параметры подключения к базе данных.")
-
-        temp_cert_file = None
-        conn = None # Инициализируем conn
-        try:
-            if db_config.get('db_ssl_cert'):
-                logging.debug("Создание временного файла сертификата SSL.")
-                with tempfile.NamedTemporaryFile(delete=False, mode='w', suffix='.crt', encoding='utf-8') as fp:
-                    fp.write(db_config['db_ssl_cert'].strip()) # ИСПРАВЛЕНИЕ: Убираем лишние пробелы/переносы
-                    temp_cert_file = fp.name
-                conn_params.update({'sslmode': 'verify-full', 'sslrootcert': temp_cert_file})
-
-            conn = psycopg2.connect(**conn_params)
-            logging.info(f"Успешное подключение к БД: {conn_params['dbname']}")
-            return conn
-        except Exception as e:
-            logging.error(f"Ошибка подключения к БД: {e}")
-            raise
-        finally:
-            if temp_cert_file and os.path.exists(temp_cert_file):
-                try:
-                    os.remove(temp_cert_file)
-                    logging.debug(f"Временный файл сертификата {temp_cert_file} удален.")
-                except OSError as e:
-                    logging.warning(f"Не удалось удалить временный файл сертификата {temp_cert_file}: {e}")
-
-
-    @staticmethod
     def _fetch_data_from_db(user_info: Dict[str, Any], data_source: str) -> Optional[str]:
         """Получает данные из БД клиента по указанному источнику (table.field)."""
         logging.debug(f"Получение данных из БД для источника: {data_source}")
@@ -138,14 +84,8 @@ class PrintingService:
             return None
 
         table_name, field_name = parts
-        conn = None
         try:
-            conn = PrintingService._get_client_db_connection(user_info)
-            if not conn:
-                logging.error("Не удалось установить соединение с БД.")
-                return None
-
-            with conn.cursor() as cur:
+            with get_client_db_connection(user_info) as conn, conn.cursor() as cur:
                 query = sql.SQL("SELECT {field} FROM {table} LIMIT 1").format(
                     field=sql.Identifier(field_name),
                     table=sql.Identifier(table_name)
@@ -161,11 +101,6 @@ class PrintingService:
         except Exception as e:
             logging.error(f"Ошибка получения данных из БД для '{data_source}': {e}")
             return None
-        finally:
-            if conn:
-                conn.close()
-
-                logging.debug("Соединение с БД закрыто.")
 
     @staticmethod
     def _get_multiline_fitting_font(draw: "ImageDraw.Draw", text: str, font_name: str, max_width: int, max_height: int) -> tuple["ImageFont.FreeTypeFont", str]:
@@ -444,7 +379,7 @@ class PrintingService:
 
                     # 3. Рендерим изображение (логика взята из объекта "image")
                     try:
-                        with PrintingService._get_client_db_connection(user_info) as conn:
+                        with get_client_db_connection(user_info) as conn:
 
                             PrintingService._ensure_images_table_exists(conn)
                             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -477,7 +412,7 @@ class PrintingService:
                     image_name = str(obj_data)
                     try:
                         # Пытаемся получить изображение из БД
-                        with PrintingService._get_client_db_connection(user_info) as conn:
+                        with get_client_db_connection(user_info) as conn:
                             PrintingService._ensure_images_table_exists(conn)
                             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                                 cur.execute("SELECT image_data FROM ap_images WHERE name = %s", (image_name,))
