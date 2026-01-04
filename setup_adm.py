@@ -46,18 +46,17 @@ if os.path.exists(binary_libs_dir):
 for dll in found_dlls:
     include_files.append((dll, os.path.basename(dll)))
 
-# --- ВОЗВРАЩАЕМ НАДЕЖНЫЙ СПОСОБ ПОИСКА DLL ---
-# Pylibdmtx DLL
+# --- НОВЫЙ, БОЛЕЕ НАДЕЖНЫЙ СПОСОБ ВКЛЮЧЕНИЯ PYLIBDMTX ---
+# Вместо копирования только DLL, мы копируем всю папку пакета.
+# Это решает проблему ImportError в скомпилированном приложении.
 try:
     import pylibdmtx
-    pylibdmtx_dir = os.path.dirname(pylibdmtx.__file__)
-    libdmtx_dll = os.path.join(pylibdmtx_dir, "libdmtx-64.dll")
+    pylibdmtx_path = os.path.dirname(pylibdmtx.__file__)
 except ImportError:
-    # Этот путь используется как запасной, если pylibdmtx не установлен в окружении сборки
-    libdmtx_dll = os.path.join(BASE_DIR, ".venv", "Lib", "site-packages", "pylibdmtx", "libdmtx-64.dll")
+    pylibdmtx_path = os.path.join(BASE_DIR, ".venv", "Lib", "site-packages", "pylibdmtx")
 
-# --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Копируем DLL в папку lib ---
-include_files.append((libdmtx_dll, os.path.join("lib", "libdmtx-64.dll")))
+# Копируем всю папку 'pylibdmtx' в папку 'lib' дистрибутива.
+include_files.append((pylibdmtx_path, os.path.join("lib", "pylibdmtx")))
 
 # MSVCR120
 msvcr_path = os.path.join(BASE_DIR, "desktop-app", "msvcr120.dll")
