@@ -276,6 +276,9 @@ class PrintingService:
     def generate_label_image(template_json: Dict[str, Any], data: Dict[str, Any], user_info: Dict[str, Any], text_cache: Optional[Dict] = None, static_layers_cache: Optional[Dict] = None) -> Optional["Image.Image"]:
         """Генерирует изображение этикетки с помощью Pillow."""
         logging.info("Начало генерации изображения этикетки.")
+        # --- ИСПРАВЛЕНИЕ: Если data - строка, оборачиваем в dict ---
+        if isinstance(data, str):
+            data = {'datamatrix': data}
         if not all([Image, ImageDraw, ImageFont]):
             logging.error("Pillow не установлен. Генерация изображения невозможна.")
             raise ImportError("Библиотека Pillow не установлена.")
@@ -386,7 +389,11 @@ class PrintingService:
                         if cache_key not in text_cache:
                             # Если в кэше нет, рассчитываем и сохраняем
                             logging.debug(f"Кэширование произвольного текста: '{cache_key[:30]}...'")
-                            font, wrapped_text = PrintingService._get_multiline_fitting_font(draw, str(obj_data), obj.get("font_name", "arial"), width, height)
+                            if obj.get("single_line"):
+                                font = PrintingService._get_fitting_font(str(obj_data), obj.get("font_name", "arial"), width, height)
+                                wrapped_text = str(obj_data)  # Не переносим
+                            else:
+                                font, wrapped_text = PrintingService._get_multiline_fitting_font(draw, str(obj_data), obj.get("font_name", "arial"), width, height)
                             text_cache[cache_key] = (font, wrapped_text)
                         else:
                             # Если в кэше есть, берем готовый результат

@@ -4,7 +4,7 @@
 
 **app-portal** — это многосервисная экосистема для работы с кодами DataMatrix, отслеживания табачных товаров, выполнения операций агрегации и управления настольными приложениями. Архитектура включает:
 - **Веб-сервисы**: Flask-приложения, контейнеризованные с помощью Docker
-- **Настольное приложение**: Клиент на базе Tkinter для локальных операций с БД
+- **Настольное приложение**: Клиент на базе PySide6 (Qt) для локальных операций с БД
 - **Общая база данных**: PostgreSQL с поддержкой мультитенантности (главная БД портала + БД клиентов)
 - **Слой кеша**: Redis для состояния сессий и отслеживания агрегации в реальном времени
 - **Обратный прокси**: Nginx для маршрутизации к сервисам
@@ -43,7 +43,7 @@ def create_app():
 **Настольное приложение (desktop-app)**:
 - Реализует пулирование соединений через `src/db_connector.py`
 - Главная БД: `get_main_db_connection()` контекстный менеджер (пул потоков с SSL-сертификатом)
-- БД клиентов: `get_client_db_connection(user_info)` динамически пулирует по клиентам
+- БД клиентов: `get_client_db_connection(user_info)` динамически пулирует по клиентам с логикой fallback (SSL → без SSL)
 - Логика fallback: сначала пытается SSL-подключение, затем отключает SSL при необходимости
 
 **Критический момент**: Настольное приложение жестко кодирует учетные данные и хост в `db_connector.py` (строка 46+). Веб-приложения читают из `.env` через `load_dotenv()`.
@@ -67,10 +67,11 @@ result = run_aggregation_process(file_path, aggregation_mode)
 ### Redis для управления состоянием сессии
 
 **manual-aggregation-app** использует Redis как механизм состояния для многошаговой агрегации:
-- Состояние сессии хранится в Redis с ключами, специфичными для пользователя
+- Класс `EmployeeStateManager` в `state_service.py` управляет состоянием с ключами `employee_state:{token_id}`
+- Состояния: IDLE, AGGREGATING_SET, AGGREGATING_BOX, ASSIGNED_TO_PALLET, ASSIGNED_TO_CONTAINER
 - Каждый HTTP-запрос читает/обновляет состояние Redis
 - Исключает необходимость отправки форм между шагами
-- `state_service.py` предоставляет интерфейс state machine
+- `state_service.py` предоставляет интерфейс state machine с блокировками для предотвращения конфликтов
 
 **Пример рабочего процесса**:
 1. Пользователь начинает агрегацию → Redis хранит `{user_id: {current_box: X, scanned_items: []}}`
@@ -100,29 +101,29 @@ docker-compose down -v         # Также удалить тома (разру�
 Использует **Nuitka** (не PyInstaller):
 ```bash
 # Запустить задачу сборки из VS Code или терминала
-python -m nuitka --standalone --mingw64 --enable-plugin=tk-inter \
+python -m nuitka --standalone --mingw64 --enable-plugin=pyside6 \
   --windows-console-mode=disable --output-dir=build \
   --output-filename=TildaKod.exe \
-  --include-package=pylibdmtx,jinja2,babel,psycopg2,PIL \
+  --include-package=pylibdmtx,jinja2,babel,psycopg2,PIL,pandas,requests,bcrypt,dotenv,barcode \
+  --include-data-file=${workspaceFolder}/.venv/Lib/site-packages/pylibdmtx/libdmtx-64.dll=libdmtx-64.dll \
   --include-data-file=desktop-app/.env=.env \
   --include-data-file=desktop-app/msvcr120.dll=msvcr120.dll \
+  --include-data-dir=secrets=secrets \
   desktop-app/run.py
 ```
 
 **Критическое исправление в `desktop-app/run.py` (строки 6-35)**: 
 - Обрабатывает разрешение пути DLL для режима IDE и скомпилированного exe
-- Добавляет `base_dir` в `os.add_dll_directory()` для загрузки Windows DLL
-- Необходимо для работы библиотеки `libdmtx`
+- Добавляет `base_dir` в `os.add_dll_directory()` и `PATH` для загрузки Windows DLL
+- Необходимо для работы библиотеки `libdmtx` и других зависимостей
 
 ## Специфичные для проекта паттерны и соглашения
 
 ### Парсинг кодов DataMatrix
 
 Реализованы два стандарта парсинга:
-- **Табак**: фиксированный формат из 29 символов (GS_SEPARATOR не используется) → `parse_tobacco_dm()`
-- **DMKOD**: переменной длины, использует `GS (\x1d)` как разделитель полей → `parse_datamatrix()`
-
-Файлы: `datamatrix-app/app/services/tobacco_service.py` и `aggregation_service.py`
+- **Табак**: фиксированный формат из 29 символов (GS_SEPARATOR не используется) → `parse_tobacco_dm()` в `tobacco_service.py`
+- **DMKOD**: переменной длины, использует `GS (\x1d)` как разделитель полей → `parse_datamatrix()` в `aggregation_service.py`
 
 ### Генерация представлений для интеграции Bartender
 
@@ -184,8 +185,8 @@ cur.execute(query, (id_value,))
 
 ### Изменение UI настольного приложения
 
-1. Отредактируйте `desktop-app/src/admin_ui.py`, `supervisor_ui.py` или основное окно
-2. На основе Tkinter; макет фреймов управляется grid/pack
+1. Отредактируйте `desktop-app/src/admin_ui_qt.py`, `supervisor_ui_qt.py` или основное окно
+2. На основе PySide6; макет использует QVBoxLayout, QHBoxLayout и т.д.
 3. Сервисы в `src/` (aggregation_service, printing_service, api_service и т. д.)
 4. Пересоберите с помощью задачи Nuitka для тестирования поведения исполняемого файла
 
@@ -209,7 +210,7 @@ cur.execute(query, (id_value,))
 2. **"DATABASE_URL not set"**: Веб-приложения ожидают этого в `.env`, а не в отдельных переменных DB_*
 3. **Циклические импорты**: Всегда используйте Flask application factory для отложенной регистрации blueprint
 4. **Несогласованность состояния Redis**: manual-aggregation-app не очищает заброшенные сессии; мониторьте память Redis
-5. **Ошибки сборки Nuitka**: Убедитесь, что `--include-package=` охватывает все зависимости psycopg2, jinja2, babel
+5. **Ошибки сборки Nuitka**: Убедитесь, что `--include-package=` охватывает все зависимости psycopg2, jinja2, babel, pandas, requests, bcrypt, dotenv, barcode
 6. **Сбои многотенантного подключения**: настольное приложение `get_client_db_connection()` сначала пытается SSL, затем fallback на небезопасное; проверьте конфиг клиента в БД портала
 
 ## Справочник ключевых файлов
@@ -222,3 +223,4 @@ cur.execute(query, (id_value,))
 - `datamatrix-app/init_db.py` - Определение схемы для главного приложения
 - `manual-aggregation-app/init_ma_db.py` - Схема для ручной агрегации
 - `desktop-app/src/db_connector.py` - Пулирование соединений и логика SSL
+- `manual-aggregation-app/app/services/state_service.py` - Управление состоянием через Redis

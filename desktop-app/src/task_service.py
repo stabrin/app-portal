@@ -5,6 +5,7 @@ import string
 import psycopg2
 from .db_connector import get_client_db_connection
 from psycopg2.extras import RealDictCursor
+from typing import Optional, Dict, Any
 
 class TaskService:
     """
@@ -71,7 +72,12 @@ class TaskService:
                 try:
                     # 1. Найти сотрудника и связанную задачу по коду-пропуску
                     cur.execute(
-                        "SELECT id, task_id FROM task_employees WHERE access_code = %s",
+                        """
+                        SELECT te.id, tet.task_id, te.employee_token_id
+                        FROM task_employees te
+                        JOIN task_employee_tokens tet ON te.employee_token_id = tet.id
+                        WHERE te.access_code = %s
+                        """,
                         (access_code,)
                     )
                     employee_data = cur.fetchone()
@@ -80,14 +86,15 @@ class TaskService:
                         return {'is_valid': False, 'error': 'Код-пропуск не найден'}
 
                     employee_id = employee_data['id']
+                    employee_token_id = employee_data['employee_token_id']
                     task_id = employee_data['task_id']
 
                     # 2. Обновить ФИО сотрудника
                     cur.execute(
-                        "UPDATE task_employees SET employee_name = %s WHERE id = %s",
-                        (operator_name, employee_id)
+                        "UPDATE task_employee_tokens SET employee_name = %s WHERE id = %s",
+                        (operator_name, employee_token_id)
                     )
-                    logging.info(f"Сохранено ФИО '{operator_name}' для сотрудника #{employee_id}")
+                    logging.info(f"Сохранено ФИО '{operator_name}' для токена #{employee_token_id}")
 
                     # 3. Получить основную информацию о задаче и заказе
                     cur.execute(
@@ -121,9 +128,9 @@ class TaskService:
 
                     # 5. Стартуем сессию (проверка на дубли внутри)
                     session_id = self.start_session(
-                        employee_id=employee_id,
+                        employee_token_id=employee_token_id,
                         employee_name=operator_name,
-                        order_id=order_id,
+                        task_id=task_id,
                         workstation_id=workstation_id,
                         cursor=cur  # Передаем курсор для выполнения в той же транзакции
                     )
@@ -163,15 +170,15 @@ class TaskService:
                     logging.error(f"Ошибка при проверке пропуска и создании сессии: {e}")
                     raise
 
-    def start_session(self, employee_id, employee_name, order_id, workstation_id, cursor):
+    def start_session(self, employee_token_id, employee_name, task_id, workstation_id, cursor):
         """
         Создает новую рабочую сессию. Проверяет наличие уже активной сессии.
         Использует переданный курсор для выполнения в рамках существующей транзакции.
         """
         # 1. Проверить, нет ли уже активной сессии для этого сотрудника
         cursor.execute(
-            "SELECT id FROM ma_work_sessions WHERE employee_token_id = %s AND end_time IS NULL",
-            (employee_id,)
+            "SELECT id FROM task_work_sessions WHERE employee_token_id = %s AND end_time IS NULL",
+            (employee_token_id,)
         )
         active_session = cursor.fetchone()
         if active_session:
@@ -181,14 +188,14 @@ class TaskService:
         # 2. Создать новую сессию
         cursor.execute(
             """
-            INSERT INTO ma_work_sessions (employee_token_id, employee_name, order_id, workstation_id)
+            INSERT INTO task_work_sessions (employee_token_id, employee_name, task_id, workstation_id)
             VALUES (%s, %s, %s, %s)
             RETURNING id;
             """,
-            (employee_id, employee_name, order_id, workstation_id)
+            (employee_token_id, employee_name, task_id, workstation_id)
         )
         session_id = cursor.fetchone()['id']
-        logging.info(f"Создана новая сессия #{session_id} для сотрудника #{employee_id} на рабочем месте '{workstation_id}'.")
+        logging.info(f"Создана новая сессия #{session_id} для сотрудника #{employee_token_id} на рабочем месте '{workstation_id}'.")
         return session_id
 
     def update_session_activity(self, session_id):
@@ -199,7 +206,7 @@ class TaskService:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "UPDATE ma_work_sessions SET last_activity = CURRENT_TIMESTAMP WHERE id = %s AND end_time IS NULL",
+                        "UPDATE task_work_sessions SET last_activity = CURRENT_TIMESTAMP WHERE id = %s AND end_time IS NULL",
                         (session_id,)
                     )
                 conn.commit()
@@ -215,13 +222,31 @@ class TaskService:
             with self._get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "UPDATE ma_work_sessions SET end_time = CURRENT_TIMESTAMP WHERE id = %s",
+                        "UPDATE task_work_sessions SET end_time = CURRENT_TIMESTAMP WHERE id = %s",
                         (session_id,)
                     )
                 conn.commit()
             logging.info(f"Сессия #{session_id} была закрыта.")
         except Exception as e:
             logging.error(f"Ошибка при закрытии сессии #{session_id}: {e}")
+
+    def get_active_sessions(self):
+        """Возвращает список активных сессий."""
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute(
+                        """
+                        SELECT id, employee_name, task_id, workstation_id, start_time
+                        FROM task_work_sessions
+                        WHERE end_time IS NULL
+                        ORDER BY start_time DESC
+                        """
+                    )
+                    return cur.fetchall()
+        except Exception as e:
+            logging.error(f"Ошибка при получении активных сессий: {e}")
+            return []
 
     def close_inactive_sessions(self):
         """Закрывает все сессии, неактивные более 30 минут."""
@@ -230,7 +255,7 @@ class TaskService:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
-                        UPDATE ma_work_sessions
+                        UPDATE task_work_sessions
                         SET end_time = last_activity + INTERVAL '30 minutes'
                         WHERE end_time IS NULL AND last_activity < CURRENT_TIMESTAMP - INTERVAL '30 minutes'
                         RETURNING id;
@@ -409,12 +434,23 @@ class TaskService:
         generated_codes = []
         with self._get_connection() as conn:
             with conn.cursor() as cur:
-                # 1. Удаляем старые пропуски для этой задачи, чтобы избежать дублей
-                cur.execute("DELETE FROM task_employees WHERE task_id = %s", (task_id,))
-                logging.info(f"Удалены старые пропуски для задачи #{task_id}.")
+                # 1. Удаляем старые пропуски и токены для этой задачи, чтобы избежать дублей
+                cur.execute(
+                    "DELETE FROM task_employees WHERE employee_token_id IN (SELECT id FROM task_employee_tokens WHERE task_id = %s)",
+                    (task_id,)
+                )
+                cur.execute("DELETE FROM task_employee_tokens WHERE task_id = %s", (task_id,))
+                logging.info(f"Удалены старые токены и пропуски для задачи #{task_id}.")
 
-                # 2. Генерируем и вставляем новые
+                # 2. Генерируем и вставляем новые токены и пропуски
                 for _ in range(employee_count):
+                    # Создаем токен
+                    cur.execute(
+                        "INSERT INTO task_employee_tokens (task_id) VALUES (%s) RETURNING id",
+                        (task_id,)
+                    )
+                    token_id = cur.fetchone()[0]
+                    
                     # --- ИЗМЕНЕНИЕ: Генерируем короткий 8-значный код вместо длинного GUID ---
                     # Этого более чем достаточно для уникальности и делает штрихкод короче.
                     while True:
@@ -423,10 +459,10 @@ class TaskService:
                             access_code = ''.join(random.choices(chars, k=8))
                             cur.execute(
                                 """
-                                INSERT INTO task_employees (task_id, access_code)
+                                INSERT INTO task_employees (employee_token_id, access_code)
                                 VALUES (%s, %s)
                                 """,
-                                (task_id, access_code)
+                                (token_id, access_code)
                             )
                             generated_codes.append(access_code)
                             break # Выходим из цикла, если вставка прошла успешно
@@ -459,11 +495,24 @@ class TaskService:
 
                 # 2. Получаем все коды доступа для этой задачи
                 cur.execute("""
-                    SELECT access_code
-                    FROM task_employees
-                    WHERE task_id = %s
+                    SELECT te.access_code, tet.employee_name
+                    FROM task_employees te
+                    JOIN task_employee_tokens tet ON te.employee_token_id = tet.id
+                    WHERE tet.task_id = %s
                 """, (task_id,))
                 passes = cur.fetchall()
                 
-                order_info['passes'] = [p['access_code'] for p in passes]
+                order_info['passes'] = passes
                 return order_info
+
+    def get_first_datamatrix_for_task(self, task_id: int) -> Optional[Dict[str, Any]]:
+        """Возвращает первую доступную запись из task_datamatrix_pool для задачи."""
+        with get_client_db_connection(self.user_info) as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT * FROM task_datamatrix_pool 
+                    WHERE task_id = %s AND status = 'available' 
+                    ORDER BY id LIMIT 1
+                """, (task_id,))
+                row = cur.fetchone()
+                return dict(row) if row else None

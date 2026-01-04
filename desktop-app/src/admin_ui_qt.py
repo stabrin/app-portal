@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
 )
 # --- NEW IMPORTS FOR PRINTING ---
-from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
 from PySide6.QtCore import Qt, Slot, QDate, QTimer, QThread, Signal, QObject, QRectF, QSize, QSizeF, QMarginsF
 from PySide6.QtGui import QColor, QPen, QPainter, QFont, QPixmap, QPageSize, QPageLayout
 import sys
@@ -213,11 +213,12 @@ class PreviewDialog(QDialog):
 # --- НОВЫЙ КЛАСС: Диалог печати ---
 class PrintDialogQt(QDialog):
     """Аналог PrintWorkplaceLabelsDialog на PySide6."""
-    def __init__(self, parent, user_info, title, items_to_print, preselected_layout=None):
+    def __init__(self, parent, user_info, title, items_to_print, preselected_layout=None, custom_layout=None):
         super().__init__(parent)
         self.user_info = user_info
         self.items_to_print = items_to_print
         self.preselected_layout = preselected_layout
+        self.custom_layout = custom_layout  # Новый параметр для внешнего макета
         self.catalogs_service = CatalogsService(user_info, lambda: get_client_db_connection(user_info))
         self.layouts = []
 
@@ -259,12 +260,17 @@ class PrintDialogQt(QDialog):
     def _load_layouts(self):
         try:
             self.layouts = self.catalogs_service.get_print_layouts()
+            if self.custom_layout:
+                self.layouts.append(self.custom_layout)
             self.layout_combo.clear()
             for layout in self.layouts:
                 self.layout_combo.addItem(layout['name'], userData=layout)
             
-            if self.preselected_layout and self.preselected_layout in [l['name'] for l in self.layouts]:
-                self.layout_combo.setCurrentText(self.preselected_layout)
+            if self.preselected_layout:
+                if isinstance(self.preselected_layout, str) and self.preselected_layout in [l['name'] for l in self.layouts]:
+                    self.layout_combo.setCurrentText(self.preselected_layout)
+                elif isinstance(self.preselected_layout, dict) and 'name' in self.preselected_layout:
+                    self.layout_combo.setCurrentText(self.preselected_layout['name'])
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить макеты: {e}")
 
@@ -735,13 +741,13 @@ class TaskEditorFrameQt(QWidget):
             self.employee_count_spinbox.setRange(1, 100)
             self.employee_count_spinbox.setValue(3) # Default
             
-            # --- NEW: Generate Passes Button ---
-            self.btn_generate_passes = QPushButton("Сгенерировать пропуски")
-            self.btn_generate_passes.clicked.connect(self._generate_employee_passes)
+            # --- NEW: Print Passes Button ---
+            self.btn_print_passes = QPushButton("Печать пропусков")
+            self.btn_print_passes.clicked.connect(self._print_employee_passes)
             
             employee_layout = QHBoxLayout()
             employee_layout.addWidget(self.employee_count_spinbox)
-            employee_layout.addWidget(self.btn_generate_passes)
+            employee_layout.addWidget(self.btn_print_passes)
             marking_layout.addRow("Количество сотрудников:", employee_layout)
             # --- END NEW ---
 
@@ -756,7 +762,7 @@ class TaskEditorFrameQt(QWidget):
             # SSCC Source
             self.sscc_source_label = QLabel("Способ получения SSCC:")
             self.sscc_source_combo = QComboBox()
-            self.sscc_source_combo.addItems(["Генерируем сами", "Предоставляет клиент"])
+            self.sscc_source_combo.addItems(["Печатаем на в процессе", "Напечатаны заранее"])
             marking_layout.addRow(self.sscc_source_label, self.sscc_source_combo)
 
             # --- NEW: SSCC refinement checkboxes ---
@@ -950,25 +956,41 @@ class TaskEditorFrameQt(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось обновить статус: {e}")
 
-    def _generate_employee_passes(self):
-        """Генерирует уникальные коды доступа для сотрудников."""
+    def _print_employee_passes(self):
+        """Печатает пропуски сотрудников. Если количество изменилось, сначала генерирует новые."""
         try:
             task_id = self.task_data['id']
-            employee_count = self.employee_count_spinbox.value()
-
-            # Вызываем сервисный метод
-            generated_codes = self.task_service.generate_employee_passes(task_id, employee_count)
+            new_employee_count = self.employee_count_spinbox.value()
             
-            QMessageBox.information(self, "Успех", 
-                                    f"Успешно сгенерировано {len(generated_codes)} пропусков для задачи #{task_id}.")
+            # Получаем текущие настройки
+            settings_json = self.task_data.get('settings_json', {})
+            if isinstance(settings_json, str):
+                try:
+                    settings_json = json.loads(settings_json)
+                except json.JSONDecodeError:
+                    settings_json = {}
             
-            # Открываем окно просмотра
-            dialog = EmployeePassesViewerDialog(self, self.task_service, self.user_info, task_id)
+            current_employee_count = settings_json.get('employee_count', 3)
+            
+            # Если количество изменилось, генерируем новые пропуски и обновляем настройки
+            if new_employee_count != current_employee_count:
+                # Генерируем новые пропуски
+                generated_codes = self.task_service.generate_employee_passes(task_id, new_employee_count)
+                QMessageBox.information(self, "Успех", 
+                                        f"Сгенерировано {len(generated_codes)} новых пропусков для задачи #{task_id}.")
+                
+                # Обновляем настройки
+                settings_json['employee_count'] = new_employee_count
+                self.task_service.update_task_settings(task_id, settings_json)
+                self.task_data['settings_json'] = settings_json  # Обновляем локальные данные
+            
+            # Открываем диалог просмотра и автоматически запускаем печать
+            dialog = EmployeePassesViewerDialog(self, self.task_service, self.user_info, task_id, task_data=self.task_data, auto_print=True)
             dialog.exec()
             
         except Exception as e:
-            logging.error(f"Ошибка при генерации пропусков: {e}", exc_info=True)
-            QMessageBox.critical(self, "Ошибка", f"Не удалось сгенерировать пропуски: {e}")
+            logging.error(f"Ошибка при обработке пропусков: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось обработать пропуски: {e}")
 
 
 class ApiIntegrationFrameQt(QWidget):
@@ -1606,10 +1628,12 @@ class LabelEditorDialog(QDialog):
             "task_datamatrix_pool.name",
             "task_datamatrix_pool.description_1",
             "task_datamatrix_pool.description_2",
-            "task_datamatrix_pool.description_3"
+            "task_datamatrix_pool.description_3",
+            "ap_workplaces.warehouse_name",
+            "ap_workplaces.workplace_number"
         ]
         self.available_qr_sources = [
-            "QR: Конфигурация рабочего места",
+            "ap_workplaces.access_token",
             "QR: Конфигурация сервера"
         ]
         self.available_sscc_sources = ["packages.sscc_code"]
@@ -2377,7 +2401,7 @@ class LabelEditorDialog(QDialog):
 
 class EmployeePassesViewerDialog(QDialog):
     """Диалог для просмотра и печати пропусков сотрудников."""
-    def __init__(self, parent, task_service, user_info, task_id):
+    def __init__(self, parent, task_service, user_info, task_id, task_data=None, auto_print=False):
 
 
         super().__init__(parent)
@@ -2393,12 +2417,21 @@ class EmployeePassesViewerDialog(QDialog):
         self.pass_details = None
 
 
-        self.setWindowTitle(f"Пропуски для задачи #{task_id}")
+        self.task_data = task_data
+
+
+        self.auto_print = auto_print
+
+
 
 
         self.setMinimumSize(600, 400)
-        self._build_ui()
+        if not self.auto_print:
+            self._build_ui()
         self._load_passes()
+        if self.auto_print:
+            self.setVisible(False)
+            QTimer.singleShot(100, self._print_passes)
 
     def _build_ui(self):
         main_layout = QVBoxLayout(self)
@@ -2427,26 +2460,58 @@ class EmployeePassesViewerDialog(QDialog):
             if not self.pass_details or not self.pass_details.get("passes"):
                 QMessageBox.warning(self, "Нет данных", "Не найдено сгенерированных пропусков для этой задачи.")
                 return
-            self.table.setRowCount(len(self.pass_details["passes"]))
-            for i, access_code in enumerate(self.pass_details["passes"]):
-                self.table.setItem(i, 0, QTableWidgetItem(access_code))
+            # Собираем данные из task_data и user_info
+            client_name = self.task_data.get('client_name', 'N/A')
+            # Получаем container_number из orders.notes
+            container_number = 'N/A'
+            if self.task_data.get('order_id'):
+                try:
+                    from .db_connector import get_client_db_connection
+                    with get_client_db_connection(self.user_info) as conn:
+                        with conn.cursor() as cur:
+                            cur.execute("SELECT notes FROM public.orders WHERE id = %s", (self.task_data['order_id'],))
+                            result = cur.fetchone()
+                            if result and result[0]:
+                                container_number = result[0]
+                except Exception as e:
+                    logging.error(f"Ошибка получения notes из orders: {e}")
+            self.pass_details['client_name'] = client_name
+            self.pass_details['container_number'] = container_number
+            if hasattr(self, 'table'):
+                self.table.setRowCount(len(self.pass_details["passes"]))
+                for i, access_code in enumerate(self.pass_details["passes"]):
+                    self.table.setItem(i, 0, QTableWidgetItem(access_code))
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить пропуски: {e}")
             self.close()
 
     def _print_passes(self):
         """Запускает процесс печати пропусков."""
+        logging.debug("Начало печати пропусков")
         if not self.pass_details or not self.pass_details.get("passes"):
             QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
             return
+        
+        # Запрашиваем размер бумаги у пользователя
+        width, ok1 = QInputDialog.getDouble(self, "Размер бумаги", "Ширина (мм):", 60.0, 10.0, 200.0, 1)
+        if not ok1:
+            return
+        height, ok2 = QInputDialog.getDouble(self, "Размер бумаги", "Высота (мм):", 40.0, 10.0, 200.0, 1)
+        if not ok2:
+            return
+        
+        logging.debug(f"Размеры бумаги: {width} x {height} мм")
         printer = QPrinter(QPrinter.HighResolution)
-        page_size = QPageSize(QSizeF(60, 40), QPageSize.Unit.Millimeter)
+        page_size = QPageSize(QSizeF(width, height), QPageSize.Unit.Millimeter)
         printer.setPageSize(page_size)
         margins = QMarginsF(2, 2, 2, 2)
         printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
         dialog = QPrintDialog(printer, self)
         if dialog.exec() != QDialog.Accepted:
             return
+        # Переустанавливаем размер страницы и поля после диалога, чтобы игнорировать изменения пользователя
+        printer.setPageSize(page_size)
+        printer.setPageMargins(margins, QPageLayout.Unit.Millimeter)
         painter = QPainter()
         if not painter.begin(printer):
             QMessageBox.critical(self, "Ошибка", "Не удалось запустить процесс печати.")
@@ -2461,14 +2526,18 @@ class EmployeePassesViewerDialog(QDialog):
         container_number = self.pass_details.get('container_number', 'N/A')
         print_date = datetime.now().strftime("%d.%m.%Y")
         passes = self.pass_details["passes"]
-        for i, access_code in enumerate(passes):
+        logging.debug(f"Печать {len(passes)} пропусков")
+        for i, pass_data in enumerate(passes):
+            access_code = pass_data['access_code']
+            employee_name = pass_data.get('employee_name', 'Неизвестно')
+            logging.debug(f"Печать пропуска {i+1}: код {access_code}, сотрудник {employee_name}")
             if i > 0:
                 printer.newPage()
             painter.setFont(font_main)
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(56, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
+            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(2, dpi_y), mm_to_px(width - 4, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Клиент: {client_name}")
+            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(8, dpi_y), mm_to_px(width - 4, dpi_x), mm_to_px(8, dpi_y)), Qt.AlignLeft, f"Контейнер: {container_number}")
             painter.setFont(font_small)
-            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(56, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
+            painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(14, dpi_y), mm_to_px(width - 4, dpi_x), mm_to_px(6, dpi_y)), Qt.AlignLeft, f"Дата: {print_date}")
             try:
                 # --- ИЗМЕНЕНИЕ: Используем python-barcode для генерации штрих-кода ---
                 Code128 = barcode.get_barcode_class('code128')
@@ -2485,55 +2554,97 @@ class EmployeePassesViewerDialog(QDialog):
                 barcode_pixmap = QPixmap.fromImage(qimage)
 
                 # Масштабируем, если штрихкод получился слишком широким, сохраняя пропорции
-                desired_width_px = mm_to_px(50, dpi_x)
+                desired_width_px = mm_to_px(width - 6, dpi_x)
                 if barcode_pixmap.width() > desired_width_px:
                     barcode_pixmap = barcode_pixmap.scaledToWidth(desired_width_px, Qt.SmoothTransformation)
 
                 barcode_x_px = mm_to_px(3, dpi_x)
-                barcode_y_px = mm_to_px(20, dpi_y)
+                barcode_y_px = mm_to_px(22, dpi_y)
                 painter.drawPixmap(int(barcode_x_px), int(barcode_y_px), barcode_pixmap)
             except Exception as e:
-                logging.error(f"Ошибка генерации штрихкоды: {e}", exc_info=True)
-                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(20, dpi_y), mm_to_px(56, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
-            notes_rect_y_px = mm_to_px(33, dpi_y)
+                logging.error(f"Ошибка генерации штрихкоды для {access_code}: {e}", exc_info=True)
+                painter.drawText(QRectF(mm_to_px(2, dpi_x), mm_to_px(28, dpi_y), mm_to_px(width - 4, dpi_x), mm_to_px(12, dpi_y)), Qt.AlignCenter, "Ошибка ШК")
+            notes_rect_y_px = mm_to_px(height - 7, dpi_y)
             notes_rect_height_px = mm_to_px(5, dpi_y)
-            painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(56, dpi_x)), int(notes_rect_height_px))
+            painter.drawRect(int(mm_to_px(2, dpi_x)), int(notes_rect_y_px), int(mm_to_px(width - 4, dpi_x)), int(notes_rect_height_px))
         painter.end()
         QMessageBox.information(self, "Успех", "Задание на печать отправлено.")
+        logging.debug("Печать пропусков завершена успешно")
 
     def _print_passes(self):
         """
         Генерирует изображения пропусков и открывает диалог предпросмотра.
         """
+        logging.debug("Начало генерации изображений пропусков")
         if not self.pass_details or not self.pass_details.get("passes"):
             QMessageBox.warning(self, "Нет данных", "Нет пропусков для печати.")
             return
+
+        # Запрашиваем размер бумаги у пользователя
+        if self.auto_print:
+            width, height = 60.0, 40.0
+        else:
+            width, ok1 = QInputDialog.getDouble(self, "Размер бумаги", "Ширина (мм):", 60.0, 10.0, 200.0, 1)
+            if not ok1:
+                return
+            height, ok2 = QInputDialog.getDouble(self, "Размер бумаги", "Высота (мм):", 40.0, 10.0, 200.0, 1)
+            if not ok2:
+                return
 
         try:
             # 1. Генерируем изображения
             pass_images = []
             template_json = {
-                "width_mm": 60, "height_mm": 40, "objects": [
-                    {"type": "text", "is_custom_text": True, "data_source": f"Клиент: {self.pass_details.get('client_name', 'N/A')}", "x_mm": 2, "y_mm": 2, "width_mm": 56, "height_mm": 8, "font_name": "arial"},
-                    {"type": "text", "is_custom_text": True, "data_source": f"Контейнер: {self.pass_details.get('container_number', 'N/A')}", "x_mm": 2, "y_mm": 8, "width_mm": 56, "height_mm": 8, "font_name": "arial"},
-                    {"type": "text", "is_custom_text": True, "data_source": f"Дата: {datetime.now().strftime('%d.%m.%Y')}", "x_mm": 2, "y_mm": 14, "width_mm": 56, "height_mm": 6, "font_name": "arial"},
-                    {"type": "barcode", "barcode_type": "Code128", "data_source": "sscc_code", "x_mm": 3, "y_mm": 20, "width_mm": 54, "height_mm": 12}
+                "width_mm": width, "height_mm": height, "objects": [
+                    {"type": "text", "is_custom_text": True, "single_line": True, "data_source": self.pass_details.get('client_name', 'N/A'), "x_mm": 2, "y_mm": 2, "width_mm": width - 4, "height_mm": 8, "font_name": "arial"},
+                    {"type": "text", "is_custom_text": True, "data_source": f"Контейнер: {self.pass_details.get('container_number', 'N/A')}", "x_mm": 2, "y_mm": 8, "width_mm": width - 4, "height_mm": 8, "font_name": "arial"},
+                    {"type": "text", "is_custom_text": True, "data_source": f"Дата: {datetime.now().strftime('%d.%m.%Y')}", "x_mm": 2, "y_mm": 14, "width_mm": width - 4, "height_mm": 6, "font_name": "arial"},
+                    {"type": "barcode", "barcode_type": "Code128", "data_source": "sscc_code", "x_mm": 3, "y_mm": 20, "width_mm": width - 6, "height_mm": height - 25}
                 ]
             }
-            for code in self.pass_details["passes"]:
+            for pass_data in self.pass_details["passes"]:
+                code = pass_data['access_code']
+                employee_name = pass_data.get('employee_name', 'Неизвестно')
+                logging.debug(f"Генерация изображения для кода {code}, сотрудник {employee_name}")
                 img = PrintingService.generate_label_image(template_json, {"sscc_code": code}, self.user_info)
                 if img:
                     pass_images.append(img)
+                else:
+                    logging.error(f"Не удалось сгенерировать изображение для {code}")
 
             if not pass_images:
                 QMessageBox.warning(self, "Ошибка генерации", "Не удалось создать изображения для пропусков.")
                 return
 
-            # 2. Открываем стандартный диалог печати
-            print_dialog = PrintDialogQt(self, self.user_info, "Печать пропусков", self.pass_details["passes"])
-            print_dialog.exec()
+            # 2. Открываем диалог предпросмотра и печати
+            printer = QPrinter(QPrinter.HighResolution)
+            page_size = QPageSize(QSizeF(width, height), QPageSize.Unit.Millimeter)
+            printer.setPageSize(page_size)
+            
+            def paint_preview(printer):
+                painter = QPainter()
+                if painter.begin(printer):
+                    dpi_x = printer.resolution()
+                    dpi_y = printer.resolution()
+                    def mm_to_px(mm, dpi):
+                        return (mm / 25.4) * dpi
+                    for i, img in enumerate(pass_images):
+                        if i > 0:
+                            printer.newPage()
+                        # Конвертируем Pillow image в QPixmap
+                        qimage = ImageQt(img)
+                        pixmap = QPixmap.fromImage(qimage)
+                        # Масштабируем до размера страницы
+                        scaled_pixmap = pixmap.scaled(int(mm_to_px(width, dpi_x)), int(mm_to_px(height, dpi_y)), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        painter.drawPixmap(0, 0, scaled_pixmap)
+                    painter.end()
+            
+            preview_dialog = QPrintPreviewDialog(printer, self)
+            preview_dialog.paintRequested.connect(paint_preview)
+            preview_dialog.exec()
+            logging.debug("Генерация изображений пропусков завершена успешно")
         except Exception as e:
-            logging.error(f"Ошибка при подготовке к предпросмотру: {e}", exc_info=True)
+            logging.error(f"Ошибка при генерации изображений пропусков: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось подготовить пропуски к предпросмотру: {e}")
 
 
@@ -2622,6 +2733,74 @@ class PassPreviewDialog(QDialog):
         self.accept() # Закрываем окно предпросмотра
 
     # --- END NEW DIALOG ---
+
+# --- NEW DIALOG FOR SESSION MANAGEMENT ---
+class SessionManagementDialog(QDialog):
+    """Диалог для управления активными сессиями."""
+    def __init__(self, task_service, parent=None):
+        super().__init__(parent)
+        self.task_service = task_service
+        self.setWindowTitle("Управление сессиями")
+        self.setMinimumSize(800, 600)
+        self._build_ui()
+        self._load_sessions()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["ID сессии", "Сотрудник", "Задача", "Рабочее место", "Время старта"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        layout.addWidget(self.table)
+
+        buttons_layout = QHBoxLayout()
+        close_session_button = QPushButton("Завершить выбранные сессии")
+        close_session_button.clicked.connect(self._close_selected_sessions)
+        refresh_button = QPushButton("Обновить")
+        refresh_button.clicked.connect(self._load_sessions)
+        close_button = QPushButton("Закрыть")
+        close_button.clicked.connect(self.accept)
+        buttons_layout.addWidget(close_session_button)
+        buttons_layout.addWidget(refresh_button)
+        buttons_layout.addWidget(close_button)
+        layout.addLayout(buttons_layout)
+
+    def _load_sessions(self):
+        try:
+            # Предполагаем, что есть метод в task_service для получения активных сессий
+            sessions = self.task_service.get_active_sessions()
+            self.table.setRowCount(len(sessions))
+            for i, session in enumerate(sessions):
+                self.table.setItem(i, 0, QTableWidgetItem(str(session['id'])))
+                self.table.setItem(i, 1, QTableWidgetItem(session['employee_name']))
+                self.table.setItem(i, 2, QTableWidgetItem(str(session['task_id'])))
+                self.table.setItem(i, 3, QTableWidgetItem(session['workstation_id']))
+                self.table.setItem(i, 4, QTableWidgetItem(str(session['start_time'])))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить сессии: {e}")
+
+    def _close_selected_sessions(self):
+        selected_rows = set()
+        for item in self.table.selectedItems():
+            selected_rows.add(item.row())
+        if not selected_rows:
+            QMessageBox.warning(self, "Предупреждение", "Выберите сессии для завершения.")
+            return
+        session_ids = []
+        for row in selected_rows:
+            session_id = int(self.table.item(row, 0).text())
+            session_ids.append(session_id)
+        try:
+            for session_id in session_ids:
+                self.task_service.close_session(session_id)
+            QMessageBox.information(self, "Успех", f"Завершено {len(session_ids)} сессий.")
+            self._load_sessions()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось завершить сессии: {e}")
+
+# --- END NEW DIALOG ---
 
 class AdminWindowQt(QMainWindow):
     """Переносная версия tkinter админ-интерфейса на PySide6 с левым меню и правой стеком контента."""
@@ -2716,7 +2895,7 @@ class AdminWindowQt(QMainWindow):
                 self._update_api_status() # Обновляем индикатор
             return success
         except Exception as e:
-            logger.error(f"Повторная аутентификация в API не удалась: {e}", exc_info=True)
+            logging.error(f"Повторная аутентификация в API не удалась: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка аутентификации API", f"Не удалось повторно пройти аутентификацию в API.\n\nОшибка: {e}\n\nПожалуйста, проверьте настройки API или перезапустите приложение.")
             self._set_api_status_color(False) # Обновляем индикатор
             return False
@@ -2746,6 +2925,7 @@ class AdminWindowQt(QMainWindow):
         item_config_save_ini = QTreeWidgetItem(item_admin_utilities, ["Сохранить INI"]) # ПЕРЕМЕЩЕНО
         item_api_tools = QTreeWidgetItem(item_admin_utilities, ["АПИ Тестер"]) # НОВЫЙ ПУНКТ
         item_upload_lenta = QTreeWidgetItem(item_admin_utilities, ["Загрузить Ленту"]) # НОВЫЙ ПУНКТ
+        item_session_management = QTreeWidgetItem(item_admin_utilities, ["Управление сессиями"]) # НОВЫЙ ПУНКТ
         item_admin_catalogs = QTreeWidgetItem(item_admin, ["Справочники"])
         item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
 
@@ -2767,6 +2947,7 @@ class AdminWindowQt(QMainWindow):
             'save_ini': item_config_save_ini,
             'api_tools': item_api_tools, # Добавляем в словарь
             'upload_lenta': item_upload_lenta,
+            'session_management': item_session_management, # Добавляем в словарь
             'workplaces': item_config_workplaces,
         }
 
@@ -2964,7 +3145,9 @@ class AdminWindowQt(QMainWindow):
         text = item.text(column)
         
         # В зависимости от текста пункта меню, переключаем страницу
-        if text == "Управление уведомлениями":
+        if text == "Администрирование":
+            self.content_stack.setCurrentIndex(self.stack_indices['welcome'])
+        elif text == "Управление уведомлениями":
             try:
                 # При переключении на уведомления, загружаем их
                 self.load_notifications()
@@ -2998,6 +3181,8 @@ class AdminWindowQt(QMainWindow):
             self._open_generate_sscc_dialog() # Вызываем диалог, не меняя основное окно
         elif text == "Загрузить Ленту":
             self._open_lenta_upload_dialog() # Вызываем новый диалог
+        elif text == "Управление сессиями":
+            self._open_session_management_dialog() # Вызываем диалог управления сессиями
         elif text == "Справочники":
             self.content_stack.setCurrentIndex(self.stack_indices['catalogs'])
         elif text == "Управление печатью":
@@ -3024,7 +3209,7 @@ class AdminWindowQt(QMainWindow):
                 logging.info(f"Вход в режим оператора успешен. Задача: {task_info['task_id']}")
                 # Создаем и показываем основное окно оператора
                 # Оно становится модальным для главного окна, блокируя его
-                self.operator_window = OperatorWorkWindow(self.task_service, task_info, self)
+                self.operator_window = OperatorWorkWindow(self.task_service, self.catalogs_service, task_info, self)
                 self.operator_window.show()
             else:
                  logging.error("Диалог входа вернул 'Accepted', но информация о задаче пуста.")
@@ -6007,15 +6192,15 @@ class AdminWindowQt(QMainWindow):
         layout = QVBoxLayout()
 
         controls = QHBoxLayout()
-        btn_create = QPushButton("Создать склад")
+        btn_create = QPushButton("Создать новый склад")
         btn_create.clicked.connect(self.create_new_warehouse)
-        btn_change = QPushButton("Изменить кол-во")
-        btn_change.clicked.connect(self.change_workplace_count)
-        btn_print = QPushButton("Печать этикеток")
-        btn_print.clicked.connect(self.open_workplace_printing_dialog)
+        btn_edit = QPushButton("Редактировать")
+        btn_edit.clicked.connect(self.edit_warehouse)
+        btn_delete = QPushButton("Удалить склад")
+        btn_delete.clicked.connect(self.delete_warehouse)
         controls.addWidget(btn_create)
-        controls.addWidget(btn_change)
-        controls.addWidget(btn_print)
+        controls.addWidget(btn_edit)
+        controls.addWidget(btn_delete)
         layout.addLayout(controls)
 
         self.warehouses_table = QTableWidget(0, 2)
@@ -6023,6 +6208,7 @@ class AdminWindowQt(QMainWindow):
         self.warehouses_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.warehouses_table.setSelectionMode(QTableWidget.SingleSelection)
         self.warehouses_table.setStyleSheet("QTableWidget::item:selected { background-color: #ADD8E6; }")
+        self.warehouses_table.doubleClicked.connect(self.edit_warehouse)  # Двойной клик для редактирования
         layout.addWidget(self.warehouses_table)
 
         widget.setLayout(layout)
@@ -6130,6 +6316,228 @@ class AdminWindowQt(QMainWindow):
             return
         warehouse_name = self.warehouses_table.item(sel, 0).text()
         QMessageBox.information(self, "Печать", f"Вызов печати этикеток для склада: {warehouse_name} (в разработке)")
+
+    def edit_warehouse(self):
+        """Открывает диалог редактирования склада."""
+        sel = self.warehouses_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите склад для редактирования.")
+            return
+
+        try:
+            warehouse_name = self.warehouses_table.item(sel, 0).text()
+            current_count = int(self.warehouses_table.item(sel, 1).text())
+        except (AttributeError, ValueError):
+            QMessageBox.critical(self, "Ошибка", "Не удалось прочитать данные о складе.")
+            return
+
+        # Создаем диалог редактирования
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Редактирование склада: {warehouse_name}")
+        dialog.setMinimumWidth(400)
+        layout = QVBoxLayout(dialog)
+
+        form_layout = QFormLayout()
+        name_label = QLabel("Название склада:")
+        name_edit = QLineEdit(warehouse_name)
+        form_layout.addRow(name_label, name_edit)
+
+        count_label = QLabel("Количество рабочих мест:")
+        count_spin = QSpinBox()
+        count_spin.setRange(1, 10000)
+        count_spin.setValue(current_count)
+        form_layout.addRow(count_label, count_spin)
+
+        layout.addLayout(form_layout)
+
+        # Кнопка печати
+        btn_print = QPushButton("Напечатать этикетки рабочих мест")
+        btn_print.clicked.connect(lambda: self.print_workplace_labels(warehouse_name, count_spin.value()))
+        layout.addWidget(btn_print)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+
+        if dialog.exec() == QDialog.Accepted:
+            new_name = name_edit.text().strip()
+            new_count = count_spin.value()
+            if not new_name:
+                QMessageBox.warning(self, "Внимание", "Название склада не может быть пустым.")
+                return
+            self.update_warehouse(warehouse_name, new_name, new_count)
+
+    def update_warehouse(self, old_name, new_name, new_count):
+        """Обновляет склад: изменяет название и/или количество мест."""
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    # Если название изменилось, проверяем уникальность
+                    if old_name != new_name:
+                        cur.execute("SELECT 1 FROM ap_workplaces WHERE warehouse_name = %s LIMIT 1", (new_name,))
+                        if cur.fetchone():
+                            QMessageBox.critical(self, "Ошибка", f"Склад '{new_name}' уже существует.")
+                            return
+                        cur.execute("UPDATE ap_workplaces SET warehouse_name = %s WHERE warehouse_name = %s", (new_name, old_name))
+
+                    # Получаем текущее количество
+                    cur.execute("SELECT COUNT(*) FROM ap_workplaces WHERE warehouse_name = %s", (new_name,))
+                    current_count = cur.fetchone()[0]
+
+                    if new_count > current_count:
+                        to_add = new_count - current_count
+                        cur.execute("SELECT COALESCE(MAX(workplace_number), 0) FROM ap_workplaces WHERE warehouse_name = %s", (new_name,))
+                        max_num = cur.fetchone()[0]
+                        for i in range(1, to_add + 1):
+                            cur.execute("INSERT INTO ap_workplaces (warehouse_name, workplace_number) VALUES (%s, %s)", (new_name, max_num + i))
+                    elif new_count < current_count:
+                        to_delete = current_count - new_count
+                        cur.execute("""
+                            DELETE FROM ap_workplaces
+                            WHERE id IN (
+                                SELECT id FROM ap_workplaces WHERE warehouse_name = %s ORDER BY workplace_number DESC LIMIT %s
+                            )
+                        """, (new_name, to_delete))
+
+                conn.commit()
+            QMessageBox.information(self, "Успех", f"Склад '{new_name}' обновлен.")
+            self.load_warehouses()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось обновить склад: {e}")
+
+    def delete_warehouse(self):
+        """Удаляет выбранный склад."""
+        sel = self.warehouses_table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите склад для удаления.")
+            return
+
+        try:
+            warehouse_name = self.warehouses_table.item(sel, 0).text()
+        except AttributeError:
+            QMessageBox.critical(self, "Ошибка", "Не удалось прочитать данные о складе.")
+            return
+
+        reply = QMessageBox.question(self, "Подтверждение", f"Удалить склад '{warehouse_name}' и все его рабочие места?", QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM ap_workplaces WHERE warehouse_name = %s", (warehouse_name,))
+                conn.commit()
+            QMessageBox.information(self, "Успех", f"Склад '{warehouse_name}' удален.")
+            self.load_warehouses()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось удалить склад: {e}")
+
+    def print_workplace_labels(self, warehouse_name, count):
+        """Печатает этикетки рабочих мест для склада."""
+        try:
+            # 1. Получаем макеты из клиентской БД
+            catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
+            layouts = catalogs_service.get_print_layouts()
+            
+            if not layouts:
+                QMessageBox.warning(self, "Внимание", "Нет доступных макетов печати.")
+                return
+            
+            # 2. Выбираем макет
+            layout_names = [l['name'] for l in layouts]
+            selected_name, ok = QInputDialog.getItem(self, "Выбор макета", "Выберите макет для печати:", layout_names, 0, False)
+            if not ok:
+                return
+            
+            logging.debug(f"Selected name: '{selected_name}'")
+            logging.debug(f"Layouts: {[l['name'] for l in layouts]}")
+            selected_layout = next(l for l in layouts if l['name'] == selected_name)
+            if 'objects' in selected_layout:
+                template_json = selected_layout
+            else:
+                template_json_str = selected_layout.get('template_json')
+                logging.debug(f"Selected layout: {selected_layout}")
+                logging.debug(f"template_json_str: {template_json_str}")
+                if template_json_str is None:
+                    QMessageBox.warning(self, "Внимание", f"Макет '{selected_name}' не имеет данных для печати.")
+                    return
+                import json
+                try:
+                    if isinstance(template_json_str, str):
+                        template_json = json.loads(template_json_str)
+                    else:
+                        template_json = template_json_str
+                    logging.debug(f"template_json: {template_json}")
+                except Exception as e:
+                    logging.error(f"Error parsing template_json: {e}")
+                    QMessageBox.critical(self, "Ошибка", f"Некорректный JSON в макете '{selected_name}'.")
+                    return
+            
+            # 3. Модифицируем data_source в макете
+            def modify_data_source(obj):
+                if isinstance(obj, dict):
+                    ds = obj.get('data_source')
+                    if ds == 'Склад':
+                        obj['data_source'] = 'ap_workplaces.warehouse_name'
+                    elif ds == 'Номер стола':
+                        obj['data_source'] = 'ap_workplaces.workplace_number'
+                    elif ds == 'QR: Конфигурация рабочего места':
+                        obj['data_source'] = 'ap_workplaces.access_token'
+                    elif ds == 'ap_workplaces.warehouse_name':
+                        pass  # уже правильно
+                    elif ds == 'ap_workplaces.workplace_number':
+                        pass
+                    elif ds == 'ap_workplaces.access_token':
+                        pass
+                    for value in obj.values():
+                        modify_data_source(value)
+                elif isinstance(obj, list):
+                    for item in obj:
+                        modify_data_source(item)
+            
+            modify_data_source(template_json)
+            
+            # 4. Получаем данные рабочих мест
+            with get_client_db_connection(self.user_info) as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT warehouse_name, workplace_number, access_token::text
+                        FROM ap_workplaces 
+                        WHERE warehouse_name = %s 
+                        ORDER BY workplace_number
+                    """, (warehouse_name,))
+                    workplaces = cur.fetchall()
+            
+            logging.debug(f"Found {len(workplaces)} workplaces for printing")
+            if not workplaces:
+                QMessageBox.warning(self, "Внимание", f"Нет рабочих мест для склада '{warehouse_name}'.")
+                return
+            
+            # 5. Создаем items_to_print
+            items_to_print = []
+            for wp in workplaces:
+                item = {
+                    'ap_workplaces.warehouse_name': wp['warehouse_name'],
+                    'ap_workplaces.workplace_number': str(wp['workplace_number']),
+                    'ap_workplaces.access_token': wp['access_token']
+                }
+                items_to_print.append(item)
+            
+            # 6. Открываем диалог печати
+            custom_layout = {
+                'name': selected_name, 
+                'template_json': template_json,
+                'paper_name': selected_layout.get('paper_name')  # Добавляем paper_name если есть
+            }
+            dialog = PrintDialogQt(self, self.user_info, f"Этикетки рабочих мест: {warehouse_name}", items_to_print, preselected_layout=selected_name, custom_layout=custom_layout)
+            dialog.exec()
+            
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Не удалось подготовить печать: {e}")
     def _open_generate_sscc_dialog(self):
         """Открывает диалог для запроса количества SSCC и запускает генерацию."""
         dialog = QDialog(self)
@@ -6246,6 +6654,11 @@ class AdminWindowQt(QMainWindow):
     def _open_lenta_upload_dialog(self):
         """Открывает диалог для специальной загрузки 'Лента'."""
         dialog = LentaUploadDialog(self, self.user_info)
+        dialog.exec()
+
+    def _open_session_management_dialog(self):
+        """Открывает диалог управления сессиями."""
+        dialog = SessionManagementDialog(self.task_service, self)
         dialog.exec()
 
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---

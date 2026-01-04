@@ -487,18 +487,38 @@ def update_client_db_schema(conn):
 
     # --- НОВЫЙ БЛОК: Таблицы для выполнения заданий (Фаза 2) ---
     task_execution_tables_commands = [
-        # 1. Таблица для кодов-пропусков сотрудников
+        # 1. Таблица токенов сотрудников для задач
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS task_employee_tokens (
+                id SERIAL PRIMARY KEY,
+                task_id INTEGER NOT NULL REFERENCES production_tasks(id) ON DELETE CASCADE,
+                access_token UUID NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+                employee_name VARCHAR(255),
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                last_login TIMESTAMP WITH TIME ZONE
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE task_employee_tokens IS 'Токены доступа сотрудников к задачам.';"),
+
+        # 2. Таблица для кодов-пропусков сотрудников
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS task_employees (
                 id SERIAL PRIMARY KEY,
-                task_id INTEGER NOT NULL REFERENCES production_tasks(id) ON DELETE CASCADE,
-                access_code VARCHAR(255) NOT NULL UNIQUE,
+                employee_token_id INTEGER REFERENCES task_employee_tokens(id) ON DELETE CASCADE,
+                access_code VARCHAR(255) UNIQUE,
                 employee_name VARCHAR(255)
             );
         """),
-        sql.SQL("COMMENT ON TABLE task_employees IS 'Коды-пропуски для доступа сотрудников к выполнению задач.';"),
+        sql.SQL("COMMENT ON TABLE task_employees IS 'Коды-пропуски сотрудников, связанные с токенами доступа.';"),
+        # ALTER для обновления структуры, если таблица уже существует
+        sql.SQL("ALTER TABLE task_employees ADD COLUMN IF NOT EXISTS employee_token_id INTEGER REFERENCES task_employee_tokens(id) ON DELETE CASCADE;"),
+        sql.SQL("ALTER TABLE task_employees ADD COLUMN IF NOT EXISTS access_code VARCHAR(255);"),
+        sql.SQL("ALTER TABLE task_employees ADD COLUMN IF NOT EXISTS employee_name VARCHAR(255);"),
+        sql.SQL("ALTER TABLE task_employees DROP COLUMN IF EXISTS task_id;"),  # Удаляем старую колонку, если существует
+        sql.SQL("ALTER TABLE task_employees ADD CONSTRAINT IF NOT EXISTS task_employees_access_code_key UNIQUE (access_code);"),
 
-        # 2. Таблица для иерархии упаковок
+        # 3. Таблица для иерархии упаковок
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS tasks_packages (
                 id SERIAL PRIMARY KEY,
@@ -511,7 +531,7 @@ def update_client_db_schema(conn):
         """),
         sql.SQL("COMMENT ON TABLE tasks_packages IS 'Иерархия упаковок (короба, паллеты) в рамках задач.';"),
 
-        # 3. Пул кодов DataMatrix для задач
+        # 4. Пул кодов DataMatrix для задач
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS task_datamatrix_pool (
                 id SERIAL PRIMARY KEY,
@@ -539,7 +559,7 @@ def update_client_db_schema(conn):
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_datamatrix_pool_task_id ON task_datamatrix_pool(task_id);"),
         sql.SQL("COMMENT ON TABLE task_datamatrix_pool IS 'Пул кодов DataMatrix для управления их жизненным циклом в задачах.';"),
 
-        # 4. Таблица управляющих штрихкодов
+        # 5. Таблица управляющих штрихкодов
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS task_control_codes (
                 id SERIAL PRIMARY KEY,
@@ -549,9 +569,21 @@ def update_client_db_schema(conn):
             );
         """),
         sql.SQL("COMMENT ON TABLE task_control_codes IS 'Управляющие штрихкоды для контроля процесса выполнения задач.';"),
-    ]
 
-    # Объединяем все команды
+        # 6. Таблица рабочих сессий для задач
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS task_work_sessions (
+                id SERIAL PRIMARY KEY,
+                employee_token_id INTEGER NOT NULL REFERENCES task_employee_tokens(id) ON DELETE CASCADE,
+                employee_name VARCHAR(255),
+                task_id INTEGER NOT NULL REFERENCES production_tasks(id) ON DELETE CASCADE,
+                workstation_id VARCHAR(100),
+                start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                end_time TIMESTAMP WITH TIME ZONE,
+                last_activity TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE task_work_sessions IS 'Рабочие сессии сотрудников в задачах.';"),    ]
     all_commands = sql_commands + ap_tables_commands + ap_settings_defaults + visibility_commands + task_execution_tables_commands
 
     try:
