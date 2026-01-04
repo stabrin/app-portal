@@ -53,8 +53,11 @@ try:
     pylibdmtx_dir = os.path.dirname(pylibdmtx.__file__)
     libdmtx_dll = os.path.join(pylibdmtx_dir, "libdmtx-64.dll")
 except ImportError:
+    # Этот путь используется как запасной, если pylibdmtx не установлен в окружении сборки
     libdmtx_dll = os.path.join(BASE_DIR, ".venv", "Lib", "site-packages", "pylibdmtx", "libdmtx-64.dll")
-include_files.append((libdmtx_dll, "libdmtx-64.dll"))
+
+# --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Копируем DLL в папку lib ---
+include_files.append((libdmtx_dll, os.path.join("lib", "libdmtx-64.dll")))
 
 # MSVCR120
 msvcr_path = os.path.join(BASE_DIR, "desktop-app", "msvcr120.dll")
