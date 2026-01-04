@@ -1,28 +1,21 @@
 import io
 import logging
-import json
 import textwrap
 from typing import Dict, Any, Optional
 from psycopg2 import sql
-import re
-from psycopg2.extras import RealDictCursor # Явно импортируем RealDictCursor
-
+from psycopg2.extras import RealDictCursor
 from .db_connector import get_client_db_connection
-
-import psycopg2
 
 # Библиотеки для генерации штрихкодов и работы с Windows API
 try:
     import qrcode
-    # Импортируем только ядро Pillow, которое не зависит от Tkinter
     from PIL import Image, ImageDraw, ImageFont, ImageWin
 except ImportError:
-    logging.warning("QR code libraries (qrcode, Pillow Core) not installed.")
+    logging.warning("QR code Библиотека (qrcode, Pillow Core) не установлена. Установите: pip install qrcode Pillow")
     qrcode = None
     Image = None
     ImageDraw = None
     ImageFont = None
-    ImageTk = None
 
 try:
     from pylibdmtx.pylibdmtx import encode as dmtx_encode
@@ -45,7 +38,7 @@ try:
     import win32gui
     from pywintypes import error as pywin_error
 except ImportError:
-    logging.warning("pywin32 not installed. Install with: pip install pywin32")
+    logging.warning("pywin32 не установлена. Установите: pip install pywin32")
     win32print = None
 
     win32ui = None
