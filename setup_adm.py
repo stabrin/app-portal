@@ -5,7 +5,7 @@ from cx_Freeze import setup, Executable
 import psycopg2
 
 # --- ПАРАМЕТРЫ ---
-APP_NAME = "TildaKod"
+APP_NAME = "TildaKod_ADM"
 VERSION = "1.0.6"
 DESCRIPTION = "Приложение для печати этикеток и сканирования"
 AUTHOR = "Tabrin Sergey"

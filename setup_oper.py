@@ -5,17 +5,17 @@ from cx_Freeze import setup, Executable
 import psycopg2
 
 # --- ПАРАМЕТРЫ ---
-APP_NAME = "TildaKod"
-VERSION = "1.0.6"
+APP_NAME = "TildaKod_WS"
+VERSION = "1.0.1"
 DESCRIPTION = "Приложение для печати этикеток и сканирования"
 AUTHOR = "Tabrin Sergey"
-UPGRADE_CODE = "{9503ec40-7cf9-4196-874e-3cafa334bc61}"
+UPGRADE_CODE = "{688cf803-e16e-40c8-a135-367020ac7df8}"
 
 # --- ПУТИ ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(BASE_DIR, "desktop-app"))
 
-SCRIPT_FILE = os.path.join(BASE_DIR, "desktop-app", "run.py")
+SCRIPT_FILE = os.path.join(BASE_DIR, "desktop-app", "run_oper.py")
 ICON_FILE = os.path.join(BASE_DIR, "ts.ico")
 
 # --- 1. ФАЙЛЫ ---
@@ -67,7 +67,7 @@ packages = [
     "os", "sys", "PySide6", "pandas", "psycopg2", 
     "PIL", "qrcode", # Важно!
     "jinja2", "babel", "requests", "bcrypt", "dotenv", 
-    "barcode", "pylibdmtx", "src"
+    "barcode", "pylibdmtx", "packaging", "src"
 ]
 
 # --- INCLUDES (Самое важное для решения проблемы) ---

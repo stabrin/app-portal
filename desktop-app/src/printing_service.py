@@ -18,10 +18,20 @@ except ImportError:
     ImageDraw = None
     ImageFont = None
 
+import sys
+import os
+if getattr(sys, 'frozen', False):
+    base_dir = os.path.dirname(sys.executable)
+    # When frozen, the pylibdmtx package is in the lib folder
+    pylibdmtx_dir = os.path.join(base_dir, 'lib', 'pylibdmtx')
+    if hasattr(os, 'add_dll_directory'):
+        os.add_dll_directory(pylibdmtx_dir)
+    os.environ['PATH'] = pylibdmtx_dir + os.pathsep + os.environ['PATH']
+
 try:
     from pylibdmtx.pylibdmtx import encode as dmtx_encode
 except ImportError:
-    logging.warning("Библиотека pylibdmtx не установлена. Установите: pip install pylibdmtx")
+    logging.error("Failed to import pylibdmtx in printing_service", exc_info=True)
     dmtx_encode = None
 
 try:
@@ -268,7 +278,7 @@ class PrintingService:
                         continue # Переходим к следующему объекту
 
 
-                if obj.get("is_custom_text") or (obj.get("type") == "text_with_image"):
+                if obj.get("is_custom_text") or (obj.get("type") == "text_with_image") or (obj.get("type") == "image"):
                     obj_data = obj.get("data_source") # Для произвольного текста данные хранятся прямо в шаблоне
                 else:
                     # --- ИСПРАВЛЕНИЕ: Упрощенная логика получения данных ---
