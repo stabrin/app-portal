@@ -540,7 +540,8 @@ def update_client_db_schema(conn):
         sql.SQL("ALTER TABLE task_employees ADD COLUMN IF NOT EXISTS access_code VARCHAR(255);"),
         sql.SQL("ALTER TABLE task_employees ADD COLUMN IF NOT EXISTS employee_name VARCHAR(255);"),
         sql.SQL("ALTER TABLE task_employees DROP COLUMN IF EXISTS task_id;"),  # Удаляем старую колонку, если существует
-        sql.SQL("ALTER TABLE task_employees ADD CONSTRAINT IF NOT EXISTS task_employees_access_code_key UNIQUE (access_code);"),
+        sql.SQL("ALTER TABLE task_employees DROP CONSTRAINT IF EXISTS task_employees_access_code_key;"),
+        sql.SQL("ALTER TABLE task_employees ADD CONSTRAINT task_employees_access_code_key UNIQUE (access_code);"),
 
         # 3. Таблица для иерархии упаковок
         sql.SQL("""
