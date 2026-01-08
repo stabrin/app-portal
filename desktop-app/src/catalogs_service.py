@@ -409,6 +409,60 @@ class CatalogsService:
             conn.commit()
         logger.info(f"Изображение '{name}' успешно загружено.")
 
+    # --- НОВЫЙ БЛОК: Методы для сопоставления кодов ---
+
+    def get_product_mappings(self):
+        """Возвращает список всех сопоставлений кодов товаров."""
+        logger.info("Запрос справочника сопоставлений кодов из БД клиента.")
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Используем LEFT JOIN, чтобы получить и глобальные сопоставления (где client_id IS NULL)
+                cur.execute("""
+                    SELECT 
+                        pcm.id, pcm.gtin, pcm.mapped_code, pcm.mapped_code_type, pcm.client_id,
+                        ac.name as client_name
+                    FROM product_code_mappings pcm
+                    LEFT JOIN ap_clients ac ON pcm.client_id = ac.id
+                    ORDER BY pcm.gtin, pcm.mapped_code;
+                """)
+                return cur.fetchall()
+
+    def get_mapping_by_id(self, mapping_id: int):
+        """Возвращает одну запись сопоставления по ее ID."""
+        logger.info(f"Запрос сопоставления с ID: {mapping_id}")
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("SELECT * FROM product_code_mappings WHERE id = %s", (mapping_id,))
+                return cur.fetchone()
+
+    def upsert_product_mapping(self, mapping_data: dict):
+        """Добавляет или обновляет сопоставление кодов."""
+        mapping_id = mapping_data.get('id')
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if mapping_id: # Обновление
+                    cur.execute("""
+                        UPDATE product_code_mappings SET 
+                            gtin=%s, mapped_code=%s, mapped_code_type=%s, client_id=%s
+                        WHERE id=%s
+                    """, (mapping_data['gtin'], mapping_data['mapped_code'], mapping_data['mapped_code_type'], mapping_data.get('client_id'), mapping_id))
+                else: # Вставка
+                    cur.execute("""
+                        INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type, client_id)
+                        VALUES (%s, %s, %s, %s)
+                    """, (mapping_data['gtin'], mapping_data['mapped_code'], mapping_data['mapped_code_type'], mapping_data.get('client_id')))
+            conn.commit()
+
+    def delete_product_mapping(self, mapping_id: int):
+        """Удаляет сопоставление по ID."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM product_code_mappings WHERE id = %s", (mapping_id,))
+            conn.commit()
+
+    # --- КОНЕЦ НОВОГО БЛОКА ---
+
+
     def get_image_names(self):
         """Возвращает список имен всех изображений из БД."""
         with self.get_db_connection() as conn:
