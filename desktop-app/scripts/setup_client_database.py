@@ -437,6 +437,30 @@ def update_client_db_schema(conn):
             EXECUTE PROCEDURE trigger_set_timestamp();
         """),
 
+        # --- НОВЫЙ БЛОК: Таблица для сопоставления кодов товаров ---
+        sql.SQL("""
+            CREATE TABLE IF NOT EXISTS public.product_code_mappings (
+                id SERIAL PRIMARY KEY,
+                gtin VARCHAR(14) NOT NULL,
+                mapped_code VARCHAR(255) NOT NULL,
+                mapped_code_type VARCHAR(50) NOT NULL,
+                client_id INTEGER,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                CONSTRAINT fk_product_gtin
+                    FOREIGN KEY(gtin) 
+                    REFERENCES public.products(gtin)
+                    ON DELETE CASCADE,
+                CONSTRAINT fk_client
+                    FOREIGN KEY(client_id) 
+                    REFERENCES public.ap_clients(id)
+                    ON DELETE SET NULL
+            );
+        """),
+        sql.SQL("COMMENT ON TABLE public.product_code_mappings IS 'Таблица для сопоставления российских GTIN с альтернативными кодами (EAN, код производителя).';"),
+        sql.SQL("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_mapping 
+            ON public.product_code_mappings (mapped_code, mapped_code_type, COALESCE(client_id, -1));
+        """),
         # --- НОВЫЙ БЛОК: Таблица и триггер для производственных задач ---
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS production_tasks (

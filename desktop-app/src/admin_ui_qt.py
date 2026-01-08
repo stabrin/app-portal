@@ -4580,6 +4580,10 @@ class AdminWindowQt(QMainWindow):
         # --- ИЗМЕНЕНИЕ: Добавляем вкладку для управления макетами ---
         self._build_products_tab(notebook)
         self._build_scenarios_tab(notebook)
+
+        # --- НОВЫЙ БЛОК: Добавляем вкладку для сопоставления кодов ---
+        self._build_product_mappings_tab(notebook)
+
         self._build_print_layouts_tab(notebook)
 
         return widget
@@ -4974,6 +4978,109 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
+
+    def _build_product_mappings_tab(self, parent_notebook):
+        """Создает вкладку для управления сопоставлениями кодов товаров."""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+
+        # Панель кнопок
+        controls_layout = QHBoxLayout()
+        btn_add = QPushButton("Добавить")
+        btn_edit = QPushButton("Редактировать")
+        btn_delete = QPushButton("Удалить")
+        btn_export = QPushButton("Выгрузить в Excel")
+        btn_import = QPushButton("Загрузить из Excel")
+        btn_refresh = QPushButton("Обновить")
+        controls_layout.addWidget(btn_add)
+        controls_layout.addWidget(btn_edit)
+        controls_layout.addWidget(btn_delete)
+        controls_layout.addStretch()
+        controls_layout.addWidget(btn_export)
+        controls_layout.addWidget(btn_import)
+        controls_layout.addWidget(btn_refresh)
+        layout.addLayout(controls_layout)
+
+        # Таблица
+        self.product_mappings_table = QTableWidget(0, 5)
+        self.product_mappings_table.setHorizontalHeaderLabels(["ID", "Российский GTIN", "Сопоставляемый код", "Тип кода", "Клиент"])
+        self.product_mappings_table.setColumnHidden(0, True)
+        self.product_mappings_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.product_mappings_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.product_mappings_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.product_mappings_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        layout.addWidget(self.product_mappings_table)
+        
+        parent_notebook.addTab(tab, "Сопоставление кодов")
+
+        # Привязка обработчиков
+        btn_refresh.clicked.connect(self._refresh_product_mappings)
+        btn_add.clicked.connect(self._add_product_mapping)
+        btn_edit.clicked.connect(self._edit_product_mapping)
+        self.product_mappings_table.doubleClicked.connect(self._edit_product_mapping)
+        btn_delete.clicked.connect(self._delete_product_mapping)
+        btn_export.clicked.connect(lambda: QMessageBox.information(self, "В разработке", "Экспорт в Excel будет добавлен позже."))
+        btn_import.clicked.connect(lambda: QMessageBox.information(self, "В разработке", "Импорт из Excel будет добавлен позже."))
+
+        # Загрузка данных при первом открытии
+        self._refresh_product_mappings()
+
+    def _refresh_product_mappings(self):
+        """Обновляет данные в таблице сопоставлений."""
+        try:
+            self.product_mappings_table.setRowCount(0)
+            mappings = self.catalogs_service.get_product_mappings()
+            for item in mappings:
+                row = self.product_mappings_table.rowCount()
+                self.product_mappings_table.insertRow(row)
+                self.product_mappings_table.setItem(row, 0, QTableWidgetItem(str(item['id'])))
+                self.product_mappings_table.setItem(row, 1, QTableWidgetItem(item.get('gtin', '')))
+                self.product_mappings_table.setItem(row, 2, QTableWidgetItem(item.get('mapped_code', '')))
+                self.product_mappings_table.setItem(row, 3, QTableWidgetItem(item.get('mapped_code_type', '')))
+                self.product_mappings_table.setItem(row, 4, QTableWidgetItem(item.get('client_name', 'Глобальное')))
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить сопоставления кодов: {e}")
+
+    def _add_product_mapping(self):
+        """Открывает диалог для добавления нового сопоставления."""
+        dialog = ProductMappingEditorDialog(self, self.catalogs_service)
+        if dialog.exec():
+            try:
+                data = dialog.get_data()
+                self.catalogs_service.upsert_product_mapping(data)
+                self._refresh_product_mappings()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось добавить сопоставление: {e}")
+
+    def _edit_product_mapping(self):
+        """Открывает диалог для редактирования выбранного сопоставления."""
+        sel_row = self.product_mappings_table.currentRow()
+        if sel_row < 0: return
+
+        mapping_id = int(self.product_mappings_table.item(sel_row, 0).text())
+        try:
+            # Получаем полные данные для редактирования
+            mapping_data = self.catalogs_service.get_mapping_by_id(mapping_id)
+            dialog = ProductMappingEditorDialog(self, self.catalogs_service, mapping_data)
+            if dialog.exec():
+                data = dialog.get_data()
+                self.catalogs_service.upsert_product_mapping(data)
+                self._refresh_product_mappings()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось отредактировать сопоставление: {e}")
+
+    def _delete_product_mapping(self):
+        """Удаляет выбранное сопоставление."""
+        sel_row = self.product_mappings_table.currentRow()
+        if sel_row < 0: return
+
+        mapping_id = int(self.product_mappings_table.item(sel_row, 0).text())
+        if QMessageBox.question(self, "Подтверждение", f"Удалить сопоставление ID {mapping_id}?") == QMessageBox.Yes:
+            try:
+                self.catalogs_service.delete_product_mapping(mapping_id)
+                self._refresh_product_mappings()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось удалить сопоставление: {e}")
 
     def _build_product_groups_tab(self, parent_notebook):
         """Создает вкладку для управления товарными группами."""
