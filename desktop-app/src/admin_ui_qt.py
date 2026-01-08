@@ -1559,8 +1559,6 @@ class PrintableObjectItem(QGraphicsRectItem):
         # Добавляем текст внутрь
         self.text_item = QGraphicsTextItem(self._get_display_text(), self)
         self.text_item.setDefaultTextColor(QColor("black"))
-        # --- ИСПРАВЛЕНИЕ: Устанавливаем ширину текста равной ширине родителя для центрирования ---
-        self.text_item.setTextWidth(self.rect().width())
         self.update_text_position()
 
     def paint(self, painter, option, widget):
