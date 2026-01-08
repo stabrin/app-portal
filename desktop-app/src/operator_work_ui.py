@@ -305,9 +305,36 @@ class OperatorWorkWindow(QMainWindow):
 
     def _print_test(self):
         """Печатает тестовую марку и переходит в режим ожидания сканирования с печати."""
-        # Здесь должна быть логика печати
-        # ...
-        logging.info(f"Отправка на печать на принтер: {self.printer_combo.currentText()}")
+        try:
+            printer_name = self.printer_combo.currentText()
+            layout_id = self.layout_combo.currentData()
+            if not printer_name or not layout_id:
+                QMessageBox.warning(self, "Ошибка", "Не выбран принтер или макет.")
+                return
+
+            # Получаем данные для печати (аналогично предпросмотру)
+            dm_data = self.task_service.get_first_datamatrix_for_task(self.task_info['task_id'])
+            layouts = self.catalogs_service.get_print_layouts()
+            template = next((layout for layout in layouts if layout['id'] == layout_id), None)
+
+            if not dm_data or not template:
+                QMessageBox.warning(self, "Ошибка", "Не найдены данные для печати или шаблон.")
+                return
+
+            # Используем PrintingService для отправки на печать
+            logging.info(f"Отправка на печать на принтер: {printer_name}")
+            PrintingService.print_label_direct(
+                printer_name=printer_name,
+                paper_name=template.get('paper_name'), # paper_name берется из макета
+                template_json=template,
+                data=dm_data,
+                user_info=self.user_info
+            )
+        except Exception as e:
+            logging.error(f"Ошибка при отправке на печать: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка печати", f"Не удалось отправить задание на печать: {e}")
+            return # Прерываем переход в следующее состояние, если печать не удалась
+
         self.equipment_check_state = "awaiting_print_scan"
         self.dm_input.clear()
         self.dm_input.setPlaceholderText("Отсканируйте распечатанную этикетку")
