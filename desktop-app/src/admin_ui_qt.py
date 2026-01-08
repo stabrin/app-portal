@@ -1578,16 +1578,15 @@ class PrintableObjectItem(QGraphicsRectItem):
 
     def update_text_position(self):
         """Центрирует текстовый элемент внутри прямоугольника."""
-        # Используем размер документа для точного определения размера текста
-        text_size = self.text_item.document().size()
-        
+        # --- ИСПРАВЛЕНИЕ: Корректное центрирование текста ---
+        # Получаем границы текстового блока
+        text_rect = self.text_item.boundingRect()
         # Получаем границы родительского прямоугольника
-        parent_rect = self.rect()
-        
-        # Вычисляем позицию для центрирования
-        new_x = (parent_rect.width() - text_size.width()) / 2
-        new_y = (parent_rect.height() - text_size.height()) / 2
-        
+        parent_rect = self.boundingRect()
+
+        # Вычисляем центральные координаты родителя и смещаемся на половину размера текста
+        new_x = parent_rect.center().x() - text_rect.width() / 2
+        new_y = parent_rect.center().y() - text_rect.height() / 2
         self.text_item.setPos(new_x, new_y)
 
     def _get_display_text(self):
