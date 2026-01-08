@@ -150,7 +150,7 @@ def main(user_info):
         task_info = login_dialog.get_task_info()
         if task_info:
             logging.info(f"Login successful. Starting main window for task #{task_info['task_id']}.")
-            main_window = OperatorWorkWindow(task_service, catalogs_service, task_info)
+            main_window = OperatorWorkWindow(task_service, catalogs_service, user_info, task_info)
             main_window.show()
             sys.exit(app.exec())
         else:

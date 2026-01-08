@@ -11,8 +11,8 @@ class OperatorWorkWindow(QMainWindow):
     """
     Окно оператора с меню слева и основным полем справа.
     """
-    def __init__(self, task_service, catalogs_service, user_info, task_info, parent=None):
-        super().__init__(parent)
+    def __init__(self, task_service, catalogs_service, user_info, task_info, **kwargs):
+        super().__init__(kwargs.get('parent'))
         self.task_service = task_service
         self.catalogs_service = catalogs_service
         self.task_info = task_info
