@@ -2,7 +2,7 @@
 # Окно оператора с меню и основным полем.
 import logging
 from PySide6.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QMessageBox, QSplitter, QTreeWidget, QTreeWidgetItem, QStackedWidget, QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QGroupBox, QFormLayout, QListWidget, QSpinBox, QDateEdit
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtPrintSupport import QPrinterInfo
 from PySide6.QtGui import QPixmap, QImage
 from .printing_service import PrintingService
@@ -121,7 +121,7 @@ class OperatorWorkWindow(QMainWindow):
             
         if settings.get('refine_prod_date'):
             self.refine_prod_date_input = QDateEdit(calendarPopup=True)
-            self.refine_prod_date_input.setDate(Qt.QDate.currentDate())
+            self.refine_prod_date_input.setDate(QDate.currentDate())
             self.refine_widgets['prod_date'] = form_layout.addRow("Уточнить дату произв.:", self.refine_prod_date_input)
             
         # Кнопка для запуска процесса
