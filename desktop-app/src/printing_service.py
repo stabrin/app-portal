@@ -395,7 +395,7 @@ class PrintingService:
                             
                             # Центрируем изображение по вертикали в его области
                             paste_y = img_y + (img_h - img_obj.height) // 2
-                            target_draw.paste(img_obj, (img_x, paste_y), img_obj)
+                            temp_layer.paste(img_obj, (img_x, paste_y), img_obj)
                         else:
                             logging.warning(f"Изображение '{image_name}' не найдено для объекта text_with_image.")
                     except Exception as e:
@@ -427,7 +427,7 @@ class PrintingService:
                             # --- УЛУЧШЕНИЕ: Используем thumbnail для сохранения пропорций ---
                             # Это предотвратит искажение изображения, если его пропорции не совпадают с объектом.
                             img_obj.thumbnail((width, height), Image.Resampling.LANCZOS)
-                            target_draw.paste(img_obj, (x, y), img_obj if img_obj.mode == 'RGBA' else None)
+                            label_image.paste(img_obj, (x, y), img_obj if img_obj.mode == 'RGBA' else None)
                         else:
                             logging.warning(f"Изображение с именем '{image_name}' не найдено в БД.")
                     except Exception as e:
