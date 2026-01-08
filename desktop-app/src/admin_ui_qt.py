@@ -763,7 +763,7 @@ class TaskEditorFrameQt(QWidget):
             # SSCC Source
             self.sscc_source_label = QLabel("Способ получения SSCC:")
             self.sscc_source_combo = QComboBox()
-            self.sscc_source_combo.addItems(["Печатаем на в процессе", "Напечатаны заранее"])
+            self.sscc_source_combo.addItems(["Печатаем в процессе", "Напечатаны заранее"])
             marking_layout.addRow(self.sscc_source_label, self.sscc_source_combo)
 
             # --- NEW: SSCC refinement checkboxes ---

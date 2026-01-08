@@ -1,7 +1,7 @@
 # desktop-app/src/operator_work_ui.py
 # Окно оператора с меню и основным полем.
 import logging
-from PySide6.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QMessageBox, QSplitter, QTreeWidget, QTreeWidgetItem, QStackedWidget, QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QGroupBox, QFormLayout, QListWidget
+from PySide6.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QMessageBox, QSplitter, QTreeWidget, QTreeWidgetItem, QStackedWidget, QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QGroupBox, QFormLayout, QListWidget, QSpinBox, QDateEdit
 from PySide6.QtCore import Qt
 from PySide6.QtPrintSupport import QPrinterInfo
 from PySide6.QtGui import QPixmap, QImage
@@ -90,31 +90,63 @@ class OperatorWorkWindow(QMainWindow):
 
     def _build_task_page(self, page):
         """Строит страницу задания с списком GTIN."""
-        layout = QVBoxLayout(page)
+        main_layout = QVBoxLayout(page)
+        settings = self.task_info.get('settings_json', {})
         
-        layout.addWidget(QLabel("Список GTIN для задания:"))
+        # --- НОВЫЙ ИНТЕРФЕЙС ДЛЯ ВЫПОЛНЕНИЯ ЗАДАНИЯ ---
+        task_group = QGroupBox("Выполнение задания")
+        form_layout = QFormLayout(task_group)
         
-        self.gtin_list = QListWidget()
-        gtins = self.task_info.get('gtins', [])
-        for gtin in gtins:
-            self.gtin_list.addItem(gtin)
-        layout.addWidget(self.gtin_list)
+        # Поле для сканирования товара (GTIN, EAN, etc.)
+        self.scan_product_input = QLineEdit()
+        self.scan_product_input.setPlaceholderText("Отсканируйте код товара (GTIN, EAN)...")
+        form_layout.addRow("1. Код товара:", self.scan_product_input)
         
-        print_btn = QPushButton("Печать марки для выбранного GTIN")
-        print_btn.clicked.connect(self._print_selected_gtin)
-        layout.addWidget(print_btn)
+        # Поле для количества
+        self.quantity_spinbox = QSpinBox()
+        self.quantity_spinbox.setRange(1, 10000)
+        self.quantity_spinbox.setValue(1)
+        form_layout.addRow("2. Количество в упаковке:", self.quantity_spinbox)
         
-        layout.addStretch()
+        # --- Динамические поля для уточнений ---
+        self.refine_widgets = {} # Словарь для хранения виджетов
+        
+        if settings.get('refine_batch'):
+            self.refine_batch_input = QLineEdit()
+            self.refine_widgets['batch'] = form_layout.addRow("Уточнить партию:", self.refine_batch_input)
+        
+        if settings.get('refine_country'):
+            self.refine_country_input = QLineEdit() # В будущем можно заменить на QComboBox
+            self.refine_widgets['country'] = form_layout.addRow("Уточнить страну:", self.refine_country_input)
+            
+        if settings.get('refine_prod_date'):
+            self.refine_prod_date_input = QDateEdit(calendarPopup=True)
+            self.refine_prod_date_input.setDate(Qt.QDate.currentDate())
+            self.refine_widgets['prod_date'] = form_layout.addRow("Уточнить дату произв.:", self.refine_prod_date_input)
+            
+        # Кнопка для запуска процесса
+        self.print_labels_button = QPushButton("Напечатать марки")
+        self.print_labels_button.clicked.connect(self._find_gtin_and_print)
+        form_layout.addRow(self.print_labels_button)
+        
+        main_layout.addWidget(task_group)
+        main_layout.addStretch()
 
-    def _print_selected_gtin(self):
-        """Печатает марку для выбранного GTIN."""
-        selected_item = self.gtin_list.currentItem()
-        if not selected_item:
-            QMessageBox.warning(self, "Ошибка", "Выберите GTIN.")
+    def _find_gtin_and_print(self):
+        """Основная логика: поиск GTIN и запуск печати."""
+        scanned_code = self.scan_product_input.text().strip()
+        if not scanned_code:
+            QMessageBox.warning(self, "Ошибка", "Отсканируйте код товара.")
             return
-        gtin = selected_item.text()
-        # TODO: Использовать выбранный макет и принтер из тестирования
-        QMessageBox.information(self, "Печать", f"Печать марки для GTIN: {gtin}")
+            
+        # Здесь будет логика поиска GTIN через catalogs_service
+        # ...
+        
+        QMessageBox.information(self, "В разработке", f"Запущен поиск для кода: {scanned_code}")
+
+    def _show_create_mapping_dialog(self, unknown_code):
+        """Показывает диалог для создания нового сопоставления."""
+        QMessageBox.information(self, "В разработке", f"Здесь будет диалог создания сопоставления для кода: {unknown_code}")
 
     def _build_equipment_page(self, page):
         """Строит страницу проверки оборудования."""
