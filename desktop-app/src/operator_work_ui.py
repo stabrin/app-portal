@@ -1,6 +1,6 @@
 # desktop-app/src/operator_work_ui.py
 # Окно оператора с меню и основным полем.
-
+import logging
 from PySide6.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QMessageBox, QSplitter, QTreeWidget, QTreeWidgetItem, QStackedWidget, QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QGroupBox, QFormLayout, QListWidget
 from PySide6.QtCore import Qt
 from PySide6.QtPrintSupport import QPrinterInfo
@@ -18,6 +18,7 @@ class OperatorWorkWindow(QMainWindow):
         self.task_info = task_info
         self.user_info = user_info
 
+        self.equipment_check_state = "idle" # Состояния: idle, awaiting_screen_scan, awaiting_print_scan
         # Переменные для тестирования
         self.test_dm = None  # Первое datamatrix из задания
         self.selected_layout = None
@@ -130,7 +131,7 @@ class OperatorWorkWindow(QMainWindow):
             # Выбор макета
             self.layout_combo = QComboBox()
             try:
-                layouts = self.catalogs_service.get_print_layouts()  # Предполагаем метод
+                layouts = self.catalogs_service.get_print_layouts()
                 for layout_info in layouts:
                     self.layout_combo.addItem(layout_info['name'], layout_info['id'])
             except:
@@ -163,26 +164,9 @@ class OperatorWorkWindow(QMainWindow):
             
             # Поле для сканирования ДМ
             self.dm_input = QLineEdit()
-            self.dm_input.setPlaceholderText("Сканируйте DataMatrix")
+            self.dm_input.setPlaceholderText("Ожидание...")
+            self.dm_input.returnPressed.connect(self._process_scan)
             form_layout.addRow("DataMatrix:", self.dm_input)
-            
-            # Кнопки
-            btn_layout = QHBoxLayout()
-            self.scan_btn = QPushButton("Сканировать ДМ")
-            self.scan_btn.clicked.connect(self._scan_dm)
-            btn_layout.addWidget(self.scan_btn)
-            
-            self.print_btn = QPushButton("Печать")
-            self.print_btn.clicked.connect(self._print_test)
-            self.print_btn.setEnabled(False)
-            btn_layout.addWidget(self.print_btn)
-            
-            self.verify_btn = QPushButton("Проверить распечатанный ДМ")
-            self.verify_btn.clicked.connect(self._verify_printed_dm)
-            self.verify_btn.setEnabled(False)
-            btn_layout.addWidget(self.verify_btn)
-            
-            form_layout.addRow(btn_layout)
             
             layout.addWidget(group)
         else:
@@ -233,13 +217,15 @@ class OperatorWorkWindow(QMainWindow):
                 QMessageBox.warning(self, "Ошибка", "Нет доступных кодов DataMatrix для задачи.")
                 return
             
+            self.test_dm = dm_data['datamatrix']
+            
             # Получить выбранный макет
-            layout_name = self.layout_combo.currentData()
-            if not layout_name:
+            layout_id = self.layout_combo.currentData()
+            if not layout_id:
                 QMessageBox.warning(self, "Ошибка", "Выберите макет.")
                 return
             
-            # Получить все макеты и найти нужный
+            # Найти выбранный макет в списке
             layouts = self.catalogs_service.get_print_layouts()
             template = None
             for layout in layouts:
@@ -248,7 +234,7 @@ class OperatorWorkWindow(QMainWindow):
                     break
             if not template:
                 QMessageBox.warning(self, "Ошибка", "Макет не найден.")
-                return
+                return            
             
             # Подготовить данные для генерации
             data = {
@@ -276,37 +262,53 @@ class OperatorWorkWindow(QMainWindow):
                 qimage = QImage(data, image.size[0], image.size[1], QImage.Format_RGBA8888)
                 pixmap = QPixmap.fromImage(qimage)
                 self.preview_label.setPixmap(pixmap.scaledToWidth(300, Qt.SmoothTransformation))
-                QMessageBox.information(self, "Успех", "Предпросмотр сгенерирован.")
+                
+                # Переход в режим сканирования с экрана
+                self.equipment_check_state = "awaiting_screen_scan"
+                self.dm_input.clear()
+                self.dm_input.setPlaceholderText("Отсканируйте код с экрана")
+                self.dm_input.setFocus()
             else:
                 QMessageBox.warning(self, "Ошибка", "Не удалось сгенерировать изображение.")
                 
         except Exception as e:
+            logging.error(f"Ошибка генерации предпросмотра: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Ошибка генерации предпросмотра: {e}")
 
-    def _scan_dm(self):
-        """Сканирует ДМ."""
+    def _process_scan(self):
+        """Обрабатывает сканирование в зависимости от текущего состояния."""
         scanned = self.dm_input.text().strip()
-        if scanned == self.test_dm:
-            QMessageBox.information(self, "Успех", "ДМ считан правильно.")
-            self.print_btn.setEnabled(True)
-        else:
-            QMessageBox.warning(self, "Ошибка", "ДМ не совпадает.")
+        if not scanned:
+            return
+
+        if self.equipment_check_state == "awaiting_screen_scan":
+            if scanned == self.test_dm:
+                QMessageBox.information(self, "Успех", "Код с экрана считан верно. Отправка на печать...")
+                self._print_test()
+            else:
+                QMessageBox.warning(self, "Ошибка", "Отсканированный код не совпадает с кодом на экране. Попробуйте еще раз.")
+                self.dm_input.clear()
+
+        elif self.equipment_check_state == "awaiting_print_scan":
+            if scanned == self.test_dm:
+                QMessageBox.information(self, "Успех", "Тестирование оборудования успешно завершено!")
+                # Сохраняем настройки для сессии
+                self.selected_layout = self.layout_combo.currentData()
+                self.selected_printer = self.printer_combo.currentText()
+                logging.info(f"Для сессии сохранены настройки: Принтер='{self.selected_printer}', Макет ID='{self.selected_layout}'")
+                self.equipment_check_state = "idle"
+                self.dm_input.setPlaceholderText("Тестирование завершено")
+                self.dm_input.clear()
+            else:
+                QMessageBox.warning(self, "Ошибка", "Отсканированный код не совпадает с распечатанным. Проверьте настройки принтера и попробуйте еще раз.")
+                self.dm_input.clear()
 
     def _print_test(self):
-        """Печатает тестовую марку."""
-        # TODO: Отправить на печать
-        QMessageBox.information(self, "Печать", "Марка отправлена на печать.")
-        self.verify_btn.setEnabled(True)
-        self.test_printed = True
-
-    def _verify_printed_dm(self):
-        """Проверяет распечатанный ДМ."""
-        scanned = self.dm_input.text().strip()
-        if scanned == self.test_dm:
-            QMessageBox.information(self, "Успех", "Тестирование завершено.")
-            # Запомнить настройки
-            self.selected_layout = self.layout_combo.currentText()
-            self.selected_printer = self.printer_combo.currentText()
-            # TODO: Сохранить в сессии
-        else:
-            QMessageBox.warning(self, "Ошибка", "Распечатанный ДМ не совпадает.")
+        """Печатает тестовую марку и переходит в режим ожидания сканирования с печати."""
+        # Здесь должна быть логика печати
+        # ...
+        logging.info(f"Отправка на печать на принтер: {self.printer_combo.currentText()}")
+        self.equipment_check_state = "awaiting_print_scan"
+        self.dm_input.clear()
+        self.dm_input.setPlaceholderText("Отсканируйте распечатанную этикетку")
+        self.dm_input.setFocus()
