@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QHeaderView, QDateEdit, QDialog, QFormLayout, QComboBox, QSplitter, QTabWidget, QProgressDialog, QDialogButtonBox, QCheckBox,
     QGroupBox, QRadioButton, QSpinBox, QScrollArea,
     QInputDialog, QTreeWidget, QTreeWidgetItem, QStackedWidget, QAbstractItemView,
-    QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem
+    QGraphicsScene, QGraphicsView, QGraphicsRectItem, QGraphicsTextItem, QGraphicsItem, QMenu
 )
 # --- NEW IMPORTS FOR PRINTING ---
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog, QPrintPreviewDialog
@@ -33,6 +33,7 @@ from .db_connector import get_client_db_connection
 from .catalogs_service import CatalogsService
 from .supply_notification_service import SupplyNotificationService
 from .aggregation_service import run_aggregation_process_desktop
+from .genai_service import GenAIService
 from .api_service import ApiService # ИСПРАВЛЕНИЕ: Добавляем импорт ApiService
 import psycopg2
 from psycopg2 import sql
@@ -1518,10 +1519,11 @@ class LayoutSelectionDialog(QDialog):
 # --- Новые классы для редактора макетов ---
 class PrintableObjectItem(QGraphicsRectItem):
     """Кастомный элемент на сцене, представляющий объект на этикетке."""
-    def __init__(self, obj_data, object_id, scale):
+    def __init__(self, obj_data, object_id, scale, editor_dialog):
         self.obj_data = obj_data
         self.object_id = object_id
         self.scale = scale
+        self.editor_dialog = editor_dialog
 
         x = obj_data.get('x_mm', 0) * scale
         y = obj_data.get('y_mm', 0) * scale
@@ -1532,7 +1534,13 @@ class PrintableObjectItem(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self.setAcceptHoverEvents(True)
         
+        self.original_pos = None # Для отслеживания перемещения
+
+        self.resizing = False
+        self.resize_handle_size = 10.0
+
         # Визуальное оформление
         obj_type = obj_data.get('type')
         if obj_type == 'text':
@@ -1551,9 +1559,38 @@ class PrintableObjectItem(QGraphicsRectItem):
         # Добавляем текст внутрь
         self.text_item = QGraphicsTextItem(self._get_display_text(), self)
         self.text_item.setDefaultTextColor(QColor("black"))
-        # Центрируем текст
-        br = self.text_item.boundingRect()
-        self.text_item.setPos(x + (w - br.width()) / 2, y + (h - br.height()) / 2)
+        # --- ИСПРАВЛЕНИЕ: Устанавливаем ширину текста равной ширине родителя для центрирования ---
+        self.text_item.setTextWidth(self.rect().width())
+        self.update_text_position()
+
+    def paint(self, painter, option, widget):
+        """Переопределяем paint для отрисовки рамки выделения."""
+        super().paint(painter, option, widget)
+        if self.isSelected():
+            # Рисуем рамку для изменения размера
+            pen = QPen(QColor("blue"), 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawRect(self.rect())
+
+            # Рисуем маркер изменения размера
+            handle_rect = QRectF(self.rect().right() - self.resize_handle_size, self.rect().bottom() - self.resize_handle_size, self.resize_handle_size, self.resize_handle_size)
+            painter.setBrush(QColor("blue"))
+            painter.setPen(Qt.NoPen)
+            painter.drawRect(handle_rect)
+
+    def update_text_position(self):
+        """Центрирует текстовый элемент внутри прямоугольника."""
+        # Используем размер документа для точного определения размера текста
+        text_size = self.text_item.document().size()
+        
+        # Получаем границы родительского прямоугольника
+        parent_rect = self.rect()
+        
+        # Вычисляем позицию для центрирования
+        new_x = (parent_rect.width() - text_size.width()) / 2
+        new_y = (parent_rect.height() - text_size.height()) / 2
+        
+        self.text_item.setPos(new_x, new_y)
 
     def _get_display_text(self):
         obj_type = self.obj_data.get('type')
@@ -1561,48 +1598,105 @@ class PrintableObjectItem(QGraphicsRectItem):
             return self.obj_data.get('barcode_type', 'BARCODE')
         elif obj_type == 'text':
             if self.obj_data.get('is_custom_text'):
-                # Не показываем длинный текст в предпросмотре
                 return "'...' (свой текст)" if self.obj_data.get('data_source') else "Свой текст"
             return self.obj_data.get('data_source', 'text')
         elif obj_type == 'image':
             return 'IMG'
         elif obj_type == 'text_with_image':
             return 'Текст+IMG'
-        return obj_type or "object"    
-    def itemChange(self, change, value):
-        if change == QGraphicsItem.ItemPositionHasChanged:
-            # Обновляем координаты в исходном словаре данных
-            new_x = round(self.pos().x() / self.scale, 2)
-            new_y = round(self.pos().y() / self.scale, 2)
+        return obj_type or "object"
 
-            # --- ИСПРАВЛЕНИЕ: Проверяем, изменились ли координаты, чтобы избежать рекурсии ---
-            if self.obj_data.get('x_mm') != new_x or self.obj_data.get('y_mm') != new_y:
-                self.obj_data['x_mm'] = new_x
-                self.obj_data['y_mm'] = new_y
-                # Сообщаем родительскому диалогу об изменении
-                if self.scene() and hasattr(self.scene().parent(), 'on_item_moved'):
-                    self.scene().parent().on_item_moved(self.object_id)
+    def itemChange(self, change, value):
+        # Логика обновления перенесена в mouseReleaseEvent, чтобы избежать
+        # проблем с производительностью и циклических обновлений во время перетаскивания.
         return super().itemChange(change, value)
 
-    def _delete_selected_object(self):
-        """Удаляет выделенный объект с холста и из шаблона."""
-        if self.selected_object_id is None:
-            QMessageBox.warning(self, "Внимание", "Нет выделенных объектов для удаления.")
-            return
+    def hoverMoveEvent(self, event):
+        if self.isSelected():
+            handle_rect = QRectF(self.rect().right() - self.resize_handle_size, self.rect().bottom() - self.resize_handle_size, self.resize_handle_size, self.resize_handle_size)
+            if handle_rect.contains(event.pos()):
+                self.setCursor(Qt.SizeFDiagCursor)
+            else:
+                self.setCursor(Qt.ArrowCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+        super().hoverMoveEvent(event)
+    
+    def hoverLeaveEvent(self, event):
+        self.setCursor(Qt.ArrowCursor)
+        super().hoverLeaveEvent(event)
 
-        reply = QMessageBox.question(self, "Подтверждение", "Вы уверены, что хотите удалить выделенный объект?", QMessageBox.Yes | QMessageBox.No)
-        if reply != QMessageBox.Yes:
-            return
+    def mousePressEvent(self, event):
+        # Сохраняем начальную позицию для отслеживания перемещения
+        self.original_pos = self.pos()
 
-        try:
-            del self.template['objects'][self.selected_object_id]
-            self.selected_object_id = None
-            self._redraw_canvas()
-            self._update_properties_panel() # Очищаем панель свойств
-        except IndexError:
-            QMessageBox.critical(self, "Ошибка", "Произошла ошибка при удалении объекта (индекс вне диапазона).")
+        handle_rect = QRectF(self.rect().right() - self.resize_handle_size, self.rect().bottom() - self.resize_handle_size, self.resize_handle_size, self.resize_handle_size)
+        if event.button() == Qt.LeftButton and handle_rect.contains(event.pos()):
+            self.resizing = True
+            self.original_rect = self.rect()
+            self.resize_start_mouse_pos = event.pos()
+            self.setFlag(QGraphicsItem.ItemIsMovable, False)
+        else:
+            self.resizing = False
+            super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if self.resizing:
+            self.prepareGeometryChange()
+            delta = event.pos() - self.resize_start_mouse_pos
+            
+            new_width = self.original_rect.width() + delta.x()
+            new_height = self.original_rect.height() + delta.y()
 
+            min_size_px = 5 * self.scale
+            if new_width < min_size_px: new_width = min_size_px
+            if new_height < min_size_px: new_height = min_size_px
+
+            self.setRect(self.original_rect.x(), self.original_rect.y(), new_width, new_height)
+            self.update_text_position()
+        else:
+            super().mouseMoveEvent(event)
+
+    def contextMenuEvent(self, event):
+        """Создает контекстное меню для удаления объекта."""
+        menu = QMenu()
+        delete_action = menu.addAction("Удалить")
+        action = menu.exec(event.screenPos())
+
+        if action == delete_action:
+            self.editor_dialog._delete_selected_object()
+
+    def mouseReleaseEvent(self, event):
+        data_changed = False
+        if self.resizing:
+            self.resizing = False
+            self.setFlag(QGraphicsItem.ItemIsMovable, True)
+            
+            new_w_mm = round(self.rect().width() / self.scale, 2)
+            new_h_mm = round(self.rect().height() / self.scale, 2)
+            
+            if self.obj_data.get('width_mm') != new_w_mm or self.obj_data.get('height_mm') != new_h_mm:
+                self.obj_data['width_mm'] = new_w_mm
+                self.obj_data['height_mm'] = new_h_mm
+                data_changed = True
+        
+        # --- ИСПРАВЛЕНИЕ: Логика перемещения ---
+        # Всегда проверяем смещение относительно исходной точки, 
+        # чтобы избежать накопления ошибок.
+        if self.original_pos is not None and self.pos() != self.original_pos:
+            delta_pos = self.pos() - self.original_pos
+            self.obj_data['x_mm'] = round(self.obj_data.get('x_mm', 0) + delta_pos.x() / self.scale, 2)
+            self.obj_data['y_mm'] = round(self.obj_data.get('y_mm', 0) + delta_pos.y() / self.scale, 2)
+            data_changed = True
+
+        if data_changed:
+            self.editor_dialog.on_item_moved(self.object_id)
+
+        super().mouseReleaseEvent(event)
+        
+        # Сбрасываем original_pos после завершения операции
+        self.original_pos = None
+        
 class LabelEditorDialog(QDialog):
     """Диалоговое окно для визуального редактора макетов этикеток."""
     def __init__(self, parent, user_info, catalog_service, layout_data=None):
@@ -1681,181 +1775,79 @@ class LabelEditorDialog(QDialog):
 
         # --- ИЗМЕНЕНИЕ: Создаем все возможные виджеты для панели свойств ---
 
-
         props_group = QGroupBox("Свойства объекта")
-
-
         self.props_layout = QFormLayout(props_group)
-
-
-        
-
-
         self.prop_x = QLineEdit()
-
-
         self.prop_y = QLineEdit()
-
-
         self.prop_w = QLineEdit()
-
-
         self.prop_h = QLineEdit()
-
-
-        
-
-
         self.prop_is_custom_text = QCheckBox("Произвольный текст")
-
-
-        
-
 
         # --- ИЗМЕНЕНИЕ: Создаем контейнеры для динамических виджетов ---
 
-
         self.prop_data_source_widget = QWidget()
-
-
         data_source_layout = QHBoxLayout(self.prop_data_source_widget)
-
-
         data_source_layout.setContentsMargins(0, 0, 0, 0)
-
-
         self.prop_data_source_combo = QComboBox()
-
-
         self.prop_data_source_combo.setEditable(False) # По умолчанию нередактируемый
-
-
         self.prop_data_source_entry = QLineEdit()
-
-
         data_source_layout.addWidget(self.prop_data_source_combo)
-
-
         data_source_layout.addWidget(self.prop_data_source_entry)
-
-
-        
-
-
         self.prop_image_source_widget = QWidget()
-
-
         image_source_layout = QHBoxLayout(self.prop_image_source_widget)
-
-
         image_source_layout.setContentsMargins(0, 0, 0, 0)
-
-
         self.prop_image_source_combo = QComboBox()
-
-
         self.prop_image_source_combo.setEditable(True) # Можно вписать имя
-
-
         image_source_layout.addWidget(self.prop_image_source_combo)
-
-
-
-
-
         self.props_layout.addRow("X (мм):", self.prop_x)
-
-
         self.props_layout.addRow("Y (мм):", self.prop_y)
-
-
         self.props_layout.addRow("Ширина (мм):", self.prop_w)
-
-
         self.props_layout.addRow("Высота (мм):", self.prop_h)
-
-
         self.props_layout.addRow(self.prop_is_custom_text)
-
-
         self.props_layout.addRow("Источник:", self.prop_data_source_widget)
-
-
         self.props_layout.addRow("Источник картинки:", self.prop_image_source_widget)
-
-
-        
-
-
         btn_apply_props = QPushButton("Применить свойства")
-
-
         btn_apply_props.clicked.connect(self._apply_properties)
-
-
         self.props_layout.addWidget(btn_apply_props)
-
-
-
-
-
         controls_layout.addWidget(tools_group)
-
-
         controls_layout.addWidget(props_group)
-
-
         controls_layout.addStretch()
-
-
         controls_layout.addWidget(button_box)
-
-
-
-
-
         canvas_widget = QWidget()
-
-
         canvas_layout = QVBoxLayout(canvas_widget)
-
-
         self.scene = QGraphicsScene()
-
-
         self.scene.selectionChanged.connect(self._on_scene_selection_changed)
-
-
         self.view = QGraphicsView(self.scene)
-
-
         self.view.setRenderHint(QPainter.Antialiasing)
-
-
         canvas_layout.addWidget(self.view)
-
-
-
-
-
         splitter.addWidget(controls_widget)
-
-
         splitter.addWidget(canvas_widget)
-
-
         splitter.setSizes([300, 900])
-
-
-        
-
 
         # Коннекторы
 
-
         self.prop_is_custom_text.stateChanged.connect(self._update_properties_panel)
 
+    def _delete_selected_object(self):
+        """Удаляет выбранный объект с холста и из шаблона."""
+        if self.selected_object_id is None:
+            return
 
+        reply = QMessageBox.question(self, "Подтверждение", 
+                                     "Вы уверены, что хотите удалить выбранный объект?",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+
+        if reply == QMessageBox.Yes:
+            try:
+                # Удаляем объект из списка
+                del self.template['objects'][self.selected_object_id]
+                
+                # Сбрасываем выделение и обновляем холст
+                self.selected_object_id = None
+                self._redraw_canvas()
+                self._update_properties_panel() # Очищаем и деактивируем панель свойств
+            except IndexError:
+                QMessageBox.warning(self, "Ошибка", "Не удалось удалить объект. Возможно, он уже был удален.")
 
 
 
@@ -1923,22 +1915,10 @@ class LabelEditorDialog(QDialog):
 
 
     def _draw_object(self, obj_data, object_id):
-
-
-        item = PrintableObjectItem(obj_data, object_id, self.canvas_scale)
-
-
+        item = PrintableObjectItem(obj_data, object_id, self.canvas_scale, self)
         self.scene.addItem(item)
-
-
         if self.selected_object_id == object_id:
-
-
             item.setSelected(True)
-
-
-
-
 
     def _add_object(self, template_key: str):
 
@@ -2820,6 +2800,7 @@ class AdminWindowQt(QMainWindow):
         self.supply_notification_service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
         self.catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
         self.api_service = ApiService(self.user_info, self.order_service) # ApiService должен быть инициализирован после всех, так как может их использовать
+        self.genai_service = GenAIService(os.getenv("GOOGLE_API_KEY"))
         self._define_endpoint_map() # ИСПРАВЛЕНИЕ: Добавляем вызов для инициализации карты эндпоинтов
         self._build_ui()
         self._setup_db_status_checker() # Настраиваем и запускаем проверку БД
@@ -2925,6 +2906,7 @@ class AdminWindowQt(QMainWindow):
         item_config_save_ini = QTreeWidgetItem(item_admin_utilities, ["Сохранить INI"]) # ПЕРЕМЕЩЕНО
         item_api_tools = QTreeWidgetItem(item_admin_utilities, ["АПИ Тестер"]) # НОВЫЙ ПУНКТ
         item_upload_lenta = QTreeWidgetItem(item_admin_utilities, ["Загрузить Ленту"]) # НОВЫЙ ПУНКТ
+        item_genai_util = QTreeWidgetItem(item_admin_utilities, ["GenAI Утилита"])
         item_session_management = QTreeWidgetItem(item_admin_utilities, ["Управление сессиями"]) # НОВЫЙ ПУНКТ
         item_admin_catalogs = QTreeWidgetItem(item_admin, ["Справочники"])
         item_admin_reports = QTreeWidgetItem(item_admin, ["Отчеты"])
@@ -2947,6 +2929,7 @@ class AdminWindowQt(QMainWindow):
             'save_ini': item_config_save_ini,
             'api_tools': item_api_tools, # Добавляем в словарь
             'upload_lenta': item_upload_lenta,
+            'genai_util': item_genai_util,
             'session_management': item_session_management, # Добавляем в словарь
             'workplaces': item_config_workplaces,
         }
@@ -3181,6 +3164,8 @@ class AdminWindowQt(QMainWindow):
             self._open_generate_sscc_dialog() # Вызываем диалог, не меняя основное окно
         elif text == "Загрузить Ленту":
             self._open_lenta_upload_dialog() # Вызываем новый диалог
+        elif text == "GenAI Утилита":
+            self._open_genai_util_dialog()
         elif text == "Управление сессиями":
             self._open_session_management_dialog() # Вызываем диалог управления сессиями
         elif text == "Справочники":
@@ -6655,6 +6640,10 @@ class AdminWindowQt(QMainWindow):
         """Открывает диалог для специальной загрузки 'Лента'."""
         dialog = LentaUploadDialog(self, self.user_info)
         dialog.exec()
+
+    def _open_genai_util_dialog(self):
+        """Открывает диалог для утилиты GenAI."""
+        QMessageBox.information(self, "GenAI Утилита", "Эта функция находится в разработке.")
 
     def _open_session_management_dialog(self):
         """Открывает диалог управления сессиями."""
