@@ -3191,7 +3191,7 @@ class AdminWindowQt(QMainWindow):
                 logging.info(f"Вход в режим оператора успешен. Задача: {task_info['task_id']}")
                 # Создаем и показываем основное окно оператора
                 # Оно становится модальным для главного окна, блокируя его
-                self.operator_window = OperatorWorkWindow(self.task_service, self.catalogs_service, task_info, self)
+                self.operator_window = OperatorWorkWindow(self.task_service, self.catalogs_service, self.user_info, task_info, self)
                 self.operator_window.show()
             else:
                  logging.error("Диалог входа вернул 'Accepted', но информация о задаче пуста.")

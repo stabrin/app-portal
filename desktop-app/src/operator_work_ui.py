@@ -11,11 +11,12 @@ class OperatorWorkWindow(QMainWindow):
     """
     Окно оператора с меню слева и основным полем справа.
     """
-    def __init__(self, task_service, catalogs_service, task_info, parent=None):
+    def __init__(self, task_service, catalogs_service, user_info, task_info, parent=None):
         super().__init__(parent)
         self.task_service = task_service
         self.catalogs_service = catalogs_service
         self.task_info = task_info
+        self.user_info = user_info
 
         # Переменные для тестирования
         self.test_dm = None  # Первое datamatrix из задания
@@ -267,7 +268,7 @@ class OperatorWorkWindow(QMainWindow):
             }
             
             # Генерировать изображение
-            image = PrintingService.generate_label_image(template, data, {})  # user_info пустой
+            image = PrintingService.generate_label_image(template, data, self.user_info)
             if image:
                 # Конвертировать PIL Image в QPixmap
                 image = image.convert("RGBA")
