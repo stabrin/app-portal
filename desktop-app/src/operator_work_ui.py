@@ -229,7 +229,7 @@ class OperatorWorkWindow(QMainWindow):
             layouts = self.catalogs_service.get_print_layouts()
             template = None
             for layout in layouts:
-                if layout['name'] == layout_name:
+                if layout['id'] == layout_id:
                     template = layout
                     break
             if not template:
