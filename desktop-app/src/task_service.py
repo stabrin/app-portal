@@ -105,7 +105,8 @@ class TaskService:
                             pt.status,
                             pt.settings_json,
                             o.id AS order_id,
-                            o.client_name
+                            o.client_name,
+                            o.client_id
                         FROM
                             production_tasks pt
                         JOIN
