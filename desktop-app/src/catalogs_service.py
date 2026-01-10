@@ -495,12 +495,15 @@ class CatalogsService:
         logger.info(f"Код '{code}' не найден ни в справочнике товаров, ни в сопоставлениях.")
         return None
 
-    def create_code_mapping(self, gtin: str, mapped_code: str, mapped_code_type: str):
+    def create_code_mapping(self, gtin: str, mapped_code: str, mapped_code_type: str, client_id: Optional[int] = None):
         """Создает новую запись в таблице сопоставлений кодов."""
-        logger.info(f"Создание сопоставления: '{mapped_code}' ({mapped_code_type}) -> '{gtin}'")
+        log_msg = f"Создание сопоставления: '{mapped_code}' ({mapped_code_type}) -> '{gtin}'"
+        if client_id:
+            log_msg += f" для клиента ID: {client_id}"
+        logger.info(log_msg)
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type) VALUES (%s, %s, %s)", (gtin, mapped_code, mapped_code_type))
+                cur.execute("INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type, client_id) VALUES (%s, %s, %s, %s)", (gtin, mapped_code, mapped_code_type, client_id))
             conn.commit()
 
     # --- КОНЕЦ НОВОГО БЛОКА ---

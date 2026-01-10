@@ -191,7 +191,8 @@ class OperatorWorkWindow(QMainWindow):
             self.catalogs_service.create_code_mapping(
                 gtin=target_gtin,
                 mapped_code=unknown_code,
-                mapped_code_type='EAN' # или другой тип, если он известен
+                mapped_code_type='EAN', # или другой тип, если он известен
+                client_id=self.user_info.get('client_id')
             )
             QMessageBox.information(self, "Успех", f"Сопоставление для кода '{unknown_code}' успешно создано.\nПовторяем печать...")
             # Повторяем исходное действие
