@@ -122,7 +122,7 @@ def main(user_info: dict):
     logging.info("Сервисы инициализированы.")
 
     # Запуск UI
-    login_dialog = OperatorLoginWindow(task_service, user_info)
+    login_dialog = OperatorLoginWindow(task_service, user_info={})
     if login_dialog.exec():
         task_info = login_dialog.get_task_info()
         if task_info:
