@@ -415,37 +415,16 @@ class CatalogsService:
         """Возвращает список всех сопоставлений кодов товаров."""
         logger.info("Запрос справочника сопоставлений кодов из БД клиента.")
         with self.get_db_connection() as conn:
-            # Используем два разных курсора для двух баз данных
-            with conn.cursor(cursor_factory=RealDictCursor) as client_cur:
-                # 1. Получаем все сопоставления из БД клиента
-                client_cur.execute("SELECT id, gtin, mapped_code, mapped_code_type, client_id FROM product_code_mappings")
-                all_mappings = client_cur.fetchall()
-
-        if not all_mappings:
-            return []
-
-        # 2. Разделяем ID клиентов на локальные и API
-        local_client_ids_str = [m['client_id'] for m in all_mappings if m['client_id'] and m['client_id'].startswith('local_')]
-        api_client_ids_str = [m['client_id'] for m in all_mappings if m['client_id'] and m['client_id'].startswith('api_')]
-
-        client_id_to_name = {}
-
-        # 3. Получаем имена для локальных клиентов
-        if local_client_ids_str:
-            with self.get_db_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as client_cur:
-                    client_cur.execute("SELECT id, name FROM ap_clients WHERE ('local_' || id::text) = ANY(%s)", (local_client_ids_str,))
-                    for row in client_cur.fetchall():
-                        client_id_to_name[f"local_{row['id']}"] = row['name']
-        
-        # 4. Обогащаем основной список именами клиентов
-        for mapping in all_mappings:
-            mapping['client_name'] = client_id_to_name.get(mapping['client_id'], 'Глобальное')
-
-        # 5. Сортируем результат в Python
-        all_mappings.sort(key=lambda x: (x.get('gtin', ''), x.get('mapped_code', '')))
-
-        return all_mappings
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Просто выбираем все данные. Имя клиента теперь хранится прямо в client_id.
+                cur.execute("""
+                    SELECT 
+                        id, gtin, mapped_code, mapped_code_type, 
+                        COALESCE(client_id, 'Глобальное') as client_name 
+                    FROM product_code_mappings
+                    ORDER BY gtin, mapped_code;
+                """)
+                return cur.fetchall()
 
     def get_mapping_by_id(self, mapping_id: int):
         """Возвращает одну запись сопоставления по ее ID."""

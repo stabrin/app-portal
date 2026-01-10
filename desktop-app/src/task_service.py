@@ -107,8 +107,8 @@ class TaskService:
                             o.id AS order_id,
                             o.client_name,
                             CASE
-                                WHEN o.client_api_id IS NOT NULL THEN 'api_' || o.client_api_id::text
-                                WHEN o.client_local_id IS NOT NULL THEN 'local_' || o.client_local_id::text
+                                WHEN o.client_api_id IS NOT NULL THEN 'api_' || o.client_api_id::text || '_' || o.client_name
+                                WHEN o.client_local_id IS NOT NULL THEN 'local_' || o.client_local_id::text || '_' || o.client_name
                                 ELSE NULL
                             END as client_id
                         FROM
