@@ -106,7 +106,7 @@ class TaskService:
                             pt.settings_json,
                             o.id AS order_id,
                             o.client_name,
-                            o.client_id
+                            COALESCE(o.client_api_id, o.client_local_id) as client_id
                         FROM
                             production_tasks pt
                         JOIN
