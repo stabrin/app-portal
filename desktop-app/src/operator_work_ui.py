@@ -127,6 +127,9 @@ class OperatorWorkWindow(QMainWindow):
         # Кнопка для запуска процесса
         self.print_labels_button = QPushButton("Напечатать марки")
         self.print_labels_button.clicked.connect(self._find_gtin_and_print)
+        # --- ИСПРАВЛЕНИЕ: Добавляем обработку нажатия Enter в поле сканирования ---
+        self.scan_product_input.returnPressed.connect(self._find_gtin_and_print)
+        
         form_layout.addRow(self.print_labels_button)
         
         main_layout.addWidget(task_group)
