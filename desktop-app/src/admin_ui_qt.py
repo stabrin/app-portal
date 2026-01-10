@@ -5019,11 +5019,40 @@ class AdminWindowQt(QMainWindow):
         btn_edit.clicked.connect(self._edit_product_mapping)
         self.product_mappings_table.doubleClicked.connect(self._edit_product_mapping)
         btn_delete.clicked.connect(self._delete_product_mapping)
-        btn_export.clicked.connect(lambda: QMessageBox.information(self, "В разработке", "Экспорт в Excel будет добавлен позже."))
-        btn_import.clicked.connect(lambda: QMessageBox.information(self, "В разработке", "Импорт из Excel будет добавлен позже."))
+        btn_export.clicked.connect(self._export_product_mappings)
+        btn_import.clicked.connect(self._import_product_mappings)
 
         # Загрузка данных при первом открытии
         self._refresh_product_mappings()
+
+    def _export_product_mappings(self):
+        """Выгружает справочник сопоставлений в Excel."""
+        try:
+            df = self.catalogs_service.get_product_mappings_template()
+            mappings = self.catalogs_service.get_product_mappings()
+            if mappings:
+                # Для выгрузки используем client_id, а не client_name
+                full_mappings = [self.catalogs_service.get_mapping_by_id(m['id']) for m in mappings]
+                df = pd.DataFrame(full_mappings)
+
+            filepath, _ = QFileDialog.getSaveFileName(self, "Выгрузка: Сопоставления кодов", "product_mappings.xlsx", "Excel Files (*.xlsx)")
+            if filepath:
+                df.to_excel(filepath, index=False)
+                QMessageBox.information(self, "Успех", "Справочник успешно выгружен.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось выгрузить файл: {e}")
+
+    def _import_product_mappings(self):
+        """Импортирует сопоставления из Excel."""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Импорт: Сопоставления кодов", "", "Excel Files (*.xlsx *.xls)")
+        if not filepath: return
+        try:
+            df = pd.read_excel(filepath, dtype=str).where(pd.notna, None)
+            self.catalogs_service.process_product_mappings_import(df)
+            self._refresh_product_mappings()
+            QMessageBox.information(self, "Успех", "Данные успешно импортированы.")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка импорта: {e}")
 
     def _refresh_product_mappings(self):
         """Обновляет данные в таблице сопоставлений."""

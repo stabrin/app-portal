@@ -187,11 +187,15 @@ class OperatorWorkWindow(QMainWindow):
     def _create_mapping_and_retry_print(self, unknown_code: str, target_gtin: str):
         """Создает сопоставление и повторяет попытку печати."""
         try:
+            # --- НОВАЯ ЛОГИКА: Автоматически определяем тип кода ---
+            # Если код состоит только из цифр, считаем его EAN, иначе - кодом производителя.
+            mapped_code_type = 'EAN' if unknown_code.isdigit() else 'MANUFACTURER_CODE'
+
             # Создаем сопоставление через сервис
             self.catalogs_service.create_code_mapping(
                 gtin=target_gtin,
                 mapped_code=unknown_code,
-                mapped_code_type='EAN', # или другой тип, если он известен
+                mapped_code_type=mapped_code_type,
                 client_id=self.user_info.get('client_id')
             )
             QMessageBox.information(self, "Успех", f"Сопоставление для кода '{unknown_code}' успешно создано.\nПовторяем печать...")

@@ -452,6 +452,31 @@ class CatalogsService:
                     """, (mapping_data['gtin'], mapping_data['mapped_code'], mapping_data['mapped_code_type'], mapping_data.get('client_id')))
             conn.commit()
 
+    def get_product_mappings_template(self):
+        """Возвращает шаблон для импорта сопоставлений."""
+        return pd.DataFrame(columns=['id', 'gtin', 'mapped_code', 'mapped_code_type', 'client_id'])
+
+    def process_product_mappings_import(self, df: pd.DataFrame):
+        """Обрабатывает импорт сопоставлений из DataFrame."""
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Используем ON CONFLICT для UPSERT
+                # Уникальный индекс idx_unique_mapping создан по (mapped_code, mapped_code_type, COALESCE(client_id, ''))
+                # Поэтому в ON CONFLICT нужно использовать ту же конструкцию.
+                upsert_query = """
+                    INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type, client_id)
+                    VALUES %s
+                    ON CONFLICT (mapped_code, mapped_code_type, COALESCE(client_id, '')) DO UPDATE SET
+                        gtin = EXCLUDED.gtin;
+                """
+                # Убираем столбец 'id', так как он не участвует в UPSERT
+                if 'id' in df.columns:
+                    df = df.drop(columns=['id'])
+                
+                data_tuples = [tuple(x) for x in df.to_numpy()]
+                execute_values(cur, upsert_query, data_tuples)
+            conn.commit()
+
     def delete_product_mapping(self, mapping_id: int):
         """Удаляет сопоставление по ID."""
         with self.get_db_connection() as conn:
