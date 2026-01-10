@@ -459,7 +459,7 @@ def update_client_db_schema(conn):
         # 3. Пересоздаем уникальный индекс, чтобы он корректно работал со строками
         sql.SQL("DROP INDEX IF EXISTS idx_unique_mapping;"),
         sql.SQL("""
-            CREATE UNIQUE INDEX idx_unique_mapping 
+            CREATE UNIQUE INDEX idx_unique_mapping
             ON public.product_code_mappings (mapped_code, mapped_code_type, COALESCE(client_id, ''));
         """),
         # --- НОВЫЙ БЛОК: Таблица и триггер для производственных задач ---
