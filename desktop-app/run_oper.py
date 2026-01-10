@@ -74,7 +74,7 @@ def setup_environment():
     # Формируем user_info на основе .env
     user_info = {
         "name": "OperatorMode",
-        "role": "оператор",
+        "role": "администратор", # Используем 'администратор' для доступа ко всем сервисам
         "client_db_config": {
             'id': 0, # Признак локального режима
             'db_host': os.getenv("DB_HOST"),
