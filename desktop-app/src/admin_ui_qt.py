@@ -3183,7 +3183,7 @@ class AdminWindowQt(QMainWindow):
         """Открывает диалог входа для оператора."""
         logging.info("Открытие окна входа в режим оператора.")
         
-        login_dialog = OperatorLoginWindow(self.task_service, self)
+        login_dialog = OperatorLoginWindow(self.task_service, self.user_info, self)
         
         if login_dialog.exec(): # exec() returns QDialog.Accepted on accept()
             task_info = login_dialog.get_task_info()

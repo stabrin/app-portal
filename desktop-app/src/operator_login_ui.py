@@ -14,9 +14,10 @@ class OperatorLoginWindow(QDialog):
     """
     Окно для входа оператора по сканированию кода-пропуска.
     """
-    def __init__(self, task_service: TaskService, parent=None):
+    def __init__(self, task_service: TaskService, user_info: dict, parent=None):
         super().__init__(parent)
         self.task_service = task_service
+        self.user_info = user_info
         self.task_info = None # Для хранения информации о задаче после успешного входа
         
         self.setWindowTitle("Вход для оператора")
