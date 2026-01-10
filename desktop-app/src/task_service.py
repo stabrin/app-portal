@@ -516,3 +516,24 @@ class TaskService:
                 """, (task_id,))
                 row = cur.fetchone()
                 return dict(row) if row else None
+
+    def get_gtins_for_task(self, task_id: int) -> list[dict[str, Any]]:
+        """
+        Возвращает список уникальных GTIN и их наименований для указанной задачи.
+        Используется для построения диалога сопоставления.
+        """
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Используем DISTINCT ON (gtin) чтобы получить одну запись для каждого GTIN.
+                # ORDER BY gtin, name гарантирует, что мы получим предсказуемый результат,
+                # если для одного GTIN есть несколько разных имен (хотя это маловероятно).
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (gtin) gtin, name
+                    FROM task_datamatrix_pool
+                    WHERE task_id = %s
+                    ORDER BY gtin, name;
+                    """,
+                    (task_id,)
+                )
+                return cur.fetchall()
