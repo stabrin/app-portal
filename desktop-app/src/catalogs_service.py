@@ -422,7 +422,7 @@ class CatalogsService:
                         pcm.id, pcm.gtin, pcm.mapped_code, pcm.mapped_code_type, pcm.client_id,
                         ac.name as client_name
                     FROM product_code_mappings pcm
-                    LEFT JOIN ap_clients ac ON pcm.client_id = ac.id
+                    LEFT JOIN ap_clients ac ON pcm.client_id = ('local_' || ac.id::text)
                     ORDER BY pcm.gtin, pcm.mapped_code;
                 """)
                 return cur.fetchall()
