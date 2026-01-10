@@ -1,7 +1,7 @@
 # desktop-app/src/operator_work_ui.py
 # Окно оператора с меню и основным полем.
 import logging
-from PySide6.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QMessageBox, QSplitter, QTreeWidget, QTreeWidgetItem, QStackedWidget, QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QGroupBox, QFormLayout, QListWidget, QSpinBox, QDateEdit
+from PySide6.QtWidgets import QMainWindow, QLabel, QVBoxLayout, QWidget, QPushButton, QMessageBox, QSplitter, QTreeWidget, QTreeWidgetItem, QStackedWidget, QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QGroupBox, QFormLayout, QListWidget, QSpinBox, QDateEdit, QInputDialog
 from PySide6.QtCore import Qt, QDate
 from PySide6.QtPrintSupport import QPrinterInfo
 from PySide6.QtGui import QPixmap, QImage
@@ -138,15 +138,64 @@ class OperatorWorkWindow(QMainWindow):
         if not scanned_code:
             QMessageBox.warning(self, "Ошибка", "Отсканируйте код товара.")
             return
-            
-        # Здесь будет логика поиска GTIN через catalogs_service
-        # ...
-        
-        QMessageBox.information(self, "В разработке", f"Запущен поиск для кода: {scanned_code}")
 
-    def _show_create_mapping_dialog(self, unknown_code):
+        try:
+            # Шаги 1-3: Попытаться найти GTIN по любому известному коду
+            gtin_info = self.catalogs_service.find_gtin_by_any_code(scanned_code)
+
+            if gtin_info and gtin_info.get('gtin'):
+                # Шаг 4: GTIN найден, запускаем печать
+                gtin = gtin_info['gtin']
+                QMessageBox.information(self, "В разработке", f"Найден GTIN: {gtin} для кода: {scanned_code}. Запускаем печать...")
+                # Здесь будет логика печати из шага 6 плана
+            else:
+                # Шаг 5: GTIN не найден, предлагаем создать сопоставление
+                self._show_create_mapping_dialog(scanned_code)
+
+        except Exception as e:
+            logging.error(f"Ошибка при поиске GTIN для кода '{scanned_code}': {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Произошла ошибка при поиске товара: {e}")
+
+    def _show_create_mapping_dialog(self, unknown_code: str):
         """Показывает диалог для создания нового сопоставления."""
-        QMessageBox.information(self, "В разработке", f"Здесь будет диалог создания сопоставления для кода: {unknown_code}")
+        try:
+            # Получаем список GTIN, доступных в этом задании
+            task_gtins = self.task_service.get_gtins_for_task(self.task_info['task_id'])
+            if not task_gtins:
+                QMessageBox.warning(self, "Ошибка", "В данном задании нет доступных товаров (GTIN) для сопоставления.")
+                return
+
+            # Формируем список для выбора
+            items = [f"{g['gtin']} - {g.get('name', 'Без названия')}" for g in task_gtins]
+            
+            item, ok = QInputDialog.getItem(self, "Создать сопоставление",
+                                            f"Код '{unknown_code}' не найден.\nВыберите товар из задания, которому он соответствует:",
+                                            items, 0, False)
+
+            if ok and item:
+                # Извлекаем GTIN из выбранной строки
+                selected_gtin = item.split(" - ")[0]
+                self._create_mapping_and_retry_print(unknown_code, selected_gtin)
+
+        except Exception as e:
+            logging.error(f"Ошибка при создании диалога сопоставления: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть диалог создания сопоставления: {e}")
+
+    def _create_mapping_and_retry_print(self, unknown_code: str, target_gtin: str):
+        """Создает сопоставление и повторяет попытку печати."""
+        try:
+            # Создаем сопоставление через сервис
+            self.catalogs_service.create_code_mapping(
+                gtin=target_gtin,
+                mapped_code=unknown_code,
+                mapped_code_type='EAN' # или другой тип, если он известен
+            )
+            QMessageBox.information(self, "Успех", f"Сопоставление для кода '{unknown_code}' успешно создано.\nПовторяем печать...")
+            # Повторяем исходное действие
+            self._find_gtin_and_print()
+        except Exception as e:
+            logging.error(f"Ошибка при создании сопоставления: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать сопоставление: {e}")
 
     def _build_equipment_page(self, page):
         """Строит страницу проверки оборудования."""
