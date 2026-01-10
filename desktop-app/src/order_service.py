@@ -341,23 +341,73 @@ class OrderService:
                 order_info = cur.fetchone()
                 
                 query = """
-                    WITH RECURSIVE base_data AS (
-                        SELECT i.datamatrix, i.gtin, i.package_id, p.name AS product_name, p.description_1, p.description_2, p.description_3
-                        FROM items i LEFT JOIN products p ON i.gtin = p.gtin
-                        WHERE i.order_id = %(order_id)s
-                    ), package_hierarchy AS (
-                        SELECT p.id as base_box_id, p.id as package_id, p.level, p.sscc, p.parent_id
-                        FROM packages p WHERE p.level = 1 AND p.id IN (SELECT DISTINCT package_id FROM base_data WHERE package_id IS NOT NULL)
-                        UNION ALL
-                        SELECT ph.base_box_id, p_parent.id as package_id, p_parent.level, p_parent.sscc, p_parent.parent_id
-                        FROM package_hierarchy ph JOIN packages p_parent ON ph.parent_id = p_parent.id
-                    ), sscc_data AS (
-                        SELECT base_box_id AS id_level_1, MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1, MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2, MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
-                        FROM package_hierarchy GROUP BY base_box_id
-                    )
-                    SELECT b.datamatrix, b.gtin, SUBSTRING(b.datamatrix for 24) AS dm_part_24, SUBSTRING(b.datamatrix for 31) AS dm_part_31, s.sscc_level_1, s.sscc_level_2, s.sscc_level_3, b.product_name, b.description_1, b.description_2, b.description_3
-                    FROM base_data b LEFT JOIN sscc_data s ON b.package_id = s.id_level_1 ORDER BY b.datamatrix;
-                """
+                        WITH RECURSIVE base_data AS (
+                            SELECT 
+                                i.datamatrix, 
+                                REPLACE(i.datamatrix, CHR(29), '') AS cleaned_datamatrix, 
+                                i.gtin, 
+                                i.package_id, 
+                                p.name AS product_name, 
+                                p.description_1, 
+                                p.description_2, 
+                                p.description_3
+                            FROM items i LEFT JOIN products p ON i.gtin = p.gtin
+                            WHERE i.order_id = %(order_id)s
+                        ),
+                        package_hierarchy AS (
+                            SELECT 
+                                p.id as base_box_id, 
+                                p.id as package_id, 
+                                p.level, 
+                                p.sscc, 
+                                p.parent_id
+                            FROM packages p WHERE p.level = 1 AND p.id IN (SELECT DISTINCT package_id FROM base_data WHERE package_id IS NOT NULL)
+                            UNION ALL
+                            SELECT 
+                                ph.base_box_id, 
+                                p_parent.id as package_id, 
+                                p_parent.level, 
+                                p_parent.sscc, 
+                                p_parent.parent_id
+                            FROM package_hierarchy ph JOIN packages p_parent ON ph.parent_id = p_parent.id
+                        ),
+                        sscc_data AS (
+                            SELECT 
+                                base_box_id AS id_level_1, 
+                                MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1, 
+                                MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2, 
+                                MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
+                            FROM package_hierarchy GROUP BY base_box_id
+                        ),
+                        delta_parsed_codes AS (
+                            SELECT
+                                dr.order_id,
+                                (jsonb_array_elements(dr.codes_json->'include')->>'code') AS delta_datamatrix_raw,
+                                REPLACE((jsonb_array_elements(dr.codes_json->'include')->>'code'), CHR(29), '') AS delta_datamatrix_cleaned,
+                                (dr.codes_json->'attributes'->>'production_date') AS production_date,
+                                (dr.codes_json->'attributes'->>'expiration_date') AS expiration_date
+                            FROM delta_result dr
+                            WHERE dr.order_id = %(order_id)s
+                        )
+                        SELECT 
+                            b.datamatrix, 
+                            b.gtin, 
+                            SUBSTRING(b.datamatrix for 24) AS dm_part_24, 
+                            SUBSTRING(b.datamatrix for 31) AS dm_part_31, 
+                            s.sscc_level_1, 
+                            s.sscc_level_2, 
+                            s.sscc_level_3, 
+                            b.product_name, 
+                            b.description_1, 
+                            b.description_2, 
+                            b.description_3,
+                            dp.production_date,
+                            dp.expiration_date
+                        FROM base_data b 
+                        LEFT JOIN sscc_data s ON b.package_id = s.id_level_1 
+                        LEFT JOIN delta_parsed_codes dp ON b.cleaned_datamatrix = dp.delta_datamatrix_cleaned
+                        ORDER BY b.datamatrix;
+                        """
                 cur.execute(query, {'order_id': order_id})
                 report_data = cur.fetchall()
         
