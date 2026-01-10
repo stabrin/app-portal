@@ -31,11 +31,15 @@ class OperatorLoginWindow(QDialog):
         # 1. Поле для ФИО
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("Введите или отсканируйте ФИО")
+        # --- ДЛЯ РАЗРАБОТКИ: Значение по умолчанию ---
+        self.name_input.setText("Тест")
         form_layout.addRow("ФИО Оператора:", self.name_input)
 
         # 2. Поле для рабочего места
         self.workstation_input = QLineEdit()
         self.workstation_input.setPlaceholderText("Отсканируйте код рабочего места")
+        # --- ДЛЯ РАЗРАБОТКИ: Значение по умолчанию ---
+        self.workstation_input.setText("A43aa946-cb6c-4033-8e62-15ec44c8e3e5")
         form_layout.addRow("Рабочее место:", self.workstation_input)
 
         # 3. Поле для кода-пропуска
@@ -44,6 +48,8 @@ class OperatorLoginWindow(QDialog):
         # Подсказка системе ввода, что здесь предпочтительна латиница
         self.access_code_input.setInputMethodHints(Qt.ImhNoPredictiveText | Qt.ImhLatinOnly)
         form_layout.addRow("Код-пропуск:", self.access_code_input)
+        # --- ДЛЯ РАЗРАБОТКИ: Значение по умолчанию ---
+        self.access_code_input.setText("LH1VLPVB")
         
         layout.addLayout(form_layout)
 
