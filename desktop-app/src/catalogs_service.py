@@ -495,7 +495,7 @@ class CatalogsService:
         logger.info(f"Код '{code}' не найден ни в справочнике товаров, ни в сопоставлениях.")
         return None
 
-    def create_code_mapping(self, gtin: str, mapped_code: str, mapped_code_type: str, client_id: Optional[int] = None):
+    def create_code_mapping(self, gtin: str, mapped_code: str, mapped_code_type: str, client_id: Optional[str] = None):
         """Создает новую запись в таблице сопоставлений кодов."""
         log_msg = f"Создание сопоставления: '{mapped_code}' ({mapped_code_type}) -> '{gtin}'"
         if client_id:

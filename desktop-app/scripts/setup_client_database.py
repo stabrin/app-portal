@@ -441,25 +441,26 @@ def update_client_db_schema(conn):
         sql.SQL("""
             CREATE TABLE IF NOT EXISTS public.product_code_mappings (
                 id SERIAL PRIMARY KEY,
-                gtin VARCHAR(14) NOT NULL,
+                gtin VARCHAR(14) NOT NULL REFERENCES public.products(gtin) ON DELETE CASCADE,
                 mapped_code VARCHAR(255) NOT NULL,
                 mapped_code_type VARCHAR(50) NOT NULL,
-                client_id INTEGER,
-                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                CONSTRAINT fk_product_gtin
-                    FOREIGN KEY(gtin) 
-                    REFERENCES public.products(gtin)
-                    ON DELETE CASCADE,
-                CONSTRAINT fk_client
-                    FOREIGN KEY(client_id) 
-                    REFERENCES public.ap_clients(id)
-                    ON DELETE SET NULL
+                client_id VARCHAR(255), -- Изменен тип на VARCHAR
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """),
+        # --- ИЗМЕНЕНИЯ ДЛЯ client_id ---
+        # 1. Удаляем старый внешний ключ, если он существует (для обратной совместимости)
+        sql.SQL("ALTER TABLE public.product_code_mappings DROP CONSTRAINT IF EXISTS fk_client;"),
+        # 2. Меняем тип колонки на VARCHAR
+        sql.SQL("ALTER TABLE public.product_code_mappings ALTER COLUMN client_id TYPE VARCHAR(255);"),
+        
         sql.SQL("COMMENT ON TABLE public.product_code_mappings IS 'Таблица для сопоставления российских GTIN с альтернативными кодами (EAN, код производителя).';"),
+        
+        # 3. Пересоздаем уникальный индекс, чтобы он корректно работал со строками
+        sql.SQL("DROP INDEX IF EXISTS idx_unique_mapping;"),
         sql.SQL("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_mapping 
-            ON public.product_code_mappings (mapped_code, mapped_code_type, COALESCE(client_id, -1));
+            CREATE UNIQUE INDEX idx_unique_mapping 
+            ON public.product_code_mappings (mapped_code, mapped_code_type, COALESCE(client_id, ''));
         """),
         # --- НОВЫЙ БЛОК: Таблица и триггер для производственных задач ---
         sql.SQL("""

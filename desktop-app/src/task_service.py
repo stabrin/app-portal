@@ -106,7 +106,11 @@ class TaskService:
                             pt.settings_json,
                             o.id AS order_id,
                             o.client_name,
-                            COALESCE(o.client_api_id, o.client_local_id) as client_id
+                            CASE
+                                WHEN o.client_api_id IS NOT NULL THEN 'api_' || o.client_api_id::text
+                                WHEN o.client_local_id IS NOT NULL THEN 'local_' || o.client_local_id::text
+                                ELSE NULL
+                            END as client_id
                         FROM
                             production_tasks pt
                         JOIN
