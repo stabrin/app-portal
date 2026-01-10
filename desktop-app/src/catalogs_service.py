@@ -6,7 +6,7 @@ import psycopg2
 import pandas as pd
 from psycopg2.extras import RealDictCursor, execute_values
 from .api_service import ApiService
-
+from typing import Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 class CatalogsService:
@@ -459,6 +459,48 @@ class CatalogsService:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM product_code_mappings WHERE id = %s", (mapping_id,))
             conn.commit()
+            
+    def find_gtin_by_any_code(self, code: str) -> Optional[Dict[str, Any]]:
+        """
+        Ищет товар по любому коду (GTIN, EAN и т.д.).
+        1. Ищет в `products.gtin`.
+        2. Если не найден, ищет в `product_code_mappings.mapped_code`.
+        Возвращает словарь с информацией о товаре или None.
+        """
+        logger.info(f"Поиск товара по коду: '{code}'")
+        with self.get_db_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Шаг 1: Попытаться найти код напрямую в `products`
+                cur.execute("""
+                    SELECT gtin, name, description_1, description_2, description_3 
+                    FROM products 
+                    WHERE gtin = %s
+                """, (code,))
+                product_info = cur.fetchone()
+                if product_info:
+                    logger.info(f"Код '{code}' найден напрямую в справочнике товаров (products.gtin).")
+                    return dict(product_info)
+
+                # Шаг 2: Если не найден, выполнить поиск в `product_code_mappings`
+                cur.execute("SELECT gtin FROM product_code_mappings WHERE mapped_code = %s", (code,))
+                mapping_info = cur.fetchone()
+                if mapping_info and mapping_info['gtin']:
+                    gtin_from_mapping = mapping_info['gtin']
+                    logger.info(f"Код '{code}' найден в сопоставлениях. Соответствующий GTIN: {gtin_from_mapping}.")
+                    # Шаг 3: Получить информацию о товаре по найденному GTIN
+                    cur.execute("SELECT gtin, name, description_1, description_2, description_3 FROM products WHERE gtin = %s", (gtin_from_mapping,))
+                    product_info_from_mapping = cur.fetchone()
+                    return dict(product_info_from_mapping) if product_info_from_mapping else None
+
+        logger.info(f"Код '{code}' не найден ни в справочнике товаров, ни в сопоставлениях.")
+        return None
+
+    def create_code_mapping(self, gtin: str, mapped_code: str, mapped_code_type: str):
+        """Создает новую запись в таблице сопоставлений кодов."""
+        logger.info(f"Создание сопоставления: '{mapped_code}' ({mapped_code_type}) -> '{gtin}'")
+        with self.get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type) VALUES (%s, %s, %s)", (gtin, mapped_code, mapped_code_type))
 
     # --- КОНЕЦ НОВОГО БЛОКА ---
 
