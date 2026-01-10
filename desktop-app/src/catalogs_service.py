@@ -501,6 +501,7 @@ class CatalogsService:
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute("INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type) VALUES (%s, %s, %s)", (gtin, mapped_code, mapped_code_type))
+            conn.commit()
 
     # --- КОНЕЦ НОВОГО БЛОКА ---
 
