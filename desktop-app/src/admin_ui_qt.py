@@ -5034,6 +5034,9 @@ class AdminWindowQt(QMainWindow):
                 # Для выгрузки используем client_id, а не client_name
                 full_mappings = [self.catalogs_service.get_mapping_by_id(m['id']) for m in mappings]
                 df = pd.DataFrame(full_mappings)
+                # --- ИСПРАВЛЕНИЕ: Исключаем колонку с датой, которая вызывает ошибку ---
+                if 'created_at' in df.columns:
+                    df = df.drop(columns=['created_at'])
 
             filepath, _ = QFileDialog.getSaveFileName(self, "Выгрузка: Сопоставления кодов", "product_mappings.xlsx", "Excel Files (*.xlsx)")
             if filepath:
