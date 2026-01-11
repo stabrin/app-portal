@@ -100,21 +100,24 @@ class TaskService:
                     cur.execute(
                         """
                         SELECT
-                            pt.id AS task_id,
-                            pt.task_type,
-                            pt.status,
-                            pt.settings_json,
-                            o.id AS order_id,
-                            o.client_name,
-                            -- --- ИЗМЕНЕНИЕ: Возвращаем числовой ID клиента ---
-                            COALESCE(o.client_api_id, o.client_local_id) as client_id
-                        FROM
-                            production_tasks pt
-                        JOIN
-                            orders o ON pt.order_id = o.id
-                        WHERE
-                            pt.id = %s
-                        """,
+                           pt.id AS task_id,
+                           pt.task_type,
+                           pt.status,
+                           pt.settings_json,
+                           o.id AS order_id,
+                           o.client_name,
+                           CASE
+                                WHEN o.client_api_id IS NOT NULL THEN 'api_' || o.client_api_id::text || '_' || o.client_name
+                                WHEN o.client_local_id IS NOT NULL THEN 'local_' || o.client_local_id::text || '_' || o.client_name
+                               ELSE NULL
+                           END as client_id
+                       FROM
+                           production_tasks pt
+                       JOIN
+                           orders o ON pt.order_id = o.id
+                       WHERE
+                           pt.id = %s
+                       """,
                         (task_id,)
                     )
                     task_info = cur.fetchone()
