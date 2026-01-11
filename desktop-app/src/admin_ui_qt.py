@@ -6868,7 +6868,9 @@ class ProductMappingEditorDialog(QDialog):
             'gtin': self.gtin_edit.text().strip(),
             'mapped_code': self.mapped_code_edit.text().strip(),
             'mapped_code_type': self.code_type_combo.currentText(),
-            'client_id': self.client_combo.currentData()
+            # --- ИЗМЕНЕНИЕ: Сохраняем текстовое представление клиента, а не ID ---
+            # Если выбрано "Глобальное сопоставление", сохраняем NULL (None).
+            'client_id': self.client_combo.currentText() if self.client_combo.currentData() is not None else None
         }
 
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
