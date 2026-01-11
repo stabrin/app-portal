@@ -63,38 +63,36 @@ def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedCo
     if pool_key not in client_db_pools:
         logging.info(f"Пул для клиента (ключ: {pool_key}) не найден. Создаю...")
         conn_params = None
-        is_local_mode = not isinstance(pool_key, int)
         logging.debug(f"get_client_pool: db_config = {{{', '.join(f'{k}: {v}' for k,v in (db_config or {}).items() if k != 'db_password')}}}")
 
         # 1. Попытка с внешним адресом (SSL)
-        if not is_local_mode:
-            try:
-                ext_params = {
-                    'host': db_config.get('db_host'), 
-                    'port': db_config.get('db_port'), 
-                    'dbname': db_config.get('db_name'),
-                    'user': db_config.get('db_user'), 
-                    'password': db_config.get('db_password'), 
-                    'connect_timeout': 3
-                }
-                # Проверяем обязательные поля (без пустых значений)
-                required = ['host', 'port', 'dbname', 'user', 'password']
-                if all(ext_params.get(k) for k in required):
-                    logging.debug(f"get_client_pool: Попытка подключения по внешнему адресу {ext_params['host']}:{ext_params['port']}")
-                    with _attempt_db_connection(ext_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
-                        if conn:
-                            logging.info(f"get_client_pool: Успешное подключение по внешнему адресу с SSL")
-                            cert_path = _get_cert_path(db_config.get('db_ssl_cert'))
-                            if cert_path:
-                                conn_params = {**ext_params, 'sslmode': 'verify-full', 'sslrootcert': cert_path}
-                            else:
-                                conn_params = {**ext_params, 'sslmode': 'disable'}
-                else:
-                    missing = [k for k in required if not ext_params.get(k)]
-                    logging.debug(f"get_client_pool: Пропуск внешнего подключения — отсутствуют поля {missing}")
-            except Exception as e:
-                log_params = {k: v for k, v in ext_params.items() if k != 'password'}
-                logging.warning(f"get_client_pool: Попытка подключения по внешнему адресу не удалась. Параметры: {log_params}. Ошибка: {e}")
+        try:
+            ext_params = {
+                'host': db_config.get('db_host'), 
+                'port': db_config.get('db_port'), 
+                'dbname': db_config.get('db_name'),
+                'user': db_config.get('db_user'), 
+                'password': db_config.get('db_password'), 
+                'connect_timeout': 3
+            }
+            # Проверяем обязательные поля (без пустых значений)
+            required = ['host', 'port', 'dbname', 'user', 'password']
+            if all(ext_params.get(k) for k in required):
+                logging.debug(f"get_client_pool: Попытка подключения по внешнему адресу {ext_params['host']}:{ext_params['port']}")
+                with _attempt_db_connection(ext_params, db_config.get('db_ssl_cert'), 'verify-full') as conn:
+                    if conn:
+                        logging.info(f"get_client_pool: Успешное подключение по внешнему адресу с SSL")
+                        cert_path = _get_cert_path(db_config.get('db_ssl_cert'))
+                        if cert_path:
+                            conn_params = {**ext_params, 'sslmode': 'verify-full', 'sslrootcert': cert_path}
+                        else:
+                            conn_params = {**ext_params, 'sslmode': 'disable'}
+            else:
+                missing = [k for k in required if not ext_params.get(k)]
+                logging.debug(f"get_client_pool: Пропуск внешнего подключения — отсутствуют поля {missing}")
+        except Exception as e:
+            log_params = {k: v for k, v in ext_params.items() if k != 'password'}
+            logging.warning(f"get_client_pool: Попытка подключения по внешнему адресу не удалась. Параметры: {log_params}. Ошибка: {e}")
 
         # 2. Попытка с внутренним адресом (без SSL)
         if not conn_params:
@@ -124,7 +122,7 @@ def get_client_pool(pool_key: Any, db_config: Dict[str, Any]) -> pool.ThreadedCo
                 logging.warning(f"get_client_pool: Попытка подключения по внутреннему адресу не удалась. Параметры: {log_params}. Ошибка: {e}")
 
         if not conn_params:
-            logging.error(f"get_client_pool: Ни одна попытка подключения не удалась. pool_key={pool_key}, is_local_mode={is_local_mode}")
+            logging.error(f"get_client_pool: Ни одна попытка подключения не удалась. pool_key={pool_key}")
             raise ConnectionError(f"Не удалось создать пул для клиента {pool_key}")
 
         try:
