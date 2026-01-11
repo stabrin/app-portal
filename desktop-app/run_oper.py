@@ -75,8 +75,8 @@ def setup_environment():
     user_info = {
         "name": "OperatorMode",
         "role": "администратор", # Используем 'администратор' для доступа ко всем сервисам
+        "client_id": os.getenv("CLIENT_ID"), # Явно читаем ID клиента из .env
         "client_db_config": {
-            'id': 0, # Признак локального режима
             'db_host': os.getenv("DB_HOST"),
             'db_port': os.getenv("DB_PORT"),
             'db_name': os.getenv("DB_NAME"),
@@ -87,6 +87,12 @@ def setup_environment():
             'local_server_port': os.getenv("LOCAL_SERVER_PORT")
         }
     }
+
+    # Добавляем ID клиента и в client_db_config, так как он используется в db_connector
+    if user_info["client_id"] is not None:
+        user_info["client_db_config"]["id"] = int(user_info["client_id"])
+    else:
+        user_info["client_db_config"]["id"] = 0 # Режим по умолчанию, если ID не указан
 
     # Проверяем, что все необходимые параметры загружены
     required_params = ['db_host', 'db_port', 'db_name', 'db_user', 'db_password']
