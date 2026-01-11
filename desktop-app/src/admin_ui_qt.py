@@ -6783,6 +6783,77 @@ class AdminWindowQt(QMainWindow):
         dialog = SessionManagementDialog(self.task_service, self)
         dialog.exec()
 
+# --- НОВЫЙ КЛАСС: Диалог для сопоставления кодов ---
+class ProductMappingEditorDialog(QDialog):
+    """Диалог для создания и редактирования сопоставлений кодов товаров."""
+    def __init__(self, parent, catalogs_service, mapping_data=None):
+        super().__init__(parent)
+        self.catalogs_service = catalogs_service
+        self.mapping_data = mapping_data or {}
+        self.setWindowTitle("Редактор сопоставления кодов")
+        self.setMinimumWidth(450)
+
+        self._build_ui()
+        self._load_data()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        form_layout = QFormLayout()
+
+        self.gtin_edit = QLineEdit()
+        self.mapped_code_edit = QLineEdit()
+        self.code_type_combo = QComboBox()
+        self.client_combo = QComboBox()
+
+        # Заполняем типы кодов
+        self.code_type_combo.addItems(['EAN', 'MANUFACTURER_CODE', 'OTHER'])
+
+        form_layout.addRow("Российский GTIN:", self.gtin_edit)
+        form_layout.addRow("Сопоставляемый код:", self.mapped_code_edit)
+        form_layout.addRow("Тип кода:", self.code_type_combo)
+        form_layout.addRow("Клиент (необязательно):", self.client_combo)
+
+        layout.addLayout(form_layout)
+
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _load_data(self):
+        # Загрузка клиентов
+        self.client_combo.addItem("Глобальное сопоставление", userData=None) # Опция для client_id = NULL
+        try:
+            clients = self.catalogs_service.get_local_clients()
+            for client in clients:
+                self.client_combo.addItem(client['name'], userData=client['id'])
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить список клиентов: {e}")
+
+        # Заполнение полей, если это редактирование
+        if self.mapping_data:
+            self.gtin_edit.setText(self.mapping_data.get('gtin', ''))
+            self.mapped_code_edit.setText(self.mapping_data.get('mapped_code', ''))
+            self.code_type_combo.setCurrentText(self.mapping_data.get('mapped_code_type', 'EAN'))
+            
+            client_id_to_select = self.mapping_data.get('client_id')
+            if client_id_to_select is None:
+                self.client_combo.setCurrentIndex(0) # "Глобальное сопоставление"
+            else:
+                index = self.client_combo.findData(client_id_to_select)
+                if index != -1:
+                    self.client_combo.setCurrentIndex(index)
+
+    def get_data(self):
+        """Возвращает данные из формы в виде словаря."""
+        return {
+            'id': self.mapping_data.get('id'),
+            'gtin': self.gtin_edit.text().strip(),
+            'mapped_code': self.mapped_code_edit.text().strip(),
+            'mapped_code_type': self.code_type_combo.currentText(),
+            'client_id': self.client_combo.currentData()
+        }
+
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
 class NotificationEditorDialog(QDialog):
     def __init__(self, parent, user_info):
