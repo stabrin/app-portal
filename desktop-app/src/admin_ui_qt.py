@@ -6822,12 +6822,26 @@ class ProductMappingEditorDialog(QDialog):
 
     def _load_data(self):
         # Загрузка клиентов
-        self.client_combo.addItem("Глобальное сопоставление", userData=None) # Опция для client_id = NULL
+        self.client_combo.addItem("Глобальное сопоставление", userData=None)  # Опция для client_id = NULL
         try:
-            clients = self.catalogs_service.get_local_clients()
-            for client in clients:
-                self.client_combo.addItem(client['name'], userData=client['id'])
+            # --- ИЗМЕНЕНИЕ: Загружаем оба типа клиентов и форматируем их ---
+            # 1. Локальные клиенты
+            local_clients = self.catalogs_service.get_local_clients()
+            for client in local_clients:
+                display_name = f"local_{client['id']}_{client['name']}"
+                # В userData сохраняем только ID, как и раньше
+                self.client_combo.addItem(display_name, userData=client['id'])
+
+            # 2. Клиенты из API
+            api_clients = self.catalogs_service.get_participants_catalog()
+            for client in api_clients:
+                # Пропускаем, если у клиента нет ID или имени
+                if not client.get('id') or not client.get('name'):
+                    continue
+                display_name = f"api_{client['id']}_{client['name']}"
+                self.client_combo.addItem(display_name, userData=client['id'])
         except Exception as e:
+            logging.error(f"Ошибка при загрузке клиентов в ProductMappingEditorDialog: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить список клиентов: {e}")
 
         # Заполнение полей, если это редактирование
