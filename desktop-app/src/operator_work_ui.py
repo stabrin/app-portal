@@ -143,8 +143,12 @@ class OperatorWorkWindow(QMainWindow):
             return
 
         try:
-            # Шаги 1-3: Попытаться найти GTIN по любому известному коду
-            gtin_info = self.catalogs_service.find_gtin_by_any_code(scanned_code)
+            # --- ИСПРАВЛЕНИЕ: Передаем client_id для корректного поиска ---
+            # Теперь поиск в сопоставлениях будет учитывать клиента.
+            gtin_info = self.catalogs_service.find_gtin_by_any_code(
+                code=scanned_code,
+                client_id=self.user_info.get('client_id')
+            )
 
             if gtin_info and gtin_info.get('gtin'):
                 # Шаг 4: GTIN найден, запускаем печать

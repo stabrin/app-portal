@@ -485,13 +485,14 @@ class CatalogsService:
             conn.commit()
             
     def find_gtin_by_any_code(self, code: str) -> Optional[Dict[str, Any]]:
+    def find_gtin_by_any_code(self, code: str, client_id: Optional[Any] = None) -> Optional[Dict[str, Any]]:
         """
-        Ищет товар по любому коду (GTIN, EAN и т.д.).
-        1. Ищет в `products.gtin`.
-        2. Если не найден, ищет в `product_code_mappings.mapped_code`.
-        Возвращает словарь с информацией о товаре или None.
+        Ищет товар по любому коду (GTIN, EAN и т.д.), учитывая приоритет клиента.
+        1. Ищет в `products.gtin` (прямое совпадение).
+        2. Если не найден, ищет в `product_code_mappings` сначала для конкретного `client_id`,
+           а затем глобальное сопоставление (где client_id IS NULL).
         """
-        logger.info(f"Поиск товара по коду: '{code}'")
+        logger.info(f"Поиск товара по коду: '{code}' для клиента ID: {client_id}")
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 # Шаг 1: Попытаться найти код напрямую в `products`
@@ -506,8 +507,18 @@ class CatalogsService:
                     return dict(product_info)
 
                 # Шаг 2: Если не найден, выполнить поиск в `product_code_mappings`
-                cur.execute("SELECT gtin FROM product_code_mappings WHERE mapped_code = %s", (code,))
+                # --- ИСПРАВЛЕНИЕ: Добавляем поиск с учетом client_id и глобальных сопоставлений ---
+                # Сортируем так, чтобы сопоставление для конкретного клиента имело приоритет
+                # над глобальным (client_id IS NULL).
+                cur.execute("""
+                    SELECT gtin FROM product_code_mappings 
+                    WHERE mapped_code = %s AND (client_id = %s OR client_id IS NULL)
+                    ORDER BY client_id DESC NULLS LAST
+                    LIMIT 1
+                """, (code, client_id))
                 mapping_info = cur.fetchone()
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
                 if mapping_info and mapping_info['gtin']:
                     gtin_from_mapping = mapping_info['gtin']
                     logger.info(f"Код '{code}' найден в сопоставлениях. Соответствующий GTIN: {gtin_from_mapping}.")
