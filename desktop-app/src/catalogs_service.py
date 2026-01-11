@@ -484,7 +484,6 @@ class CatalogsService:
                 cur.execute("DELETE FROM product_code_mappings WHERE id = %s", (mapping_id,))
             conn.commit()
             
-    def find_gtin_by_any_code(self, code: str) -> Optional[Dict[str, Any]]:
     def find_gtin_by_any_code(self, code: str, client_id: Optional[Any] = None) -> Optional[Dict[str, Any]]:
         """
         Ищет товар по любому коду (GTIN, EAN и т.д.), учитывая приоритет клиента.
