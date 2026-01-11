@@ -5088,9 +5088,12 @@ class AdminWindowQt(QMainWindow):
 
         mapping_id = int(self.product_mappings_table.item(sel_row, 0).text())
         try:
-            # Получаем полные данные для редактирования
+            # --- ИСПРАВЛЕНИЕ: Получаем полные данные из БД перед редактированием ---
+            # Это гарантирует, что client_id будет числом, а не строкой.
             mapping_data = self.catalogs_service.get_mapping_by_id(mapping_id)
-            dialog = ProductMappingEditorDialog(self, self.catalogs_service, mapping_data)
+            if not mapping_data:
+                raise ValueError(f"Сопоставление с ID {mapping_id} не найдено.")
+            dialog = ProductMappingEditorDialog(self, self.catalogs_service, mapping_data) # Передаем полные данные
             if dialog.exec():
                 data = dialog.get_data()
                 self.catalogs_service.upsert_product_mapping(data)
