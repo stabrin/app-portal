@@ -94,11 +94,13 @@ class OperatorLoginWindow(QDialog):
                 logging.info(f"Успешный вход для сотрудника #{task_info['employee_id']} в задачу #{task_info['task_id']}")
                 self.task_info = task_info
                 self.task_info['operator_name'] = operator_name  # Добавляем ФИО в результат для UI
-
-                # --- ИСПРАВЛЕНИЕ: Сохраняем client_id в user_info, который будет передан дальше ---
+                
+                # --- КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: Сохраняем client_id, полученный от сервиса, в user_info ---
                 client_id_from_task = task_info.get('client_id')
                 if client_id_from_task:
                     self.user_info['client_id'] = client_id_from_task
+                    # Также обновляем конфиг для будущих подключений
+                    self.user_info['client_db_config']['id'] = client_id_from_task
                 self.accept() # Закрываем диалог с успешным результатом
 
             else:
