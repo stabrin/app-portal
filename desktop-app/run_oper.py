@@ -71,18 +71,26 @@ def setup_environment():
     load_dotenv(dotenv_path=dotenv_path)
     logging.info(f".env файл загружен из {dotenv_path}")
 
+    # --- ИСПРАВЛЕНИЕ: Читаем путь к сертификату и загружаем его содержимое ---
+    ssl_cert_content = None
+    cert_path_from_env = os.getenv("DB_SSL_CERT_PATH")
+    if cert_path_from_env:
+        # Используем project_root для построения абсолютного пути от корня проекта
+        absolute_cert_path = os.path.join(project_root, cert_path_from_env)
+        if os.path.exists(absolute_cert_path):
+            with open(absolute_cert_path, 'r', encoding='utf-8') as f:
+                ssl_cert_content = f.read()
+            logging.info(f"SSL-сертификат успешно загружен из {absolute_cert_path}")
+        else:
+            logging.warning(f"Файл SSL-сертификата не найден по пути: {absolute_cert_path}")
+
     # Формируем user_info на основе .env
     user_info = {
         "name": "OperatorMode",
         "role": "администратор", # Используем 'администратор' для доступа ко всем сервисам
         "client_id": None, # ID клиента будет определен после входа
         "client_db_config": {
-            'db_host': os.getenv("DB_HOST"),
-            'db_port': os.getenv("DB_PORT"),
-            'db_name': os.getenv("DB_NAME"),
-            'db_user': os.getenv("DB_USER"),
-            'db_password': os.getenv("DB_PASSWORD"),
-            'db_ssl_cert': os.getenv("DB_SSL_CERT"),
+            'db_host': os.getenv("DB_HOST"), 'db_port': os.getenv("DB_PORT"), 'db_name': os.getenv("DB_NAME"), 'db_user': os.getenv("DB_USER"), 'db_password': os.getenv("DB_PASSWORD"), 'db_ssl_cert': ssl_cert_content, # Передаем содержимое сертификата
             'local_server_address': os.getenv("LOCAL_SERVER_ADDRESS"),
             'local_server_port': os.getenv("LOCAL_SERVER_PORT")
         }
