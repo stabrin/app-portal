@@ -519,7 +519,7 @@ class CatalogsService:
                          client_id IS NULL)
                     ORDER BY client_id DESC NULLS LAST
                     LIMIT 1
-                """, (code, client_id))
+                """, (code, client_id, client_id))
                 mapping_info = cur.fetchone()
                 # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 
