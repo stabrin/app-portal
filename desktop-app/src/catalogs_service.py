@@ -492,6 +492,16 @@ class CatalogsService:
            а затем глобальное сопоставление (где client_id IS NULL).
         """
         logger.info(f"Поиск товара по коду: '{code}' для клиента ID: {client_id}")
+
+        # --- НОВАЯ ЛОГИКА: Извлекаем числовой ID из составной строки ---
+        numeric_client_id = None
+        if isinstance(client_id, str) and ('api_' in client_id or 'local_' in client_id):
+            parts = client_id.split('_')
+            if len(parts) > 1 and parts[1].isdigit():
+                numeric_client_id = int(parts[1])
+        elif isinstance(client_id, int):
+            numeric_client_id = client_id
+
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 # Шаг 1: Попытаться найти код напрямую в `products`
@@ -519,7 +529,7 @@ class CatalogsService:
                          client_id IS NULL)
                     ORDER BY client_id DESC NULLS LAST
                     LIMIT 1
-                """, (code, client_id, client_id))
+                """, (code, numeric_client_id, numeric_client_id))
                 mapping_info = cur.fetchone()
                 # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
 

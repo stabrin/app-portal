@@ -106,8 +106,12 @@ class TaskService:
                            pt.settings_json,
                            o.id AS order_id,
                            o.client_name,
-                           -- --- ИСПРАВЛЕНИЕ: Возвращаем числовой ID клиента, а не строку ---
-                           COALESCE(o.client_api_id, o.client_local_id) as client_id
+                           -- --- ИСПРАВЛЕНИЕ: Возвращаем составной client_id, как и раньше ---
+                           CASE
+                               WHEN o.client_api_id IS NOT NULL THEN 'api_' || o.client_api_id::text || '_' || o.client_name
+                               WHEN o.client_local_id IS NOT NULL THEN 'local_' || o.client_local_id::text || '_' || o.client_name
+                               ELSE NULL
+                           END as client_id
                        FROM
                            production_tasks pt
                        JOIN
