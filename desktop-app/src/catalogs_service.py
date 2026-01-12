@@ -509,9 +509,14 @@ class CatalogsService:
                 # --- ИСПРАВЛЕНИЕ: Добавляем поиск с учетом client_id и глобальных сопоставлений ---
                 # Сортируем так, чтобы сопоставление для конкретного клиента имело приоритет
                 # над глобальным (client_id IS NULL).
+                # ИСПОЛЬЗУЕМ LIKE, так как client_id из задачи - это число, а в таблице - строка 'local_1_ClientA'
                 cur.execute("""
                     SELECT gtin FROM product_code_mappings 
-                    WHERE mapped_code = %s AND (client_id = %s OR client_id IS NULL)
+                    WHERE 
+                        mapped_code = %s AND 
+                        (client_id LIKE 'local_' || %s || '_%%' OR 
+                         client_id LIKE 'api_' || %s || '_%%' OR 
+                         client_id IS NULL)
                     ORDER BY client_id DESC NULLS LAST
                     LIMIT 1
                 """, (code, client_id))
