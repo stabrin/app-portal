@@ -540,27 +540,12 @@ class CatalogsService:
         if client_id:
             log_msg += f" для клиента ID: {client_id}"
         logger.info(log_msg)
-
-        # --- НОВАЯ ЛОГИКА: Формируем правильный client_id для записи в БД ---
-        client_id_for_db = None
-        if client_id:
-            try:
-                # Пытаемся получить информацию о клиенте, чтобы сформировать имя
-                with self.get_db_connection() as conn:
-                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                        # Ищем в обеих таблицах клиентов
-                        cur.execute("SELECT name, 'api' as type FROM dmkod_participants WHERE id = %s UNION ALL SELECT name, 'local' as type FROM ap_clients WHERE id = %s", (client_id, client_id))
-                        client_info = cur.fetchone()
-                if client_info:
-                    client_id_for_db = f"{client_info['type']}_{client_id}_{client_info['name']}"
-            except Exception as e:
-                logger.error(f"Не удалось получить имя клиента для ID {client_id}: {e}", exc_info=True)
-                # В случае ошибки оставляем client_id как есть, чтобы не потерять данные
-                client_id_for_db = str(client_id)
-
+        
+        # --- ИСПРАВЛЕНИЕ: Используем client_id напрямую, без переформатирования ---
+        # Окно оператора уже передает client_id в правильном составном формате ('api_XXX_Name' или 'local_YYY_Name').
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type, client_id) VALUES (%s, %s, %s, %s)", (gtin, mapped_code, mapped_code_type, client_id_for_db))
+                cur.execute("INSERT INTO product_code_mappings (gtin, mapped_code, mapped_code_type, client_id) VALUES (%s, %s, %s, %s)", (gtin, mapped_code, mapped_code_type, client_id))
             conn.commit()
 
     # --- КОНЕЦ НОВОГО БЛОКА ---
