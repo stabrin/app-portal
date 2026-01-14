@@ -579,20 +579,62 @@ class OrderEditorFrameQt(QWidget):
     # --- Заглушки для остального функционала ---
     def _export_products_to_excel(self):
         """Выгружает в Excel данные о товарах, связанных с текущим заказом."""
+        logging.info(f"Запуск экспорта товаров для заказа ID: {self.order_id}")
         try:
             products_data = self.order_service.get_products_for_order(self.order_id)
+            client_inn = None
+            # --- Новая логика для получения ИНН ---
+            with get_client_db_connection(self.main_app_window.user_info) as conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    # 1. Получаем ID клиента из заказа
+                    cur.execute("SELECT client_api_id, client_local_id FROM orders WHERE id = %s", (self.order_id,))
+                    order_client_info = cur.fetchone()
+
+            if not order_client_info:
+                QMessageBox.warning(self, "Внимание", "Не удалось найти информацию о клиенте для заказа.")
+                return
+
+            # 2. Получаем ИНН клиента
+            if order_client_info.get('client_local_id'):
+                with get_client_db_connection(self.main_app_window.user_info) as conn:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute("SELECT inn FROM ap_clients WHERE id = %s", (order_client_info['client_local_id'],))
+                        inn_result = cur.fetchone()
+                        if inn_result:
+                            client_inn = inn_result['inn']
+            elif order_client_info.get('client_api_id'):
+                try:
+                    # Используем ApiService, который уже есть в AdminWindowQt
+                    participants = self.main_app_window.api_service.get_participants()
+                    client_api_id = order_client_info['client_api_id']
+                    found_participant = next((p for p in participants if p.get('id') == client_api_id), None)
+                    if found_participant:
+                        client_inn = found_participant.get('inn')
+                except Exception as api_err:
+                    logging.error(f"Ошибка при получении ИНН из API: {api_err}", exc_info=True)
+                    QMessageBox.warning(self, "Ошибка API", f"Не удалось получить ИНН клиента из API: {api_err}")
+
+            if not client_inn:
+                logging.warning(f"Не удалось найти ИНН для клиента заказа {self.order_id}. Поле ИНН будет пустым.")
+
+            # --- Старая логика получения товаров ---
+            products_data = self.order_service.get_products_for_order(self.order_id) # Этот метод уже есть
             if not products_data:
                 QMessageBox.warning(self, "Внимание", "Не найдено товаров в заказе для экспорта.")
                 return
 
             df = pd.DataFrame(products_data)
+            # --- Добавляем новое составное поле ---
+            df['ИНН_GTIN'] = f"{client_inn or ''}_" + df['gtin']
+
             filepath, _ = QFileDialog.getSaveFileName(self, "Сохранить товары", f"order_{self.order_id}_products.xlsx", "Excel Files (*.xlsx)")
             if filepath:
                 df.to_excel(filepath, index=False)
                 QMessageBox.information(self, "Успех", f"Товары заказа успешно выгружены в файл:\n{filepath}")
         except Exception as e:
+            logging.error(f"Ошибка при экспорте товаров заказа {self.order_id}: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать товары: {e}")
-
+            
     def _import_products_from_excel(self):
         """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
         if QMessageBox.question(self, "Подтверждение", "Данные из файла обновят записи в общем справочнике товаров. Продолжить?") != QMessageBox.Yes:

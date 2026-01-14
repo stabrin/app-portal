@@ -2551,10 +2551,32 @@ class OrderEditorFrame(ttk.Frame):
     def _export_products_to_excel(self):
         """Выгружает в Excel данные о товарах, связанных с текущим заказом."""
         logging.info(f"Запуск экспорта товаров для заказа ID: {self.order_id}")
+        client_inn = None
         try:
             with self._get_client_db_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    # 1. Получаем уникальные GTIN из детализации заказа
+                    # 1. Получаем ID клиента из заказа
+                    cur.execute("SELECT client_api_id, client_local_id FROM orders WHERE id = %s", (self.order_id,))
+                    order_client_info = cur.fetchone()
+
+                    if not order_client_info:
+                        messagebox.showwarning("Внимание", "Не удалось найти информацию о клиенте для заказа.", parent=self)
+                        return
+
+                    # 2. Получаем ИНН клиента
+                    if order_client_info['client_local_id']:
+                        cur.execute("SELECT inn FROM ap_clients WHERE id = %s", (order_client_info['client_local_id'],))
+                        inn_result = cur.fetchone()
+                        if inn_result:
+                            client_inn = inn_result['inn']
+                    # Примечание: получение ИНН для client_api_id потребует вызова API, что усложнит эту функцию.
+                    # Пока реализуем только для локальных клиентов.
+
+                    if not client_inn:
+                        logging.warning(f"Не удалось найти ИНН для клиента заказа {self.order_id}.")
+                        # Не прерываем, просто ИНН будет пустым
+
+                    # 3. Получаем уникальные GTIN из детализации заказа
                     cur.execute("SELECT DISTINCT gtin FROM dmkod_aggregation_details WHERE order_id = %s AND gtin IS NOT NULL", (self.order_id,))
                     gtins = [row['gtin'] for row in cur.fetchall()]
                     
@@ -2562,22 +2584,25 @@ class OrderEditorFrame(ttk.Frame):
                         messagebox.showwarning("Внимание", "В заказе нет товаров для экспорта.", parent=self)
                         return
 
-                    # 2. Получаем данные этих товаров из справочника products
+                    # 4. Получаем данные этих товаров из справочника products
                     cur.execute("SELECT gtin, name, description_1, description_2, description_3 FROM products WHERE gtin = ANY(%s)", (gtins,))
                     products_data = cur.fetchall()
 
             if not products_data:
                 messagebox.showwarning("Внимание", "Не найдено записей в справочнике товаров для GTIN из этого заказа.", parent=self)
                 return
-
+            
             df = pd.DataFrame(products_data)
+            
+            # 5. Добавляем новое составное поле
+            df['ИНН_GTIN'] = f"{client_inn or ''}_" + df['gtin']
+
             filepath = filedialog.asksaveasfilename(
                 defaultextension=".xlsx",
                 filetypes=[("Excel", "*.xlsx")],
                 initialfile=f"order_{self.order_id}_products.xlsx",
                 parent=self
             )
-
             if filepath:
                 df.to_excel(filepath, index=False)
                 messagebox.showinfo("Успех", f"Товары заказа успешно выгружены в файл:\n{filepath}", parent=self)
