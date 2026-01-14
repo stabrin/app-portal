@@ -2623,6 +2623,11 @@ class OrderEditorFrame(ttk.Frame):
 
         try:
             df = pd.read_excel(filepath, dtype={'gtin': str})
+            # --- НОВЫЙ БЛОК: Игнорируем составное поле при импорте ---
+            if 'ИНН_GTIN' in df.columns:
+                df = df.drop(columns=['ИНН_GTIN'])
+                logging.info("Колонка 'ИНН_GTIN' найдена в файле и будет проигнорирована при импорте.")
+            # --- КОНЕЦ НОВОГО БЛОКА ---
             with self._get_client_db_connection() as conn:
                 with conn.cursor() as cur:
                     from .utils import upsert_data_to_db

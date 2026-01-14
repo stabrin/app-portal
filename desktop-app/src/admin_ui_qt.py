@@ -581,7 +581,7 @@ class OrderEditorFrameQt(QWidget):
         """Выгружает в Excel данные о товарах, связанных с текущим заказом."""
         logging.info(f"Запуск экспорта товаров для заказа ID: {self.order_id}")
         try:
-            products_data = self.order_service.get_products_for_order(self.order_id)
+            # --- products_data = self.order_service.get_products_for_order(self.order_id)
             client_inn = None
             # --- Новая логика для получения ИНН ---
             with get_client_db_connection(self.main_app_window.user_info) as conn:
@@ -634,7 +634,7 @@ class OrderEditorFrameQt(QWidget):
         except Exception as e:
             logging.error(f"Ошибка при экспорте товаров заказа {self.order_id}: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать товары: {e}")
-            
+
     def _import_products_from_excel(self):
         """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
         if QMessageBox.question(self, "Подтверждение", "Данные из файла обновят записи в общем справочнике товаров. Продолжить?") != QMessageBox.Yes:
