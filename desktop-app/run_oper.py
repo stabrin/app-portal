@@ -14,7 +14,7 @@ if getattr(sys, 'frozen', False):
     project_root = os.path.dirname(sys.executable)
 else:
     # Если запущено как скрипт в IDE
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    project_root = os.path.dirname(os.path.abspath(__file__))
 
 # Добавляем папку src в sys.path для корректного импорта модулей
 src_path = os.path.join(project_root, 'src')
