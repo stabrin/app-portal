@@ -145,6 +145,12 @@ class OrderService:
     def import_products_from_excel(self, filepath: str):
         """Импортирует (обновляет) данные о товарах из Excel-файла в общий справочник."""
         df = pd.read_excel(filepath, dtype={'gtin': str})
+        # --- НОВЫЙ БЛОК: Игнорируем составное поле при импорте ---
+        if 'ИНН_GTIN' in df.columns:
+            df = df.drop(columns=['ИНН_GTIN'])
+            logging.info("Колонка 'ИНН_GTIN' найдена в файле и будет проигнорирована при импорте.")
+        # --- КОНЕЦ НОВОГО БЛОКА ---
+
         logging.debug(f"Прочитано {len(df)} строк из Excel-файла: {filepath}")
         # --- ИСПРАВЛЕНИЕ: Заменяем NaN на None, чтобы избежать ошибок при вставке в БД ---
         # Это гарантирует, что пустые ячейки в Excel будут преобразованы в NULL в базе данных.
