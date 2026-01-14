@@ -6,12 +6,20 @@ import logging
 import traceback
 from dotenv import load_dotenv
 
-# --- 1. Настройка путей и принудительные импорты (важно для .exe) ---
+# --- 1. Настройка путей ---
 
-# Добавляем корень проекта в sys.path для корректного импорта модулей
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+# Определяем корень проекта для логов и .env
+if getattr(sys, 'frozen', False):
+    # Если запущено как EXE (PyInstaller/Nuitka)
+    project_root = os.path.dirname(sys.executable)
+else:
+    # Если запущено как скрипт в IDE
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
+# Добавляем папку src в sys.path для корректного импорта модулей
+src_path = os.path.join(project_root, 'src')
+if src_path not in sys.path:
+    sys.path.insert(0, src_path)
 
 # Логика для поиска DLL, как в основном приложении
 if getattr(sys, 'frozen', False):
