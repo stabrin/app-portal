@@ -352,6 +352,7 @@ class OrderService:
                                 i.datamatrix, 
                                 REPLACE(i.datamatrix, CHR(29), '') AS cleaned_datamatrix, 
                                 i.gtin, 
+                                i.r_id,
                                 i.package_id, 
                                 p.name AS product_name, 
                                 p.description_1, 
@@ -398,6 +399,7 @@ class OrderService:
                         SELECT 
                             b.datamatrix, 
                             b.gtin, 
+                            b.r_id as "№_pp",
                             SUBSTRING(b.datamatrix for 24) AS dm_part_24, 
                             SUBSTRING(b.datamatrix for 31) AS dm_part_31, 
                             s.sscc_level_1, 
