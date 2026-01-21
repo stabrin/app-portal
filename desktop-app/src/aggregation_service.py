@@ -417,6 +417,7 @@ def run_aggregation_process_desktop(user_info: dict, order_id: int, filepaths: l
                     continue
                     
                 parsed_data['order_id'] = order_id
+                parsed_data['r_id'] = line_num # Добавляем порядковый номер строки
                 parsed_data['tirage_number'] = tirazh_num
                 all_dm_data.append(parsed_data)
         
