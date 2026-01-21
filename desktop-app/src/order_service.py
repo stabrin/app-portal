@@ -380,9 +380,9 @@ class OrderService:
                         sscc_data AS (
                             SELECT 
                                 base_box_id AS id_level_1, 
-                                MAX(CASE WHEN level = 1 THEN sscc END) AS sscc_level_1, 
-                                MAX(CASE WHEN level = 2 THEN sscc END) AS sscc_level_2, 
-                                MAX(CASE WHEN level = 3 THEN sscc END) AS sscc_level_3
+                                MAX(CASE WHEN level = 1 THEN '00'||sscc END) AS sscc_level_1, 
+                                MAX(CASE WHEN level = 2 THEN '00'||sscc END) AS sscc_level_2, 
+                                MAX(CASE WHEN level = 3 THEN '00'||sscc END) AS sscc_level_3
                             FROM package_hierarchy GROUP BY base_box_id
                         ),
                         delta_parsed_codes AS (
