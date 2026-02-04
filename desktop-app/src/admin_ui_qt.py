@@ -346,6 +346,23 @@ class OrderEditorFrameQt(QWidget):
 
         # --- ИЗМЕНЕНИЕ: Для архивных заказов оставляем только отчет и детализацию ---
         if self.is_archive:
+            # --- НОВЫЙ БЛОК: Добавляем нередактируемые поля для ФИАС и КПП ---
+            self.archive_fias_kpp_layout = QFormLayout()
+            self.archive_fias_label = QLabel("Код ФИАС:")
+            self.archive_fias_value = QLabel()
+            self.archive_kpp_label = QLabel("КПП:")
+            self.archive_kpp_value = QLabel()
+            self.archive_fias_kpp_layout.addRow(self.archive_fias_label, self.archive_fias_value)
+            self.archive_fias_kpp_layout.addRow(self.archive_kpp_label, self.archive_kpp_value)
+            
+            # Скрываем их по умолчанию
+            self.archive_fias_label.setVisible(False)
+            self.archive_fias_value.setVisible(False)
+            self.archive_kpp_label.setVisible(False)
+            self.archive_kpp_value.setVisible(False)
+            main_layout.addLayout(self.archive_fias_kpp_layout)
+            # --- КОНЕЦ НОВОГО БЛОКА ---
+
             # --- Ряд 3 (только кнопка отчета) ---
             controls_frame_3 = QHBoxLayout()
             btn_download_report = QPushButton("Отчет декларанта")
@@ -495,31 +512,45 @@ class OrderEditorFrameQt(QWidget):
     def _load_details(self):
         self.details_table.setRowCount(0)
         try:
+            # --- ИЗМЕНЕНИЕ: Загружаем данные заказа и для архива тоже ---
+            order_data = self.order_service.get_order_by_id(self.order_id)
+            if not order_data:
+                QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить данные для заказа ID {self.order_id}.")
+                return
+
+            # --- НОВАЯ ЛОГИКА: Получаем требования ТГ для любого типа заказа ---
+            product_group_id = order_data.get('product_group_id')
+            fias_required = False
+            kpp_required = False
+            if product_group_id:
+                all_groups = self.main_app_window.catalogs_service.get_product_groups()
+                product_group = next((g for g in all_groups if g['id'] == product_group_id), None)
+                if product_group:
+                    fias_required = product_group.get('fias_required', False)
+                    kpp_required = product_group.get('kpp_required', False)
+
             # --- ИЗМЕНЕНИЕ: Загружаем не только детали, но и основную информацию о заказе ---
             if not self.is_archive:
                 # Получаем данные самого заказа
-                order_data = self.order_service.get_order_by_id(self.order_id)
                 if order_data: # Добавляем проверку, что данные заказа получены
                     self.comment_edit.setText(order_data.get('notes', ''))
                     self.fias_edit.setText(order_data.get('fias_code', ''))
                     self.kpp_edit.setText(order_data.get('kpp', ''))
 
                     # --- НОВАЯ ЛОГИКА: Управляем видимостью полей ФИАС/КПП ---
-                    product_group_id = order_data.get('product_group_id')
-                    fias_required = False
-                    kpp_required = False
-                    if product_group_id:
-                        # Получаем все группы и ищем нужную
-                        all_groups = self.main_app_window.catalogs_service.get_product_groups()
-                        product_group = next((g for g in all_groups if g['id'] == product_group_id), None)
-                        if product_group:
-                            fias_required = product_group.get('fias_required', False)
-                            kpp_required = product_group.get('kpp_required', False)
-                    
                     self.fias_label.setVisible(fias_required)
                     self.fias_edit.setVisible(fias_required)
                     self.kpp_label.setVisible(kpp_required)
                     self.kpp_edit.setVisible(kpp_required)
+            else: # --- НОВЫЙ БЛОК: Логика для архивных заказов ---
+                self.archive_fias_value.setText(order_data.get('fias_code', ''))
+                self.archive_kpp_value.setText(order_data.get('kpp', ''))
+                
+                self.archive_fias_label.setVisible(fias_required)
+                self.archive_fias_value.setVisible(fias_required)
+                self.archive_kpp_label.setVisible(kpp_required)
+                self.archive_kpp_value.setVisible(kpp_required)
+            # --- КОНЕЦ НОВОГО БЛОКА ---
 
             details = self.order_service.get_order_details(self.order_id)
             self.details_table.setRowCount(0) # Очищаем таблицу перед заполнением
