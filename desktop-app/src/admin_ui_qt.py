@@ -4491,22 +4491,37 @@ class AdminWindowQt(QMainWindow):
         
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            # --- ИСПРАВЛЕНИЕ: Полностью переносим логику из Tkinter ---
-            success, message, needs_confirmation = service.create_or_recreate_order_from_notification(self.current_notification_id)
+            # --- ИЗМЕНЕНИЕ: Обрабатываем новый формат ответа ---
+            success, message, requirements = service.create_or_recreate_order_from_notification(self.current_notification_id)
             
-            if needs_confirmation:
+            fias_code = None
+            kpp = None
+
+            if requirements.get('fias_required'):
+                fias_code, ok = QInputDialog.getText(self, "Требуется ФИАС", "Введите код ФИАС:")
+                if not ok or not fias_code: return
+
+            if requirements.get('kpp_required'):
+                kpp, ok = QInputDialog.getText(self, "Требуется КПП", "Введите КПП:")
+                if not ok or not kpp: return
+
+            # Если были требования, вызываем сервис еще раз с новыми данными
+            if requirements:
+                success, message, requirements = service.create_or_recreate_order_from_notification(self.current_notification_id, fias_code=fias_code, kpp=kpp)
+
+            if requirements.get('confirmation_required'):
                 # Если требуется подтверждение, показываем диалог Да/Нет
                 reply = QMessageBox.question(self, "Подтверждение", message, QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
                     # Если пользователь согласен, вызываем сервис повторно с флагом force_recreate
-                    success, message, _ = service.create_or_recreate_order_from_notification(self.current_notification_id, force_recreate=True)
+                    success, message, _ = service.create_or_recreate_order_from_notification(self.current_notification_id, force_recreate=True, fias_code=fias_code, kpp=kpp)
                 else:
                     return # Пользователь отменил операцию
             
             if success: # Показываем сообщение только в случае успеха
                 QMessageBox.information(self, "Успех", message)
                 self.load_notifications() # Обновляем список в любом случае
-            else:
+            elif not requirements: # Показываем ошибку, только если это не отмена пользователем
                 QMessageBox.warning(self, "Внимание", message) # Показываем предупреждение, если не success
         except Exception as e:
             traceback.print_exc()

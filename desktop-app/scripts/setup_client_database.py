@@ -160,6 +160,7 @@ def update_client_db_schema(conn):
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS scenario_id INTEGER;").format(orders=sql.Identifier(orders_table)),
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS client_api_id INTEGER;").format(orders=sql.Identifier(orders_table)),
         sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS client_local_id INTEGER;").format(orders=sql.Identifier(orders_table)),
+        sql.SQL("ALTER TABLE {orders} ADD COLUMN IF NOT EXISTS kpp VARCHAR(9);").format(orders=sql.Identifier(orders_table)),
         sql.SQL("CREATE INDEX IF NOT EXISTS idx_orders_client_name ON {orders}(client_name);").format(orders=sql.Identifier(orders_table)),
 
         sql.SQL("""

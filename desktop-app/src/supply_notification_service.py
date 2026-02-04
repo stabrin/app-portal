@@ -206,19 +206,12 @@ class SupplyNotificationService:
                 cur.execute("DELETE FROM ap_supply_notification_files WHERE notification_id = %s", (notification_id,))
                 cur.execute("DELETE FROM ap_supply_notifications WHERE id = %s", (notification_id,))
             conn.commit()
-
-    def archive_notification(self, notification_id: int):
-        """Перемещает уведомление в архив."""
-        with self.get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("UPDATE ap_supply_notifications SET status = 'В архиве' WHERE id = %s", (notification_id,))
-            conn.commit()
-
-    def create_or_recreate_order_from_notification(self, notification_id: int, force_recreate: bool = False):
+    
+    def create_or_recreate_order_from_notification(self, notification_id: int, force_recreate: bool = False, fias_code: str = None, kpp: str = None):
         """
         Создает или обновляет заказ в таблице 'orders' на основе данных из уведомления о поставке.
         Если заказ существует, запрашивает подтверждение на пересоздание.
-        Возвращает кортеж (успех, сообщение, требуется_подтверждение).
+        Возвращает кортеж (успех, сообщение, {требования}).
         """
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -226,10 +219,11 @@ class SupplyNotificationService:
                 cur.execute("""
                     SELECT 
                         n.id, n.product_groups, n.scenario_id, n.client_api_id, n.client_local_id,
-                        n.client_name, n.vehicle_number,
+                        n.client_name, n.vehicle_number, pg.fias_required, pg.kpp_required,
                         s.scenario_data
                     FROM ap_supply_notifications n
                     JOIN ap_marking_scenarios s ON n.scenario_id = s.id
+                    LEFT JOIN dmkod_product_groups pg ON (n.product_groups->0->>'id')::int = pg.id
                     WHERE n.id = %s
                 """, (notification_id,))
                 notification = cur.fetchone()
@@ -240,8 +234,20 @@ class SupplyNotificationService:
                 # 2. Проверяем количество товарных групп
                 product_groups = notification['product_groups']
                 if not product_groups or len(product_groups) > 1:
-                    msg = f"Разделите это уведомление на {len(product_groups)} и после этого создайте отдельные заказы для каждой товарной группы."
-                    return False, msg, False
+                    msg = f"В уведомлении указано несколько товарных групп ({len(product_groups)}). Создание заказа возможно только для одной товарной группы."
+                    return False, msg, {}
+
+                # --- НОВЫЙ БЛОК: Проверка на необходимость ввода ФИАС и КПП ---
+                requirements = {}
+                if notification.get('fias_required') and not fias_code:
+                    requirements['fias_required'] = True
+                
+                if notification.get('kpp_required') and not kpp:
+                    requirements['kpp_required'] = True
+
+                if requirements:
+                    return False, "Требуются дополнительные данные", requirements
+                # --- КОНЕЦ НОВОГО БЛОКА ---
 
                 # 3. Проверяем тип сценария и формируем статус
                 scenario_data = notification['scenario_data']
@@ -257,8 +263,8 @@ class SupplyNotificationService:
                             "Вы хотите пересоздать заказ полностью?\n\n"
                             "Внимание: это полностью аннулирует заказ в ДМ.Код, если вы делали запрос кодов. "
                             "Вам придется заново запросить/получить коды."
-                        )
-                        return False, confirmation_message, True
+                        ) # --- ИЗМЕНЕНИЕ: Возвращаем confirmation_required в словаре ---
+                        return False, confirmation_message, {'confirmation_required': True}
 
                     # Определяем статус и ID товарной группы
                     status = 'dmkod' if scenario_data.get('dm_source') == 'Заказ в ДМ.Код' else 'new'
@@ -268,11 +274,11 @@ class SupplyNotificationService:
                     order_id = existing_order['id']
                     cur.execute("""
                         UPDATE orders SET
-                            client_api_id = %s, client_local_id = %s, client_name = %s, scenario_id = %s,
+                            client_api_id = %s, client_local_id = %s, client_name = %s, scenario_id = %s, fias_code = %s, kpp = %s,
                             order_date = CURRENT_DATE, notes = %s, status = %s, product_group_id = %s, api_status = NULL, api_order_id = NULL
                         WHERE id = %s;
                     """, (
-                        notification['client_api_id'], notification['client_local_id'], notification['client_name'],
+                        notification['client_api_id'], notification['client_local_id'], notification['client_name'], notification['scenario_id'], fias_code, kpp,
                         notification['scenario_id'], notification['vehicle_number'], status, product_group_id,
                         order_id
                     ))
@@ -288,12 +294,12 @@ class SupplyNotificationService:
                     # СОЗДАНИЕ НОВОГО ЗАКАЗА
                     cur.execute("""
                         INSERT INTO orders (
-                            client_api_id, client_local_id, client_name, scenario_id, notification_id, 
+                            client_api_id, client_local_id, client_name, scenario_id, notification_id, fias_code, kpp,
                             order_date, notes, status, product_group_id
-                        ) VALUES (%s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s)
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_DATE, %s, %s, %s)
                         RETURNING id;
                     """, (
-                        notification['client_api_id'], notification['client_local_id'], notification['client_name'],
+                        notification['client_api_id'], notification['client_local_id'], notification['client_name'], notification['scenario_id'], notification['id'], fias_code, kpp,
                         notification['scenario_id'], notification['id'], notification['vehicle_number'],
                         status, product_group_id
                     ))
@@ -330,7 +336,7 @@ class SupplyNotificationService:
                 logging.info(f"Статус уведомления ID {notification_id} обновлен на 'Заказ создан'.")
 
             conn.commit()
-            return True, message, False
+            return True, message, {}
 
     def get_notification_by_id(self, notification_id):
         """Получает одно уведомление по ID."""
