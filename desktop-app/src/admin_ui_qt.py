@@ -5187,8 +5187,8 @@ class AdminWindowQt(QMainWindow):
         layout.addLayout(controls_layout)
 
         # Таблица
-        self.product_groups_table = QTableWidget(0, 6)
-        self.product_groups_table.setHorizontalHeaderLabels(["ID", "Системное имя", "Отображаемое имя", "Нужен ФИАС", "Шаблон кода", "Шаблон ДМ"])
+        self.product_groups_table = QTableWidget(0, 7)
+        self.product_groups_table.setHorizontalHeaderLabels(["ID", "Системное имя", "Отображаемое имя", "Нужен ФИАС", "Нужен КПП", "Шаблон кода", "Шаблон ДМ"])
         self.product_groups_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.product_groups_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.product_groups_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -5220,8 +5220,9 @@ class AdminWindowQt(QMainWindow):
                 self.product_groups_table.setItem(row, 1, QTableWidgetItem(group.get('group_name', '')))
                 self.product_groups_table.setItem(row, 2, QTableWidgetItem(group.get('display_name', '')))
                 self.product_groups_table.setItem(row, 3, QTableWidgetItem(str(group.get('fias_required', False))))
-                self.product_groups_table.setItem(row, 4, QTableWidgetItem(group.get('code_template', '')))
-                self.product_groups_table.setItem(row, 5, QTableWidgetItem(group.get('dm_template', '')))
+                self.product_groups_table.setItem(row, 4, QTableWidgetItem(str(group.get('kpp_required', False))))
+                self.product_groups_table.setItem(row, 5, QTableWidgetItem(group.get('code_template', '')))
+                self.product_groups_table.setItem(row, 6, QTableWidgetItem(group.get('dm_template', '')))
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить товарные группы: {e}")
 
@@ -5240,14 +5241,17 @@ class AdminWindowQt(QMainWindow):
             'group_name': QLineEdit(group_data.get('group_name', '')),
             'display_name': QLineEdit(group_data.get('display_name', '')),
             'fias_required': QCheckBox(),
+            'kpp_required': QCheckBox(),
             'code_template': QLineEdit(group_data.get('code_template', '')),
             'dm_template': QLineEdit(group_data.get('dm_template', ''))
         }
         fields['fias_required'].setChecked(bool(group_data.get('fias_required', False)))
+        fields['kpp_required'].setChecked(bool(group_data.get('kpp_required', False)))
 
         form_layout.addRow("Системное имя:", fields['group_name'])
         form_layout.addRow("Отображаемое имя:", fields['display_name'])
         form_layout.addRow("Нужен ФИАС:", fields['fias_required'])
+        form_layout.addRow("Нужен КПП:", fields['kpp_required'])
         form_layout.addRow("Шаблон кода:", fields['code_template'])
         form_layout.addRow("Шаблон ДМ:", fields['dm_template'])
         
@@ -5282,8 +5286,9 @@ class AdminWindowQt(QMainWindow):
             'group_name': self.product_groups_table.item(sel_row, 1).text(),
             'display_name': self.product_groups_table.item(sel_row, 2).text(),
             'fias_required': self.product_groups_table.item(sel_row, 3).text().lower() == 'true',
-            'code_template': self.product_groups_table.item(sel_row, 4).text(),
-            'dm_template': self.product_groups_table.item(sel_row, 5).text()
+            'kpp_required': self.product_groups_table.item(sel_row, 4).text().lower() == 'true',
+            'code_template': self.product_groups_table.item(sel_row, 5).text(),
+            'dm_template': self.product_groups_table.item(sel_row, 6).text()
         }
         self._open_product_group_editor(group_data)
 
