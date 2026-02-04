@@ -349,9 +349,11 @@ class OrderEditorFrameQt(QWidget):
             # --- НОВЫЙ БЛОК: Добавляем нередактируемые поля для ФИАС и КПП ---
             self.archive_fias_kpp_layout = QFormLayout()
             self.archive_fias_label = QLabel("Код ФИАС:")
-            self.archive_fias_value = QLabel()
+            self.archive_fias_value = QLineEdit()
+            self.archive_fias_value.setReadOnly(True)
             self.archive_kpp_label = QLabel("КПП:")
-            self.archive_kpp_value = QLabel()
+            self.archive_kpp_value = QLineEdit()
+            self.archive_kpp_value.setReadOnly(True)
             self.archive_fias_kpp_layout.addRow(self.archive_fias_label, self.archive_fias_value)
             self.archive_fias_kpp_layout.addRow(self.archive_kpp_label, self.archive_kpp_value)
             
