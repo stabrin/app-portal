@@ -248,6 +248,20 @@ class OrderService:
         
         with self._get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # --- НОВЫЙ БЛОК: Получаем информацию о заказе и его товарной группе ---
+                cur.execute("""
+                    SELECT 
+                        o.fias_code, o.kpp, 
+                        pg.fias_required, pg.kpp_required
+                    FROM orders o
+                    LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
+                    WHERE o.id = %s
+                """, (order_id,))
+                order_info = cur.fetchone()
+                if not order_info:
+                    raise ValueError(f"Не удалось найти информацию для заказа ID {order_id}")
+                # --- КОНЕЦ НОВОГО БЛОКА ---
+
                 # 1. Создание упаковок (короба и паллеты)
                 unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
                 unique_pallets = df[['PaletSSCC']].dropna().drop_duplicates().rename(columns={'PaletSSCC': 'sscc'})
@@ -321,13 +335,22 @@ class OrderService:
 
                 grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
                 
-                grouped_for_api['codes_json'] = [
-                    json.dumps({
+                # --- ИЗМЕНЕНИЕ: Формируем JSON с учетом требований товарной группы ---
+                def create_payload(row):
+                    attributes = {
+                        "production_date": str(row.production_date),
+                        "expiration_date": str(row.expiration_date)
+                    }
+                    if order_info.get('fias_required') and order_info.get('fias_code'):
+                        attributes['fiasid'] = order_info['fias_code']
+                    if order_info.get('kpp_required') and order_info.get('kpp'):
+                        attributes['kpp'] = order_info['kpp']
+                    
+                    return json.dumps({
                         "include": [{"code": code.replace('\x1d', '')} for code in row.DataMatrix],
-                        "attributes": { "production_date": str(row.production_date), "expiration_date": str(row.expiration_date) }
+                        "attributes": attributes
                     })
-                    for row in grouped_for_api.itertuples()
-                ]
+                grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
                 grouped_for_api['order_id'] = order_id
                 grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
                 grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
