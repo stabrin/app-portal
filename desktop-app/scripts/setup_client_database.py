@@ -101,10 +101,12 @@ def update_client_db_schema(conn):
                 group_name VARCHAR(100) NOT NULL,
                 display_name VARCHAR(255) NOT NULL,
                 fias_required BOOLEAN NOT NULL DEFAULT FALSE,
+                kpp_required BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             );
         """).format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS code_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
+        sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS kpp_required BOOLEAN NOT NULL DEFAULT FALSE;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS dm_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
         # --- ИЗМЕНЕНИЕ: Удаляем ограничение уникальности для group_name для обратной совместимости ---
         sql.SQL("ALTER TABLE {pg_table} DROP CONSTRAINT IF EXISTS dmkod_product_groups_group_name_key;").format(pg_table=sql.Identifier(product_groups_table)),
