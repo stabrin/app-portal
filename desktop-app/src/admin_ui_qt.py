@@ -499,7 +499,7 @@ class OrderEditorFrameQt(QWidget):
             if not self.is_archive:
                 # Получаем данные самого заказа
                 order_data = self.order_service.get_order_by_id(self.order_id)
-                if order_data:
+                if order_data: # Добавляем проверку, что данные заказа получены
                     self.comment_edit.setText(order_data.get('notes', ''))
                     self.fias_edit.setText(order_data.get('fias_code', ''))
                     self.kpp_edit.setText(order_data.get('kpp', ''))
@@ -555,7 +555,7 @@ class OrderEditorFrameQt(QWidget):
         kpp_text = self.kpp_edit.text()
 
         try:
-            # 3. Вызываем обновленный сервисный метод для сохранения всего вместе
+            # 3. Вызываем обновленный сервисный метод для сохранения всего вместе.
             self.order_service.save_order_changes(self.order_id, detail_updates, comment_text, fias_code_text, kpp_text)
             QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
             
