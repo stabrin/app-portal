@@ -4005,21 +4005,13 @@ class AdminWindowQt(QMainWindow):
         self.notifications_table.itemSelectionChanged.connect(self.on_notification_select)
         layout.addWidget(self.notifications_table)
 
-        # ИСПРАВЛЕНИЕ: Устанавливаем разумную ширину для большинства колонок,
-        # а последнюю растягиваем, чтобы занять все свободное место.
+        # Устанавливаем интерактивный режим изменения размера для всех колонок,
+        # что позволяет пользователю изменять их ширину.
         header = self.notifications_table.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # Сценарий
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents) # Клиент
-        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # Товары
-        header.setSectionResizeMode(4, QHeaderView.Fixed)
-        self.notifications_table.setColumnWidth(4, 110) # Дата прибытия
-        header.setSectionResizeMode(5, QHeaderView.Fixed)
-        self.notifications_table.setColumnWidth(5, 120) # ТС/Контейнер
-        header.setSectionResizeMode(6, QHeaderView.Fixed)
-        self.notifications_table.setColumnWidth(6, 100) # Статус
-        header.setSectionResizeMode(7, QHeaderView.Fixed)
-        self.notifications_table.setColumnWidth(7, 70) # Позиций
-        header.setSectionResizeMode(8, QHeaderView.Stretch) # Кодов ДМ (растягивается)
+        for i in range(1, self.notifications_table.columnCount()):
+            header.setSectionResizeMode(i, QHeaderView.Interactive)
+        # Устанавливаем начальную ширину по содержимому
+        self.notifications_table.resizeColumnsToContents()
 
         widget.setLayout(layout)
         return widget
