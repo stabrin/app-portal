@@ -279,7 +279,7 @@ class SupplyNotificationService:
                         WHERE id = %s;
                     """, (
                         notification['client_api_id'], notification['client_local_id'], notification['client_name'], notification['scenario_id'], fias_code, kpp,
-                        notification['scenario_id'], notification['vehicle_number'], status, product_group_id,
+                        notification['vehicle_number'], status, product_group_id,
                         order_id
                     ))
                     # Удаляем старую детализацию перед вставкой новой
@@ -300,8 +300,7 @@ class SupplyNotificationService:
                         RETURNING id;
                     """, (
                         notification['client_api_id'], notification['client_local_id'], notification['client_name'], notification['scenario_id'], notification['id'], fias_code, kpp,
-                        notification['scenario_id'], notification['id'], notification['vehicle_number'],
-                        status, product_group_id
+                        notification['vehicle_number'], status, product_group_id
                     ))
                     order_id = cur.fetchone()['id']
                     logging.info(f"Создан новый заказ с ID {order_id} из уведомления ID {notification_id}.")
