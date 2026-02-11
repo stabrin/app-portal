@@ -3403,12 +3403,15 @@ class AdminWindowQt(QMainWindow):
         table_widget.setHorizontalHeaderLabels(["Дата", "Клиент / Заказ №", "Статус", "Кол-во позиций", "Кол-во ДМ", "Комментарий"])
         table_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
         table_widget.setSelectionMode(QAbstractItemView.SingleSelection)
-        table_widget.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         # ИСПРАВЛЕНИЕ: Делаем таблицу нередактируемой и добавляем стиль для выделения
         table_widget.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table_widget.setStyleSheet("""
             QTableWidget::item:selected { background-color: #ADD8E6; }
         """)
+        # --- ИЗМЕНЕНИЕ: Делаем все колонки изменяемыми по ширине ---
+        header = table_widget.horizontalHeader()
+        for i in range(header.count()):
+            header.setSectionResizeMode(i, QHeaderView.Interactive)
         
         # Вкладки для управления
         management_tabs = QTabWidget()
@@ -3440,6 +3443,11 @@ class AdminWindowQt(QMainWindow):
         search_filter_edit = QLineEdit(view_widget) 
         search_filter_edit.setPlaceholderText("Поиск по клиенту, комментарию, статусу...")
         filter_layout.addWidget(search_filter_edit)
+        
+        # --- ИЗМЕНЕНИЕ: Добавляем кнопку "Обновить" ---
+        btn_refresh = QPushButton("Обновить")
+        btn_refresh.clicked.connect(lambda: self.load_orders(is_archive))
+        filter_layout.addWidget(btn_refresh)
         
         # Добавляем фильтры над таблицей
         table_container_layout = QVBoxLayout()
@@ -3963,6 +3971,7 @@ class AdminWindowQt(QMainWindow):
         btn_refresh.clicked.connect(self.load_notifications)
         controls.addWidget(btn_new)
         controls.addWidget(btn_delete)
+        controls.addWidget(btn_refresh)
         controls.addStretch()
         layout.addLayout(controls)
 
