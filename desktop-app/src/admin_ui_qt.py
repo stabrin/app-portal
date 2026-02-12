@@ -20,6 +20,7 @@ from datetime import datetime
 import inspect # НОВЫЙ ИМПОРТ
 import io
 # --- NEW IMPORTS FOR BARCODE GENERATION ---
+import tempfile
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from .printing_service import PrintingService
@@ -3658,6 +3659,9 @@ class AdminWindowQt(QMainWindow):
         btn_download_doc = QPushButton("Скачать")
         btn_delete_doc = QPushButton("Удалить")
         controls.addWidget(btn_upload_doc)
+        # --- ИЗМЕНЕНИЕ: Добавляем кнопку "Открыть" ---
+        btn_open_doc = QPushButton("Открыть")
+        controls.addWidget(btn_open_doc)
         controls.addWidget(btn_download_doc)
         controls.addWidget(btn_delete_doc)
         controls.addStretch()
@@ -3672,6 +3676,8 @@ class AdminWindowQt(QMainWindow):
         files_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         files_table.setStyleSheet("QTableWidget::item:selected { background-color: #ADD8E6; }")
         files_layout.addWidget(files_table)
+        # --- ИЗМЕНЕНИЕ: Добавляем обработчик двойного клика ---
+        files_table.itemDoubleClicked.connect(lambda item: self.open_notification_doc(frame))
         frame.files_table = files_table # Сохраняем ссылку на таблицу
         layout.addWidget(files_group)
 
@@ -3690,6 +3696,7 @@ class AdminWindowQt(QMainWindow):
         # Привязка обработчиков
         btn_upload_doc.clicked.connect(lambda: self.upload_notification_doc(notification_id))
         btn_download_doc.clicked.connect(lambda: self.download_notification_doc(frame))
+        btn_open_doc.clicked.connect(lambda: self.open_notification_doc(frame))
         btn_delete_doc.clicked.connect(lambda: self.delete_notification_doc(frame))
         
         # --- Новые обработчики для комментария ---
@@ -4613,18 +4620,23 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Ошибка", "Не выбрано уведомление")
             return
         
-        filepath = QFileDialog.getOpenFileName(self, "Выберите файл")[0]
-        if not filepath:
+        # --- ИЗМЕНЕНИЕ: Используем getOpenFileNames для выбора нескольких файлов ---
+        filepaths, _ = QFileDialog.getOpenFileNames(self, "Выберите файлы для загрузки", "", "Все файлы (*.*)")
+        if not filepaths:
             return
         
         try:
-            with open(filepath, 'rb') as f:
-                file_data = f.read()
-            
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            filename = os.path.basename(filepath)
-            service.add_notification_file(notif_id, filename, file_data, 'client_document')
-            QMessageBox.information(self, "Успех", "Файл успешно загружен")
+            uploaded_count = 0
+            for filepath in filepaths:
+                with open(filepath, 'rb') as f:
+                    file_data = f.read()
+                
+                filename = os.path.basename(filepath)
+                service.add_notification_file(notif_id, filename, file_data, 'client_document')
+                uploaded_count += 1
+
+            QMessageBox.information(self, "Успех", f"Успешно загружено файлов: {uploaded_count}")
             
             # Обновляем обе таблицы, если они существуют
             self.load_notification_files(notif_id, self.notification_files_table)
@@ -4632,9 +4644,8 @@ class AdminWindowQt(QMainWindow):
                 self.on_order_select(is_archive=False) # Перезагружаем панель управления
             if hasattr(self, 'archive_docs_tab'):
                 self.on_order_select(is_archive=True)
-
         except Exception as e:
-            traceback.print_exc()
+            logging.error(f"Ошибка при массовой загрузке файлов: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить файл: {e}")
 
     def download_notification_doc(self, parent_frame=None):
@@ -4660,6 +4671,38 @@ class AdminWindowQt(QMainWindow):
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось скачать файл: {e}")
+
+    def open_notification_doc(self, parent_frame=None):
+        """
+        Открывает выбранный файл в ассоциированном приложении.
+        """
+        table = parent_frame.files_table if parent_frame else self.notification_files_table
+        sel = table.currentRow()
+        if sel < 0:
+            QMessageBox.warning(self, "Внимание", "Выберите файл для открытия.")
+            return
+
+        try:
+            file_info = table.files_cache[sel]
+            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+            content, filename = service.get_file_content(file_info['id'])
+
+            # Создаем временный файл с правильным расширением
+            temp_dir = tempfile.gettempdir()
+            temp_path = os.path.join(temp_dir, filename)
+
+            with open(temp_path, 'wb') as f:
+                f.write(content)
+
+            # Открываем файл с помощью системной команды
+            if sys.platform == "win32":
+                os.startfile(temp_path)
+            elif sys.platform == "darwin": # macOS
+                subprocess.call(["open", temp_path])
+            else: # linux
+                subprocess.call(["xdg-open", temp_path])
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть файл: {e}")
 
     def delete_notification_doc(self, parent_frame=None):
         """Удаляет выбранный документ уведомления."""
