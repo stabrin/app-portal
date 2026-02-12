@@ -4217,6 +4217,9 @@ class AdminWindowQt(QMainWindow):
         self.notification_files_table.setStyleSheet("""
             QTableWidget::item:selected { background-color: #ADD8E6; }
         """)
+        # --- ИСПРАВЛЕНИЕ: Добавляем обработчик двойного клика для открытия файла ---
+        self.notification_files_table.itemDoubleClicked.connect(lambda: self.open_notification_doc())
+
         docs_layout.addWidget(self.notification_files_table)
         docs_tab.setLayout(docs_layout)
         tabs.addTab(docs_tab, "Документы")
