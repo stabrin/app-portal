@@ -23,7 +23,7 @@ class EmailService:
             'user': 'tilda@it-workshop.ru',
             'password': 'Rv3a$3', # ЗАМЕНИТЕ НА РЕАЛЬНЫЙ ПАРОЛЬ
             'sender_email': 'tilda@it-workshop.ru',
-            'recipient': 'tabrin@ved-ug.ru',
+            'recipient': 'markirovka@vedug-tlt.ru',
             'bcc': 'sergey@tabrin.ru'
         }
 
