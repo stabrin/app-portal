@@ -4429,8 +4429,8 @@ class AdminWindowQt(QMainWindow):
 
     def create_new_notification(self):
         """Создает новое уведомление о поставке."""
-        # ИСПРАВЛЕНИЕ: Заменяем заглушку на вызов диалогового окна
-        dialog = NotificationEditorDialog(self, self.user_info)
+        # ИСПРАВЛЕНИЕ: Передаем существующий сервис в диалог, чтобы избежать ошибки TypeError
+        dialog = NotificationEditorDialog(self, self.user_info, supply_notification_service=self.supply_notification_service)
         # exec() открывает диалог модально и возвращает результат (Accepted или Rejected)
         if dialog.exec():
             # Если диалог был закрыт через "Сохранить", обновляем список
@@ -7085,14 +7085,14 @@ class ProductMappingEditorDialog(QDialog):
 
 # --- НОВЫЙ КЛАСС: Диалог для создания уведомления ---
 class NotificationEditorDialog(QDialog):
-    def __init__(self, parent, user_info):
+    def __init__(self, parent, user_info, supply_notification_service):
         super().__init__(parent)
         self.user_info = user_info
         self.setWindowTitle("Новое уведомление о поставке")
         self.setMinimumWidth(500)
 
         # Инициализация сервисов
-        self.service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+        self.service = supply_notification_service
         self.catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
 
         self._build_ui()
