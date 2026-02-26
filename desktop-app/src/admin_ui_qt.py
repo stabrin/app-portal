@@ -1203,7 +1203,9 @@ class ApiIntegrationFrameQt(QWidget):
 
     def _check_report_flow(self):
         """Заглушка для функции проверки отчета."""
-        QMessageBox.information(self, "В разработке", "Функция проверки статуса отчета находится в разработке.")
+        self._display_api_response("5. Проверка статуса отчета", "Запуск проверки...")
+        self._run_in_thread(self.api_service.check_utilisation_report_status, self.order_id, self._append_log)
+
 
     def _display_api_response(self, title, body):
         self.response_text.setPlainText(f"--- {title} ---\n\n{body}")

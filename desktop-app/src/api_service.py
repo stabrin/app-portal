@@ -605,6 +605,54 @@ class ApiService:
         self.order_service.update_order_status(order_id, 'Отчет подготовлен')
         return "Отчет об использовании кодов успешно подготовлен и отправлен в АПИ."
 
+    def check_utilisation_report_status(self, order_id: int, progress_callback: Callable):
+        """
+        Проверяет статус отчета об утилизации, сверяя заказанные, полученные и успешно обработанные коды.
+        """
+        if not self.order_service:
+            raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+
+        def log(message):
+            if progress_callback:
+                progress_callback(message)
+
+        log("--- НАЧАЛО ПРОВЕРКИ СТАТУСА ОТЧЕТА ---")
+
+        # 1. Получаем сводку по заказу из локальной БД
+        log("Шаг 1/2: Получение сводки по заказу из локальной БД...")
+        summary = self.order_service.get_order_summary(order_id)
+        ordered_codes = summary.get('ordered_codes', 0)
+        received_codes = summary.get('received_codes', 0)
+        log(f"  Заказано кодов: {ordered_codes}")
+        log(f"  Получено кодов: {received_codes}")
+
+        # 2. Получаем агрегированные результаты из API
+        log("\nШаг 2/2: Получение итогов обработки из API ДМ.Код...")
+        order_data = self.order_service.get_order_by_id(order_id)
+        order_status = order_data.get('status')
+        total_success, total_not_found, total_duplicated = self.get_aggregated_utilisation_results(order_id, order_status)
+        log(f"  Успешно принято API: {total_success}")
+        log(f"  Не найдено в API: {total_not_found}")
+        log(f"  Дубликаты в API: {total_duplicated}")
+
+        # 3. Сравнение и формирование результата
+        log("\n--- РЕЗУЛЬТАТ ПРОВЕРКИ ---")
+        errors = []
+        if ordered_codes != received_codes:
+            errors.append(f"Расхождение в заказанных ({ordered_codes}) и полученных ({received_codes}) кодах.")
+        if received_codes != total_success:
+            errors.append(f"Расхождение в полученных ({received_codes}) и успешно принятых API ({total_success}) кодах.")
+        if total_not_found > 0:
+            errors.append(f"API не нашло {total_not_found} кодов.")
+        if total_duplicated > 0:
+            errors.append(f"API обнаружило {total_duplicated} дубликатов.")
+
+        if not errors:
+            return "Проверка успешно пройдена. Все заказанные коды были получены и успешно приняты API. Следующий шаг проверки (в разработке)."
+        else:
+            error_message = "Обнаружены расхождения:\n- " + "\n- ".join(errors) + "\n\nТребуется ручная проверка."
+            raise Exception(error_message)
+
     def get_participants(self):
         """Получает список участников (клиентов) из API."""
         logger.info("Получение списка участников из API...")
