@@ -4705,8 +4705,7 @@ class AdminWindowQt(QMainWindow):
 
         try:
             file_info = table.files_cache[sel]
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            content, filename = service.get_file_content(file_info['id'])
+            content, filename = self.supply_notification_service.get_file_content(file_info['id'])
 
             # Создаем временный файл с правильным расширением
             temp_dir = tempfile.gettempdir()
@@ -4744,8 +4743,7 @@ class AdminWindowQt(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            service.delete_notification_file(file_id)
+            self.supply_notification_service.delete_notification_file(file_id)
             QMessageBox.information(self, "Успех", "Файл успешно удален.")
             # Обновляем список файлов
             self.load_notification_files(notif_id, table)
