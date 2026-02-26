@@ -6385,9 +6385,8 @@ class AdminWindowQt(QMainWindow):
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
-        try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            df = service.get_formalization_template()
+        try:            
+            df = self.supply_notification_service.get_formalization_template()
 
             save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить шаблон", "template_details.xlsx", "Excel Files (*.xlsx)")
 
@@ -6414,9 +6413,8 @@ class AdminWindowQt(QMainWindow):
 
         try:
             with open(filepath, 'rb') as f:
-                file_data = f.read()
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            rows_processed = service.process_formalized_file(self.current_notification_id, file_data)
+                file_data = f.read() # type: ignore
+            rows_processed = self.supply_notification_service.process_formalized_file(self.current_notification_id, file_data) # type: ignore
             self.load_order_details(self.current_notification_id) # Обновляем таблицу
             QMessageBox.information(self, "Успех", f"Файл успешно обработан. Загружено {rows_processed} строк.")
         except Exception as e:
