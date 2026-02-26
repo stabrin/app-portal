@@ -4451,14 +4451,19 @@ class AdminWindowQt(QMainWindow):
             if self.btn_create_order.parent() is not None:
                 self.btn_create_order.parent().layout().removeWidget(self.btn_create_order)
                 self.btn_create_order.setParent(None)
+            
+            # Сбрасываем стиль кнопки по умолчанию
+            self.btn_create_order.setStyleSheet("")
 
             status = notif_data.get('status', '')
 
             if status == 'Ожидание':
                 self.btn_create_order.setText("Создать заказ")
+                self.btn_create_order.setStyleSheet("background-color: #90EE90;") # LightGreen
                 self.notification_actions_layout.insertWidget(1, self.btn_create_order) # Добавляем кнопку после "Сохранить"
             elif status == 'Заказ создан':
                 self.btn_create_order.setText("Обновить заказ")
+                self.btn_create_order.setStyleSheet("background-color: #FFB6C1;") # LightPink, как красный
                 self.notification_actions_layout.insertWidget(1, self.btn_create_order)
 
             # Заполняем поля
