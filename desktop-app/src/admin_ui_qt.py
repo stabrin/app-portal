@@ -1173,27 +1173,27 @@ class ApiIntegrationFrameQt(QWidget):
 
         api_status = self.order_data.get('api_status')
 
-        # Сначала деактивируем все
-        self.request_codes_btn.setEnabled(False)
-        self.get_codes_btn.setEnabled(False)
-        self.prepare_report_data_btn.setEnabled(False)
-        self.prepare_report_btn.setEnabled(False)
+        # Сначала скрываем все кнопки
+        self.request_codes_btn.setVisible(False)
+        self.get_codes_btn.setVisible(False)
+        self.prepare_report_data_btn.setVisible(False)
+        self.prepare_report_btn.setVisible(False)
         
-        # Активируем нужные в зависимости от статуса
+        # Показываем только нужные в зависимости от статуса
         if not api_status:
-            self.request_codes_btn.setEnabled(True)
+            self.request_codes_btn.setVisible(True)
         elif api_status == 'Запрос создан':
-            self.get_codes_btn.setEnabled(True)
+            self.get_codes_btn.setVisible(True)
         elif api_status == 'Коды скачаны':
-            self.prepare_report_data_btn.setEnabled(True)
+            self.prepare_report_data_btn.setVisible(True)
         elif api_status == 'Сведения подготовлены':
             # Обе кнопки активны, т.к. пользователь может хотеть пере-подготовить сведения
-            self.prepare_report_data_btn.setEnabled(True)
-            self.prepare_report_btn.setEnabled(True)
+            self.prepare_report_data_btn.setVisible(True)
+            self.prepare_report_btn.setVisible(True)
         elif api_status == 'Отчет подготовлен':
             self._display_api_response("Завершено", "Работа с заказом в АПИ полностью завершена.")
         else: # Для промежуточных статусов ('Тиражи созданы', 'JSON заказан')
-            self.get_codes_btn.setEnabled(True) # Позволяем перезапустить весь цикл получения кодов
+            self.get_codes_btn.setVisible(True) # Позволяем перезапустить весь цикл получения кодов
 
     def _display_api_response(self, title, body):
         self.response_text.setPlainText(f"--- {title} ---\n\n{body}")
