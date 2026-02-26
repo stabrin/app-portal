@@ -3865,8 +3865,7 @@ class AdminWindowQt(QMainWindow):
             return
             
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            stats_data = service.get_order_statistics()
+            stats_data = self.supply_notification_service.get_order_statistics()
             
             target_table.setRowCount(0)
             if not stats_data:
