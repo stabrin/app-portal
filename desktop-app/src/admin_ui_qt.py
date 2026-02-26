@@ -1266,6 +1266,10 @@ class ApiIntegrationFrameQt(QWidget):
         elif isinstance(result, tuple) and len(result) == 2:
             if result[0] == 'ask_prepare_report':
                 self._ask_prepare_report(result[1])
+            elif result[0] == 'ask_send_email_notification':
+                reply = QMessageBox.question(self, "Подтверждение", result[1], QMessageBox.Yes | QMessageBox.No)
+                if reply == QMessageBox.Yes:
+                    self._run_in_thread(self.api_service.send_report_success_email, self.order_id, self._append_log)
         elif result and isinstance(result, str):
              QMessageBox.information(self, "Результат операции", result)
 

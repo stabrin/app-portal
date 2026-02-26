@@ -648,7 +648,41 @@ class ApiService:
             errors.append(f"API обнаружило {total_duplicated} дубликатов.")
 
         if not errors:
-            return "Проверка успешно пройдена. Все заказанные коды были получены и успешно приняты API. Следующий шаг проверки (в разработке)."
+            log("\n--- ЭТАП 2: Проверка статуса отчетов о нанесении ---")
+            api_order_id = order_data.get('api_order_id')
+            if not api_order_id:
+                raise ValueError("Не найден ID заказа в API (api_order_id) для выполнения второго этапа проверки.")
+
+            log(f"Запрос статуса отчетов о нанесении для заказа API ID: {api_order_id}...")
+            subreports_data = self.get_utilisation_subreports(api_order_id)
+            
+            all_subreports = subreports_data.get('orders', [{}])[0].get('utilisation_subreports', [])
+            closed_subreports = [sr for sr in all_subreports if sr.get('state') == 'CLOSED']
+            
+            total_closed_qty = sum(sr.get('qty', 0) for sr in closed_subreports)
+            log(f"Найдено {len(closed_subreports)} закрытых отчетов. Общее количество кодов в них: {total_closed_qty}.")
+
+            if total_closed_qty == total_success:
+                log("УСПЕХ: Количество кодов в закрытых отчетах совпадает с общим количеством успешно принятых кодов.")
+                self.order_service.update_order_status(order_id, 'Отчет проверен')
+                
+                client_name = summary.get('client_name', 'N/A')
+                email_prompt = (
+                    f"Проверка успешно пройдена для заказа №{order_id} (клиент: {client_name}).\n\n"
+                    "Отправить email-уведомление об успешном завершении?"
+                )
+                return ('ask_send_email_notification', email_prompt)
+            else:
+                log("ОШИБКА: Количество кодов в закрытых отчетах не совпадает с успешно принятыми.")
+                problematic_reports = [
+                    sr for sr in all_subreports 
+                    if sr.get('request') is not None or sr.get('fail_reason') is not None or sr.get('fail_reason_extra') is not None
+                ]
+                if problematic_reports:
+                    error_details = "\n".join([f"  - ID {sr['id']} (GTIN {sr['gtin']}): State={sr['state']}, FailReason={sr.get('fail_reason')}" for sr in problematic_reports])
+                    raise Exception(f"Обнаружены отчеты с ошибками или в обработке:\n{error_details}")
+                else:
+                    raise Exception("Еще не все отчеты об утилизации приняты Честным знаком. Проверку нужно повторить через 5 минут.")
         else:
             error_message = "Обнаружены расхождения:\n- " + "\n- ".join(errors) + "\n\nТребуется ручная проверка."
             raise Exception(error_message)
@@ -807,6 +841,42 @@ class ApiService:
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при создании отчета об использовании: {e}", exc_info=True)
             raise
+
+    def get_utilisation_subreports(self, api_order_id: int):
+        """Получает детали отчетов о нанесении (subreports) из API."""
+        logger.info(f"Запрос отчетов о нанесении для заказа ID {api_order_id} из API.")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/utilisation/subreports"
+            response = self._api_request('get', url, json={"order_id": api_order_id}, timeout=30)
+            logger.info(f"Отчеты о нанесении для заказа {api_order_id} успешно получены.")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Ошибка при получении отчетов о нанесении для заказа {api_order_id}: {e}", exc_info=True)
+            raise
+
+    def send_report_success_email(self, order_id: int, progress_callback: Callable):
+        """Отправляет email-уведомление об успешной проверке отчета."""
+        if not self.order_service:
+            raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+
+        def log(message):
+            if progress_callback:
+                progress_callback(message)
+
+        log(f"Подготовка email-уведомления для заказа #{order_id}...")
+        summary = self.order_service.get_order_summary(order_id)
+        client_name = summary.get('client_name', 'N/A')
+
+        subject = f"Успех: Отчет по заказу №{order_id} ({client_name}) принят и проверен"
+        body_html = f"""
+        <p>По заказу <b>№{order_id}</b> клиента <b>{client_name}</b> отчет о нанесении кодов маркировки был успешно подан, принят "Честным знаком" и проверен системой.</p>
+        <p>Отклонений не выявлено.</p>
+        """
+        
+        from .email_service import EmailService
+        email_service = EmailService()
+        email_service.send_email(to_email="ignored@example.com", subject=subject, body_html=body_html)
+        return f"Email-уведомление для заказа #{order_id} успешно отправлено."
 
     def get_aggregated_utilisation_results(self, order_id: int, order_status: str) -> tuple[int, int, int]:
         """
