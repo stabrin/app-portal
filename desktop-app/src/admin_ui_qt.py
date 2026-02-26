@@ -4260,8 +4260,9 @@ class AdminWindowQt(QMainWindow):
             self.notif_client_filter_combo.blockSignals(True)
             self.notif_search_filter_edit.blockSignals(True)
 
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            notifications = service.get_notifications_with_counts()
+            # --- ИСПРАВЛЕНИЕ: Используем уже созданный экземпляр сервиса self.supply_notification_service ---
+            # Это решает ошибку TypeError, так как сервис уже был правильно инициализирован в конструкторе окна.
+            notifications = self.supply_notification_service.get_notifications_with_counts()
             
             # Сохраняем данные в кэш
             self.all_notifications_cache = notifications
