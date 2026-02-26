@@ -4574,9 +4574,8 @@ class AdminWindowQt(QMainWindow):
             return
         
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             # --- ИЗМЕНЕНИЕ: Обрабатываем новый формат ответа ---
-            success, message, requirements = service.create_or_recreate_order_from_notification(self.current_notification_id)
+            success, message, requirements = self.supply_notification_service.create_or_recreate_order_from_notification(self.current_notification_id)
             
             fias_code = None
             kpp = None
@@ -4591,14 +4590,14 @@ class AdminWindowQt(QMainWindow):
 
             # Если были требования, вызываем сервис еще раз с новыми данными
             if requirements:
-                success, message, requirements = service.create_or_recreate_order_from_notification(self.current_notification_id, fias_code=fias_code, kpp=kpp)
+                success, message, requirements = self.supply_notification_service.create_or_recreate_order_from_notification(self.current_notification_id, fias_code=fias_code, kpp=kpp)
 
             if requirements.get('confirmation_required'):
                 # Если требуется подтверждение, показываем диалог Да/Нет
                 reply = QMessageBox.question(self, "Подтверждение", message, QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
                     # Если пользователь согласен, вызываем сервис повторно с флагом force_recreate
-                    success, message, _ = service.create_or_recreate_order_from_notification(self.current_notification_id, force_recreate=True, fias_code=fias_code, kpp=kpp)
+                    success, message, _ = self.supply_notification_service.create_or_recreate_order_from_notification(self.current_notification_id, force_recreate=True, fias_code=fias_code, kpp=kpp)
                 else:
                     return # Пользователь отменил операцию
             
