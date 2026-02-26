@@ -164,6 +164,7 @@ class AuthWindow(QMainWindow):
                     return None
                 user_info = {
                     'name': user_name,
+                    'username': user_name,
                     'role': 'администратор',
                     'client_id': 0,
                     'client_db_config': client_db_config,
@@ -189,7 +190,11 @@ class AuthWindow(QMainWindow):
         (user_name, hashed_password, user_role, client_id, db_name, db_host, db_port, db_user, db_password, db_ssl_cert, api_base_url, api_email, api_password) = row
         import bcrypt
         if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
-            user_info = {'name': user_name, 'role': user_role}
+            user_info = {
+                'name': user_name,
+                'username': login, # --- ИЗМЕНЕНИЕ: Добавляем логин пользователя в user_info ---
+                'role': user_role
+            }
             if user_role == 'администратор':
                 user_info['client_id'] = client_id
                 user_info['client_db_config'] = {
