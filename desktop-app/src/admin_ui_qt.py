@@ -6369,8 +6369,8 @@ class AdminWindowQt(QMainWindow):
         try:            
             df = self.supply_notification_service.get_formalization_template()
 
-            save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить шаблон", "template_details.xlsx", "Excel Files (*.xlsx)")
-
+            save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить шаблон", "template_details.xlsx", "Excel Files (*.xlsx)") # type: ignore
+            if save_path:
                 df.to_excel(save_path, index=False)
                 QMessageBox.information(self, "Успех", f"Шаблон успешно сохранен в: {save_path}")
         except Exception as e:
