@@ -7,18 +7,22 @@ import pandas as pd
 import io
 import json
 from dateutil.relativedelta import relativedelta
+from .email_service import EmailService # НОВЫЙ ИМПОРТ
 
 class SupplyNotificationService:
     """
     Сервис для управления уведомлениями о поставке.
     """
 
-    def __init__(self, db_connection_func):
+    def __init__(self, db_connection_func, user_info=None):
         """
         Инициализирует сервис.
         :param db_connection_func: Функция, возвращающая активное подключение к БД клиента.
+        :param user_info: Словарь с информацией о текущем пользователе.
         """
         self.get_db_connection = db_connection_func
+        self.user_info = user_info if user_info is not None else {}
+        self.email_service = EmailService() # Инициализируем сервис отправки почты
 
     def get_notifications_with_counts(self):
         """Возвращает список уведомлений, не находящихся в архиве, с подсчетом позиций и ДМ."""
@@ -265,6 +269,29 @@ class SupplyNotificationService:
                             "Вам придется заново запросить/получить коды."
                         ) # --- ИЗМЕНЕНИЕ: Возвращаем confirmation_required в словаре ---
                         return False, confirmation_message, {'confirmation_required': True}
+
+                    # --- НОВЫЙ БЛОК: Отправка email-уведомления о пересоздании ---
+                    try:
+                        username = self.user_info.get('name', 'Неизвестный пользователь')
+                        client_name = notification.get('client_name', 'N/A')
+                        order_id_to_recreate = existing_order.get('id', 'N/A')
+
+                        subject = f"ВНИМАНИЕ: Пересоздан заказ №{order_id_to_recreate} для клиента {client_name}"
+                        body_html = f"""
+                        <p>Пользователь <b>{username}</b> пересоздал заказ клиента <b>{client_name}</b> номер <b>{order_id_to_recreate}</b>.</p>
+                        <p>Дальнейшая работа с заказом требует особой внимательности, так как ранее созданный заказ и коды, полученные в рамках этого заказа, в ДМ.Коде были аннулированы.</p>
+                        """
+                        # to_email игнорируется, так как получатели захардкожены в EmailService
+                        self.email_service.send_email(
+                            to_email="ignored@example.com",
+                            subject=subject,
+                            body_html=body_html
+                        )
+                        logging.info(f"Email-уведомление о пересоздании заказа #{order_id_to_recreate} успешно отправлено.")
+                    except Exception as e:
+                        # Не прерываем основной процесс, если не удалось отправить письмо, но логируем ошибку
+                        logging.error(f"Не удалось отправить email-уведомление о пересоздании заказа: {e}", exc_info=True)
+                    # --- КОНЕЦ НОВОГО БЛОКА ---
 
                     # Определяем статус и ID товарной группы
                     status = 'dmkod' if scenario_data.get('dm_source') == 'Заказ в ДМ.Код' else 'new'

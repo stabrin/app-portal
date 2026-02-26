@@ -2910,7 +2910,7 @@ class AdminWindowQt(QMainWindow):
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
         self.order_service = OrderService(self.user_info)
         self.task_service = TaskService(self.user_info)
-        self.supply_notification_service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
+        self.supply_notification_service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info), self.user_info)
         self.catalogs_service = CatalogsService(self.user_info, lambda: get_client_db_connection(self.user_info))
         self.api_service = ApiService(self.user_info, self.order_service) # ApiService должен быть инициализирован после всех, так как может их использовать
         self.genai_service = GenAIService(os.getenv("GOOGLE_API_KEY"))
@@ -3861,7 +3861,7 @@ class AdminWindowQt(QMainWindow):
         
         # Если выбрана вкладка "Архив", просто очищаем ее таблицу статистики и выходим
         if current_tab_index == 1:
-            target_table.setRowCount(0)
+            if target_table: target_table.setRowCount(0)
             return
             
         try:
