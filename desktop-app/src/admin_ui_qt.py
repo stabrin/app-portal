@@ -4571,9 +4571,8 @@ class AdminWindowQt(QMainWindow):
             QMessageBox.warning(self, "Ошибка", "Не выбрано уведомление")
             return
         
-        try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            data_to_save = {
+        try:            
+            data_to_save = { # type: ignore
                 # ИСПРАВЛЕНИЕ: Получаем дату из QDateEdit в нужном формате
                 'planned_arrival_date': self.notif_arrival_date_input.date().toString("yyyy-MM-dd") or None,
                 'vehicle_number': self.notif_vehicle_input.text(),
@@ -4582,7 +4581,7 @@ class AdminWindowQt(QMainWindow):
             # --- ИСПРАВЛЕНИЕ: Добавляем товарные группы из сохраненных данных ---
             if hasattr(self, 'current_notification_data'):
                 data_to_save['product_groups'] = self.current_notification_data.get('product_groups', [])
-            service.update_notification(self.current_notification_id, data_to_save)
+            self.supply_notification_service.update_notification(self.current_notification_id, data_to_save)
             QMessageBox.information(self, "Успех", "Изменения сохранены")
             self.load_notifications()
         except Exception as e:
