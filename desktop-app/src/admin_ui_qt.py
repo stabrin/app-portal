@@ -1153,11 +1153,15 @@ class ApiIntegrationFrameQt(QWidget):
 
         self.prepare_report_btn = QPushButton("4. Подготовить отчет")
         self.prepare_report_btn.clicked.connect(self._prepare_report_flow)
+
+        self.check_report_btn = QPushButton("5. Проверка")
+        self.check_report_btn.clicked.connect(self._check_report_flow)
         
         buttons_layout.addWidget(self.request_codes_btn)
         buttons_layout.addWidget(self.get_codes_btn)
         buttons_layout.addWidget(self.prepare_report_data_btn)
         buttons_layout.addWidget(self.prepare_report_btn)
+        buttons_layout.addWidget(self.check_report_btn)
         buttons_layout.addStretch()
         main_layout.addLayout(buttons_layout)
 
@@ -1178,6 +1182,7 @@ class ApiIntegrationFrameQt(QWidget):
         self.get_codes_btn.setVisible(False)
         self.prepare_report_data_btn.setVisible(False)
         self.prepare_report_btn.setVisible(False)
+        self.check_report_btn.setVisible(False)
         
         # Показываем только нужные в зависимости от статуса
         if not api_status:
@@ -1191,9 +1196,14 @@ class ApiIntegrationFrameQt(QWidget):
             self.prepare_report_data_btn.setVisible(True)
             self.prepare_report_btn.setVisible(True)
         elif api_status == 'Отчет подготовлен':
-            self._display_api_response("Завершено", "Работа с заказом в АПИ полностью завершена.")
+            self.check_report_btn.setVisible(True)
+            self._display_api_response("Завершено", "Отчет об использовании кодов подготовлен и отправлен в АПИ. Вы можете выполнить проверку статуса.")
         else: # Для промежуточных статусов ('Тиражи созданы', 'JSON заказан')
             self.get_codes_btn.setVisible(True) # Позволяем перезапустить весь цикл получения кодов
+
+    def _check_report_flow(self):
+        """Заглушка для функции проверки отчета."""
+        QMessageBox.information(self, "В разработке", "Функция проверки статуса отчета находится в разработке.")
 
     def _display_api_response(self, title, body):
         self.response_text.setPlainText(f"--- {title} ---\n\n{body}")
