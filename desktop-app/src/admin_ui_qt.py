@@ -4435,8 +4435,7 @@ class AdminWindowQt(QMainWindow):
     def load_notification_details(self, notif_id):
         """Загружает и отображает детали уведомления."""
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            notif_data = service.get_notification_by_id(notif_id)
+            notif_data = self.supply_notification_service.get_notification_by_id(notif_id)
             
             if not notif_data:
                 QMessageBox.critical(self, "Ошибка", "Не удалось загрузить данные уведомления")
@@ -4498,8 +4497,7 @@ class AdminWindowQt(QMainWindow):
 
     def load_notification_files(self, notif_id, target_table=None):
         """Загружает список файлов для уведомления."""
-        # --- ИЗМЕНЕНИЕ: Принимаем целевую таблицу как аргумент ---
-        table = target_table if target_table is not None else self.notification_files_table
+        table = target_table if target_table is not None else self.notification_files_table # type: ignore
 
         try:
             service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
@@ -4523,8 +4521,7 @@ class AdminWindowQt(QMainWindow):
     def load_order_details(self, notif_id):
         """Загружает детализацию заказа для уведомления."""
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            details = service.get_notification_details(notif_id) if hasattr(service, 'get_notification_details') else []
+            details = self.supply_notification_service.get_notification_details(notif_id) if hasattr(self.supply_notification_service, 'get_notification_details') else []
             
             self.order_details_table.setRowCount(0)
             
@@ -4556,8 +4553,7 @@ class AdminWindowQt(QMainWindow):
             return
         
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            data_to_save = {
+            data_to_save = { # type: ignore
                 # ИСПРАВЛЕНИЕ: Получаем дату из QDateEdit в нужном формате
                 'planned_arrival_date': self.notif_arrival_date_input.date().toString("yyyy-MM-dd") or None,
                 'vehicle_number': self.notif_vehicle_input.text(),
@@ -4566,7 +4562,7 @@ class AdminWindowQt(QMainWindow):
             # --- ИСПРАВЛЕНИЕ: Добавляем товарные группы из сохраненных данных ---
             if hasattr(self, 'current_notification_data'):
                 data_to_save['product_groups'] = self.current_notification_data.get('product_groups', [])
-            service.update_notification(self.current_notification_id, data_to_save)
+            self.supply_notification_service.update_notification(self.current_notification_id, data_to_save)
             QMessageBox.information(self, "Успех", "Изменения сохранены")
             self.load_notifications()
         except Exception as e:
@@ -4580,9 +4576,8 @@ class AdminWindowQt(QMainWindow):
             return
         
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             # --- ИЗМЕНЕНИЕ: Обрабатываем новый формат ответа ---
-            success, message, requirements = service.create_or_recreate_order_from_notification(self.current_notification_id)
+            success, message, requirements = self.supply_notification_service.create_or_recreate_order_from_notification(self.current_notification_id)
             
             fias_code = None
             kpp = None
@@ -4597,14 +4592,14 @@ class AdminWindowQt(QMainWindow):
 
             # Если были требования, вызываем сервис еще раз с новыми данными
             if requirements:
-                success, message, requirements = service.create_or_recreate_order_from_notification(self.current_notification_id, fias_code=fias_code, kpp=kpp)
+                success, message, requirements = self.supply_notification_service.create_or_recreate_order_from_notification(self.current_notification_id, fias_code=fias_code, kpp=kpp)
 
             if requirements.get('confirmation_required'):
                 # Если требуется подтверждение, показываем диалог Да/Нет
                 reply = QMessageBox.question(self, "Подтверждение", message, QMessageBox.Yes | QMessageBox.No)
                 if reply == QMessageBox.Yes:
                     # Если пользователь согласен, вызываем сервис повторно с флагом force_recreate
-                    success, message, _ = service.create_or_recreate_order_from_notification(self.current_notification_id, force_recreate=True, fias_code=fias_code, kpp=kpp)
+                    success, message, _ = self.supply_notification_service.create_or_recreate_order_from_notification(self.current_notification_id, force_recreate=True, fias_code=fias_code, kpp=kpp)
                 else:
                     return # Пользователь отменил операцию
             
@@ -4635,14 +4630,13 @@ class AdminWindowQt(QMainWindow):
             return
         
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             uploaded_count = 0
             for filepath in filepaths:
                 with open(filepath, 'rb') as f:
                     file_data = f.read()
                 
                 filename = os.path.basename(filepath)
-                service.add_notification_file(notif_id, filename, file_data, 'client_document')
+                self.supply_notification_service.add_notification_file(notif_id, filename, file_data, 'client_document')
                 uploaded_count += 1
 
             QMessageBox.information(self, "Успех", f"Успешно загружено файлов: {uploaded_count}")
@@ -4669,8 +4663,7 @@ class AdminWindowQt(QMainWindow):
         try:
             # ИСПРАВЛЕНИЕ: Получаем ID файла из кэша, а не из виджета
             file_info = table.files_cache[sel]
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            content, filename = service.get_file_content(file_info['id'])
+            content, filename = self.supply_notification_service.get_file_content(file_info['id'])
             
             save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", filename)
             if save_path:
@@ -4693,8 +4686,7 @@ class AdminWindowQt(QMainWindow):
 
         try:
             file_info = table.files_cache[sel]
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            content, filename = service.get_file_content(file_info['id'])
+            content, filename = self.supply_notification_service.get_file_content(file_info['id'])
 
             # Создаем временный файл с правильным расширением
             temp_dir = tempfile.gettempdir()
@@ -4732,8 +4724,7 @@ class AdminWindowQt(QMainWindow):
             if reply != QMessageBox.Yes:
                 return
 
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            service.delete_notification_file(file_id)
+            self.supply_notification_service.delete_notification_file(file_id)
             QMessageBox.information(self, "Успех", "Файл успешно удален.")
             # Обновляем список файлов
             self.load_notification_files(notif_id, table)
@@ -6375,13 +6366,11 @@ class AdminWindowQt(QMainWindow):
 
     def download_order_template(self):
         """Скачивает шаблон для детализации заказа."""
-        try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            df = service.get_formalization_template()
+        try:            
+            df = self.supply_notification_service.get_formalization_template()
 
             save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить шаблон", "template_details.xlsx", "Excel Files (*.xlsx)")
 
-            if save_path:
                 df.to_excel(save_path, index=False)
                 QMessageBox.information(self, "Успех", f"Шаблон успешно сохранен в: {save_path}")
         except Exception as e:
@@ -6405,8 +6394,7 @@ class AdminWindowQt(QMainWindow):
         try:
             with open(filepath, 'rb') as f:
                 file_data = f.read()
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            rows_processed = service.process_formalized_file(self.current_notification_id, file_data)
+            rows_processed = self.supply_notification_service.process_formalized_file(self.current_notification_id, file_data)
             self.load_order_details(self.current_notification_id) # Обновляем таблицу
             QMessageBox.information(self, "Успех", f"Файл успешно обработан. Загружено {rows_processed} строк.")
         except Exception as e:
@@ -6443,8 +6431,7 @@ class AdminWindowQt(QMainWindow):
                 )
                 details_to_save.append(row_data)
 
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            service.save_notification_details(details_to_save)
+            self.supply_notification_service.save_notification_details(details_to_save)
             QMessageBox.information(self, "Успех", "Изменения в детализации успешно сохранены.")
         except Exception as e:
             traceback.print_exc()
@@ -6461,8 +6448,7 @@ class AdminWindowQt(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            service.delete_notification(notif_id)
+            self.supply_notification_service.delete_notification(notif_id)
             QMessageBox.information(self, "Успех", "Уведомление удалено")
             self.load_notifications()
         except Exception as e:
@@ -6479,8 +6465,7 @@ class AdminWindowQt(QMainWindow):
 
         try:
             with get_client_db_connection(self.user_info) as conn:
-                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                    cur.execute("SELECT setting_key, setting_value FROM ap_settings WHERE setting_key IN ('LOCAL_SERVER_ADDRESS', 'LOCAL_SERVER_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD')")
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     settings_from_db = {row['setting_key']: row['setting_value'] for row in cur.fetchall()}
 
             ssl_cert_content = self.user_info.get('client_db_config', {}).get('db_ssl_cert', '')
@@ -7037,8 +7022,7 @@ class ProductMappingEditorDialog(QDialog):
                 # Пропускаем, если у клиента нет ID или имени
                 if not client.get('id') or not client.get('name'):
                     continue
-                display_name = f"api_{client['id']}_{client['name']}"
-                self.client_combo.addItem(display_name, userData=client['id'])
+                self.client_combo.addItem(display_name, userData=client['id']) # type: ignore
         except Exception as e:
             logging.error(f"Ошибка при загрузке клиентов в ProductMappingEditorDialog: {e}", exc_info=True)
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить список клиентов: {e}")
@@ -7279,8 +7263,7 @@ class LentaUploadDialog(QDialog):
         try:
             # 1. Создание уведомления и загрузка файла
             scenario = self.scenarios[self.scenario_combo.currentIndex()]
-            client = self.clients[self.client_combo.currentIndex()]
-            pg = self.product_groups[self.product_group_combo.currentIndex()]
+            client = self.clients[self.client_combo.currentIndex()] # type: ignore
 
             notif_data = {
                 'scenario_id': scenario['id'], 'scenario_name': scenario['name'], 'client_name': client['name'],
@@ -7290,12 +7273,12 @@ class LentaUploadDialog(QDialog):
             }
             logging.debug(f"[LentaUpload] Notification data prepared: {notif_data}")
             
-            # Шаг 1: Создание уведомления. Этот метод управляет своей транзакцией.
+            # Шаг 1: Создание уведомления.
             new_notif_id = self.service.create_notification(notif_data)
             logging.debug(f"[LentaUpload] Notification created with ID: {new_notif_id}")
 
-            # Шаг 1.1: Прикрепление файла к уведомлению. Этот метод также управляет своей транзакцией.
-            with open(self.filepath, 'rb') as f:
+            # Шаг 1.1: Прикрепление файла к уведомлению.
+            with open(self.filepath, 'rb') as f: # type: ignore
                 file_data = f.read()
             self.service.add_notification_file(new_notif_id, os.path.basename(self.filepath), file_data, 'lenta_upload')
             logging.debug(f"[LentaUpload] File '{os.path.basename(self.filepath)}' attached to notification ID: {new_notif_id}")
@@ -7303,7 +7286,7 @@ class LentaUploadDialog(QDialog):
             # --- НОВАЯ ПОСЛЕДОВАТЕЛЬНОСТЬ ---
             # Сначала обрабатываем файл и готовим данные
             logging.debug(f"[LentaUpload] Reading Excel file: {self.filepath}, using columns by index [1, 2, 3].")
-            df = pd.read_excel(self.filepath, header=0, usecols=[1, 2, 3], names=['gtin', 'sscc', 'quantity'], dtype=str)
+            df = pd.read_excel(self.filepath, header=0, usecols=[1, 2, 3], names=['gtin', 'sscc', 'quantity'], dtype=str) # type: ignore
             logging.debug(f"[LentaUpload] Excel file read. Initial rows: {len(df)}. First 5 rows:\n{df.head().to_string()}")
 
             df['gtin'] = df['gtin'].apply(lambda x: str(x).strip().zfill(14) if pd.notna(x) and len(str(x).strip()) < 14 else (str(x).strip() if pd.notna(x) else None))
@@ -7323,7 +7306,7 @@ class LentaUploadDialog(QDialog):
             df_grouped = df_unique.groupby('gtin').agg(sscc_count=('sscc', 'count')).reset_index()
             logging.debug(f"[LentaUpload] Data grouped by GTIN for details. Resulting groups: {len(df_grouped)}")
 
-            # ИСПРАВЛЕНИЕ: Реализуем вставку в ap_supply_notification_details напрямую,
+            # ИСПРАВЛЕНИЕ: Реализуем вставку в ap_supply_notification_details напрямую, # type: ignore
             # так как метод save_grouped_details_from_df отсутствует в сервисе.
             with get_client_db_connection(self.user_info) as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -7345,7 +7328,7 @@ class LentaUploadDialog(QDialog):
                     cols_details = ['notification_id', 'gtin', 'quantity', 'aggregation', 'production_date', 'shelf_life_months', 'expiry_date']
                     insert_query_details = f"INSERT INTO ap_supply_notification_details ({', '.join(cols_details)}) VALUES %s"
                     logging.debug(f"[LentaUpload] Preparing to insert {len(details_to_insert)} rows into ap_supply_notification_details.")
-                    from psycopg2.extras import execute_values
+                    from psycopg2.extras import execute_values # type: ignore
                     execute_values(cur, insert_query_details, details_to_insert)
                     logging.debug(f"[LentaUpload] Insertion into ap_supply_notification_details finished.")
                 conn.commit()
@@ -7377,7 +7360,7 @@ class LentaUploadDialog(QDialog):
                     df_unique['container_id'] = container_id
                     df_unique['owner'] = client['name']
                     
-                    from psycopg2.extras import execute_values
+                    from psycopg2.extras import execute_values # type: ignore
                     tasks_to_insert = df_unique[['order_id', 'container_id', 'gtin', 'sscc', 'owner']]
                     insert_query_tasks = f"INSERT INTO aggregation_tasks ({', '.join(tasks_to_insert.columns)}) VALUES %s"
                     logging.debug(f"[LentaUpload] Preparing to insert {len(tasks_to_insert)} rows into aggregation_tasks.")
