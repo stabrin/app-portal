@@ -4519,8 +4519,7 @@ class AdminWindowQt(QMainWindow):
     def load_order_details(self, notif_id):
         """Загружает детализацию заказа для уведомления."""
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            details = service.get_notification_details(notif_id) if hasattr(service, 'get_notification_details') else []
+            details = self.supply_notification_service.get_notification_details(notif_id) if hasattr(self.supply_notification_service, 'get_notification_details') else []
             
             self.order_details_table.setRowCount(0)
             
