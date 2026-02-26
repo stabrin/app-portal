@@ -14,14 +14,14 @@ class SupplyNotificationService:
     Сервис для управления уведомлениями о поставке.
     """
 
-    def __init__(self, db_connection_func, user_info=None):
+    def __init__(self, db_connection_func, get_user_info_func):
         """
         Инициализирует сервис.
         :param db_connection_func: Функция, возвращающая активное подключение к БД клиента.
-        :param user_info: Словарь с информацией о текущем пользователе.
+        :param get_user_info_func: Функция, возвращающая актуальный словарь с информацией о пользователе.
         """
         self.get_db_connection = db_connection_func
-        self.user_info = user_info if user_info is not None else {}
+        self.get_user_info = get_user_info_func
         self.email_service = EmailService() # Инициализируем сервис отправки почты
 
     def get_notifications_with_counts(self):
@@ -272,8 +272,9 @@ class SupplyNotificationService:
 
                     # --- НОВЫЙ БЛОК: Отправка email-уведомления о пересоздании ---
                     try:
-                        # --- ИЗМЕНЕНИЕ: Используем поле 'username' вместо 'name' ---
-                        username = self.user_info.get('username', 'Неизвестный пользователь')
+                        # --- ИЗМЕНЕНИЕ: Получаем актуальные данные пользователя перед отправкой ---
+                        current_user_info = self.get_user_info()
+                        username = current_user_info.get('username', 'Неизвестный пользователь')
                         client_name = notification.get('client_name', 'N/A')
                         order_id_to_recreate = existing_order.get('id', 'N/A')
 
