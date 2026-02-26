@@ -4649,14 +4649,13 @@ class AdminWindowQt(QMainWindow):
             return
         
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
             uploaded_count = 0
             for filepath in filepaths:
                 with open(filepath, 'rb') as f:
                     file_data = f.read()
                 
                 filename = os.path.basename(filepath)
-                service.add_notification_file(notif_id, filename, file_data, 'client_document')
+                self.supply_notification_service.add_notification_file(notif_id, filename, file_data, 'client_document')
                 uploaded_count += 1
 
             QMessageBox.information(self, "Успех", f"Успешно загружено файлов: {uploaded_count}")
@@ -4683,8 +4682,7 @@ class AdminWindowQt(QMainWindow):
         try:
             # ИСПРАВЛЕНИЕ: Получаем ID файла из кэша, а не из виджета
             file_info = table.files_cache[sel]
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            content, filename = service.get_file_content(file_info['id'])
+            content, filename = self.supply_notification_service.get_file_content(file_info['id'])
             
             save_path, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", filename)
             if save_path:
