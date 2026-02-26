@@ -6453,8 +6453,7 @@ class AdminWindowQt(QMainWindow):
                 )
                 details_to_save.append(row_data)
 
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            service.save_notification_details(details_to_save)
+            self.supply_notification_service.save_notification_details(details_to_save)
             QMessageBox.information(self, "Успех", "Изменения в детализации успешно сохранены.")
         except Exception as e:
             traceback.print_exc()
