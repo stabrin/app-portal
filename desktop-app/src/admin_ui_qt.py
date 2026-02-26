@@ -4334,8 +4334,7 @@ class AdminWindowQt(QMainWindow):
     def load_summary_data(self):
         """Загружает и отображает сводку по дням."""
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            summary_data = service.get_arrival_summary()
+            summary_data = self.supply_notification_service.get_arrival_summary()
 
             # ИСПРАВЛЕНИЕ: Очищаем только строки с данными, оставляя заголовки
             while self.summary_table.rowCount() > 2:
@@ -4435,8 +4434,7 @@ class AdminWindowQt(QMainWindow):
     def load_notification_details(self, notif_id):
         """Загружает и отображает детали уведомления."""
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            notif_data = service.get_notification_by_id(notif_id)
+            notif_data = self.supply_notification_service.get_notification_by_id(notif_id)
             
             if not notif_data:
                 QMessageBox.critical(self, "Ошибка", "Не удалось загрузить данные уведомления")
