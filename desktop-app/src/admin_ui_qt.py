@@ -3964,6 +3964,9 @@ class AdminWindowQt(QMainWindow):
             elif api_status == 'Коды скачаны': bg_color = QColor("#90EE90")
             elif api_status == 'Запрос создан': bg_color = QColor("#FFFFE0")
             elif status == 'completed': bg_color = QColor("#B0E0E6")
+            # --- НОВЫЙ БЛОК: Добавляем цвет для проверенных отчетов ---
+            elif api_status == 'Отчет проверен': bg_color = QColor("#E6E6FA") # Lavender
+            # --- КОНЕЦ НОВОГО БЛОКА ---
 
             items_to_add = [
                 str(order['order_date']),
