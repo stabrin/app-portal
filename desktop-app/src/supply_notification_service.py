@@ -272,7 +272,8 @@ class SupplyNotificationService:
 
                     # --- НОВЫЙ БЛОК: Отправка email-уведомления о пересоздании ---
                     try:
-                        username = self.user_info.get('name', 'Неизвестный пользователь')
+                        # --- ИЗМЕНЕНИЕ: Используем поле 'username' вместо 'name' ---
+                        username = self.user_info.get('username', 'Неизвестный пользователь')
                         client_name = notification.get('client_name', 'N/A')
                         order_id_to_recreate = existing_order.get('id', 'N/A')
 
