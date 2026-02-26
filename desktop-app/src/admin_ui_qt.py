@@ -6475,8 +6475,8 @@ class AdminWindowQt(QMainWindow):
         if reply != QMessageBox.Yes:
             return
         try:
-            service = SupplyNotificationService(lambda: get_client_db_connection(self.user_info))
-            service.delete_notification(notif_id)
+            # Используем уже существующий экземпляр сервиса
+            self.supply_notification_service.delete_notification(notif_id)
             QMessageBox.information(self, "Успех", "Уведомление удалено")
             self.load_notifications()
         except Exception as e:
