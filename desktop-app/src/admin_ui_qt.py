@@ -2941,7 +2941,10 @@ class AdminWindowQt(QMainWindow):
     def _define_endpoint_map(self):
         """Определяет метаданные для каждого эндпоинта API."""
         self.endpoint_map = {
-            'get_participants': {'requires_order': False},
+            'Список участников': {
+                'method_name': 'get_participants',
+                'requires_order': False
+            },
             'authenticate': {'requires_order': False},
             'refresh_token': {'requires_order': False},
             'create_order': {
