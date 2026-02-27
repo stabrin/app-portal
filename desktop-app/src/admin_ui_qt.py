@@ -2945,8 +2945,6 @@ class AdminWindowQt(QMainWindow):
                 'method_name': 'get_participants',
                 'requires_order': False
             },
-            'authenticate': {'requires_order': False},
-            'refresh_token': {'requires_order': False},
             'create_order': {
                 'requires_order': True,
                 'payload_generator': lambda oid, item_id: self.api_service.order_service.get_order_for_api_creation(oid)
@@ -2983,17 +2981,17 @@ class AdminWindowQt(QMainWindow):
                 'is_cyclic': True,
                 'cycle_item_source': 'utilisation_uploads',
                 'payload_generator': lambda oid, item_id: {'upload_id': item_id}
-            },
-            'Загрузка утилизации (delta_result)': {
-                'requires_order': True,
-                'is_cyclic': True,
-                'cycle_item_source': 'printruns',
-                'payload_generator': self._generate_delta_result_payload,
-                # --- Новые ключи для прямого HTTP вызова ---
-                'is_direct_http_call': True,
-                'http_method': 'POST',
-                'http_path': 'utilisation/upload'
             }
+        }
+        # --- ИЗМЕНЕНИЕ: Добавляем новый эндпоинт для отладки ---
+        self.endpoint_map['Загрузка сведений (ручная правка)'] = {
+            'requires_order': True,
+            'is_cyclic': True,
+            'cycle_item_source': 'printruns',
+            'payload_generator': self._generate_delta_result_payload,
+            'is_direct_http_call': True,
+            'http_method': 'POST',
+            'http_path': 'utilisation/upload'
         }
 
     def _reauthenticate_api(self):
