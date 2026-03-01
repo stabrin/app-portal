@@ -2945,22 +2945,32 @@ class AdminWindowQt(QMainWindow):
                 'method_name': 'get_participants',
                 'requires_order': False
             },
-            'create_order': {
-                'requires_order': True,
-                'payload_generator': lambda oid, item_id: self.api_service.order_service.get_order_for_api_creation(oid)
-            },
+        #    'create_order': {
+        #        'requires_order': True,
+        #        'payload_generator': lambda oid, item_id: self.api_service.order_service.get_order_for_api_creation(oid)
+        #    },
             'Детали заказа': {
                 'method_name': 'get_order_details',
                 'requires_order': True,
                 'is_cyclic': False,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
+            'Детали заказа по дате': {
+                'method_name': 'get_order_details',
+                'requires_order': False,
+                'is_cyclic': False,
+                'payload_generator': lambda oid, item_id: {'date': '2026-02-26'},
+                'is_direct_http_call': True,
+                'http_method': 'GET',
+                'http_path': 'orders'
+            },
             'Детали запроса': {
                 'method_name': 'get_suborders',
                 'requires_order': True,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
-            'get_printruns': {
+            'Получить тиражи': {
+                'method_name': 'get_printruns',
                 'requires_order': True,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
