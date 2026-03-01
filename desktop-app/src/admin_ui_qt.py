@@ -2961,7 +2961,7 @@ class AdminWindowQt(QMainWindow):
                 'payload_generator': lambda oid, item_id: {'date': '2026-02-26'},
                 'is_direct_http_call': True,
                 'http_method': 'GET',
-                'http_path': 'orders'
+                'http_path': 'psp/orders'
             },
             'Детали запроса': {
                 'method_name': 'get_suborders',
