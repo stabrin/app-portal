@@ -143,6 +143,17 @@ class ApiService:
         # 1. Гарантируем наличие токена перед запросом.
         self._ensure_token()
 
+        # --- НОВАЯ ЛОГИКА: Объединение параметров для GET-запросов ---
+        # Это решает проблему, когда и `params`, и `json` передаются одновременно.
+        # Приоритет отдается `params`, но `json` также будет учтен.
+        if method.lower() == 'get':
+            params_from_json = kwargs.pop('json', {})
+            if 'params' not in kwargs:
+                kwargs['params'] = {}
+            # Объединяем, `params` из прямого вызова имеет приоритет
+            kwargs['params'] = {**params_from_json, **kwargs['params']}
+        # --- КОНЕЦ НОВОЙ ЛОГИКИ ---
+
         # 2. Выполняем запрос.
         try:
             headers = self._get_auth_headers()
