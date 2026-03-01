@@ -5957,19 +5957,23 @@ class AdminWindowQt(QMainWindow):
             if endpoint_info.get('is_direct_http_call'):
                 http_method_str = endpoint_info.get('http_method', 'POST').lower()
                 http_path = endpoint_info.get('http_path')
-                if not http_path:
-                    raise ValueError("Не определен http_path для прямого вызова API")
-                
-                # Предполагаем, что у api_service есть общий метод для POST-запросов
-                # с сигнатурой post(path, json=payload)
-                if http_method_str != 'post':
-                     raise NotImplementedError(f"Прямые HTTP вызовы поддерживаются только для POST. Запрошен: {http_method_str}")
+                if not http_path or http_method_str not in ['get', 'post']:
+                    raise NotImplementedError(f"Прямой вызов API не поддерживается для метода '{http_method_str}' или не указан 'http_path'.")
 
                 self.api_tools_response_text.setPlainText("Выполняется запрос...")
                 QApplication.processEvents()
                 
-                # `kwargs` - это payload из текстового поля
-                response = self.api_service.post(http_path, json=kwargs)
+                # --- ИСПРАВЛЕНИЕ: Используем универсальный метод _api_request ---
+                # Он умеет работать с разными HTTP-методами (GET, POST и т.д.)
+                # --- НОВАЯ ЛОГИКА: Для GET-запросов передаем данные как 'params', для остальных - как 'json' ---
+                request_kwargs = {}
+                if http_method_str.lower() == 'get':
+                    request_kwargs['params'] = kwargs
+                else:
+                    request_kwargs['json'] = kwargs
+                full_url = f"{self.api_service.api_base_url.rstrip('/')}/{http_path.lstrip('/')}"
+                api_response = self.api_service._api_request(http_method_str, full_url, **request_kwargs)
+                response = api_response.json()
 
             else: # Оригинальная логика для вызова методов по имени
                 method_name = endpoint_info.get("method_name", endpoint_name)
