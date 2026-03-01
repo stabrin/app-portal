@@ -2956,7 +2956,6 @@ class AdminWindowQt(QMainWindow):
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
             'Детали заказа по дате': {
-                'method_name': 'get_order_details',
                 'requires_order': False,
                 'is_cyclic': False,
                 'payload_generator': lambda oid, item_id: {'date': '2026-02-26'},
