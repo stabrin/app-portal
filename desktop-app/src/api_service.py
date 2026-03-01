@@ -894,8 +894,17 @@ class ApiService:
         
         from .email_service import EmailService
         email_service = EmailService()
-        email_service.send_email(to_email="ignored@example.com", subject=subject, body_html=body_html, attachment=attachment_data)
-        return f"Email-уведомление для заказа #{order_id} успешно отправлено."
+        email_service.send_email(to_email="ignored@example.com", subject=subject, body_html=body_html, attachment=attachment_data) # type: ignore
+        log(f"Email-уведомление для заказа #{order_id} успешно отправлено.")
+
+        # --- НОВЫЙ БЛОК: Автоматическая архивация ---
+        try:
+            log(f"Автоматическая архивация заказа #{order_id}...")
+            self.order_service.move_order_to_archive(order_id)
+            log(f"Заказ #{order_id} и связанное уведомление успешно перенесены в архив.")
+        except Exception as e:
+            log(f"ПРЕДУПРЕЖДЕНИЕ: Не удалось автоматически архивировать заказ: {e}")
+        return f"Email-уведомление отправлено, заказ #{order_id} перенесен в архив."
 
     def get_aggregated_utilisation_results(self, order_id: int, order_status: str) -> tuple[int, int, int]:
         """
