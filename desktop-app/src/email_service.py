@@ -3,8 +3,10 @@
 import smtplib
 import logging
 from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
-from typing import Dict, Any
+from email import encoders
+from typing import Dict, Any, Optional, Tuple
 
 class EmailService:
     """
@@ -18,16 +20,16 @@ class EmailService:
         """
         # --- ИЗМЕНЕНИЕ: Жестко задаем все параметры ---
         self.config = {
-            'host': 'mail.it-workshop.ru',
+            'host': 'smtp.mail.ru',
             'port': 465,
-            'user': 'tilda@it-workshop.ru',
-            'password': 'Rv3a$3', # ЗАМЕНИТЕ НА РЕАЛЬНЫЙ ПАРОЛЬ
-            'sender_email': 'tilda@it-workshop.ru',
-            'recipient': 'markirovka@vedug-tlt.ru',
-            'bcc': 'sergey@tabrin.ru'
+            'user': 's.tabrin@tilda.center',
+            'password': 'СЕКРЕТНЫЙ_ПАРОЛЬ', # ЗАМЕНИТЕ НА РЕАЛЬНЫЙ ПАРОЛЬ
+            'sender_email': 's.tabrin@tilda.center',
+            'recipient': 's.tabrin@tilda.center',
+            'bcc': 's.tabrin@tilda.center'
         }
 
-    def send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None):
+    def send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None, attachment: Optional[Tuple[bytes, str]] = None):
         """
         Отправляет email-сообщение.
 
@@ -35,6 +37,7 @@ class EmailService:
         :param subject: Тема письма.
         :param body_html: Тело письма в формате HTML.
         :param body_text: Тело письма в формате простого текста (опционально, для совместимости).
+        :param attachment: Кортеж (содержимое_файла_в_байтах, имя_файла).
         """
         if not self.config.get('host'):
             logging.warning("SMTP хост не настроен или конфигурация неполная. Отправка email пропущена.")
@@ -49,15 +52,29 @@ class EmailService:
         if bcc_recipient:
             all_recipients.append(bcc_recipient)
 
-        msg = MIMEMultipart('alternative')
+        # --- ИЗМЕНЕНИЕ: Используем MIMEMultipart('mixed') для поддержки вложений ---
+        msg = MIMEMultipart('mixed')
         msg['Subject'] = subject
         msg['From'] = sender_email
         msg['To'] = main_recipient # В поле "Кому" будет основной получатель
 
+        # Создаем контейнер для текстовой и HTML частей
+        msg_alternative = MIMEMultipart('alternative')
+        msg.attach(msg_alternative)
+
         # Прикрепляем текстовую и HTML версии
         if body_text:
-            msg.attach(MIMEText(body_text, 'plain'))
-        msg.attach(MIMEText(body_html, 'html'))
+            msg_alternative.attach(MIMEText(body_text, 'plain'))
+        msg_alternative.attach(MIMEText(body_html, 'html'))
+
+        # --- НОВЫЙ БЛОК: Прикрепление файла ---
+        if attachment:
+            part = MIMEBase('application', "octet-stream")
+            part.set_payload(attachment[0])
+            encoders.encode_base64(part)
+            part.add_header('Content-Disposition', f'attachment; filename="{attachment[1]}"')
+            msg.attach(part)
+
         try:
             with smtplib.SMTP_SSL(self.config['host'], self.config['port']) as server:
                 server.login(self.config['user'], self.config['password'])

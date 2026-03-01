@@ -862,6 +862,8 @@ class ApiService:
         """Отправляет email-уведомление об успешной проверке отчета."""
         if not self.order_service:
             raise ValueError("OrderService не был предоставлен для выполнения этой операции.")
+        
+        import io
 
         def log(message):
             if progress_callback:
@@ -876,10 +878,23 @@ class ApiService:
         <p>По заказу <b>№{order_id}</b> клиента <b>{client_name}</b> отчет о нанесении кодов маркировки был успешно подан, принят "Честным знаком" и проверен системой.</p>
         <p>Отклонений не выявлено.</p>
         """
+
+        # --- НОВЫЙ БЛОК: Генерация и прикрепление отчета ---
+        attachment_data = None
+        log("Генерация отчета декларанта для вложения...")
+        try:
+            report_df, report_name = self.order_service.get_declarator_report_data(order_id)
+            if report_df is not None:
+                output = io.BytesIO()
+                report_df.to_excel(output, index=False)
+                attachment_data = (output.getvalue(), f"{report_name}_order_{order_id}.xlsx")
+                log(f"Отчет '{attachment_data[1]}' успешно сгенерирован.")
+        except Exception as e:
+            log(f"ПРЕДУПРЕЖДЕНИЕ: Не удалось сгенерировать отчет для вложения: {e}")
         
         from .email_service import EmailService
         email_service = EmailService()
-        email_service.send_email(to_email="ignored@example.com", subject=subject, body_html=body_html)
+        email_service.send_email(to_email="ignored@example.com", subject=subject, body_html=body_html, attachment=attachment_data)
         return f"Email-уведомление для заказа #{order_id} успешно отправлено."
 
     def get_aggregated_utilisation_results(self, order_id: int, order_status: str) -> tuple[int, int, int]:
