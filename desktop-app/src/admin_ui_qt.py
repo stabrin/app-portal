@@ -5964,16 +5964,9 @@ class AdminWindowQt(QMainWindow):
                 self.api_tools_response_text.setPlainText("Выполняется запрос...")
                 QApplication.processEvents()
                 
-                # --- ИСПРАВЛЕНИЕ: Используем универсальный метод _api_request ---
-                # Он умеет работать с разными HTTP-методами (GET, POST и т.д.)
-                # --- НОВАЯ ЛОГИКА: Для GET-запросов передаем данные как 'params', для остальных - как 'json' ---
-                request_kwargs = {}
-                if http_method_str.lower() == 'get':
-                    request_kwargs['params'] = kwargs
-                else:
-                    request_kwargs['json'] = kwargs
                 full_url = f"{self.api_service.api_base_url.rstrip('/')}/{http_path.lstrip('/')}"
-                api_response = self.api_service._api_request(http_method_str, full_url, **request_kwargs)
+                # --- ИСПРАВЛЕНИЕ: Всегда передаем аргументы как JSON в теле, как того требует это API ---
+                api_response = self.api_service._api_request(http_method_str, full_url, json=kwargs)
                 response = api_response.json()
 
             else: # Оригинальная логика для вызова методов по имени
