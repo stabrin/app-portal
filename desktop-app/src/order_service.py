@@ -446,7 +446,8 @@ class OrderService:
             return None, None
 
         df = pd.DataFrame(report_data)
-        df = df.applymap(lambda val: val.replace('\x1d', ' ') if isinstance(val, str) else val)
+        # --- ИСПРАВЛЕНИЕ: Заменяем устаревший applymap на map ---
+        df = df.map(lambda val: val.replace('\x1d', ' ') if isinstance(val, str) else val)
         report_name = re.sub(r'[^\w]', '_', order_info.get('notes', '') if order_info else '').strip('_')
         
         return df, report_name
