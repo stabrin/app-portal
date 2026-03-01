@@ -2955,14 +2955,6 @@ class AdminWindowQt(QMainWindow):
                 'is_cyclic': False,
                 'payload_generator': lambda oid, item_id: {'order_id': self.order_service.get_order_by_id(oid).get('api_order_id')}
             },
-            'Детали заказа по дате': {
-                'requires_order': False,
-                'is_cyclic': False,
-                'payload_generator': lambda oid, item_id: {'date': '2026-02-26'},
-                'is_direct_http_call': True,
-                'http_method': 'GET',
-                'http_path': 'psp/orders'
-            },
             'Детали запроса': {
                 'method_name': 'get_suborders',
                 'requires_order': True,
@@ -2990,7 +2982,7 @@ class AdminWindowQt(QMainWindow):
                 'is_cyclic': True,
                 'cycle_item_source': 'utilisation_uploads',
                 'payload_generator': lambda oid, item_id: {'upload_id': item_id}
-            }
+            },
         }
         # --- ИЗМЕНЕНИЕ: Добавляем новый эндпоинт для отладки ---
         self.endpoint_map['Загрузка сведений (ручная правка)'] = {
@@ -3001,6 +2993,15 @@ class AdminWindowQt(QMainWindow):
             'is_direct_http_call': True,
             'http_method': 'POST',
             'http_path': 'utilisation/upload'
+        }
+        # --- НОВЫЙ ЭНДПОИНТ: Добавляем ваш эндпоинт с исправленным путем ---
+        self.endpoint_map['Детали заказа по дате'] = {
+            'requires_order': False,
+            'is_cyclic': False,
+            'payload_generator': lambda oid, item_id: {'date': '2026-02-26'},
+            'is_direct_http_call': True,
+            'http_method': 'GET',
+            'http_path': 'psp/orders' # ИСПРАВЛЕНИЕ: Добавлен префикс psp/
         }
 
     def _reauthenticate_api(self):
