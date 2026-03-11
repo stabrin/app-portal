@@ -26,7 +26,7 @@ class EmailService:
             'password': 'Rv3a$3', # ЗАМЕНИТЕ НА РЕАЛЬНЫЙ ПАРОЛЬ
             'sender_email': 'tilda@it-workshop.ru',
             'recipient': 'markirovka@vedug-tlt.ru',
-            'bcc': 'sergey@tabrin.ru'
+            'bcc': ['sergey@tabrin.ru', 'pikalova@ved-ug.ru']
         }
 
     def send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None, attachment: Optional[Tuple[bytes, str]] = None):
@@ -46,11 +46,11 @@ class EmailService:
         # --- ИЗМЕНЕНИЕ: Используем жестко заданные адреса ---
         sender_email = self.config['sender_email']
         main_recipient = self.config['recipient']
-        bcc_recipient = self.config.get('bcc')
+        bcc_recipients = self.config.get('bcc', [])
 
         all_recipients = [main_recipient]
-        if bcc_recipient:
-            all_recipients.append(bcc_recipient)
+        if bcc_recipients:
+            all_recipients.extend(bcc_recipients if isinstance(bcc_recipients, list) else [bcc_recipients])
 
         # --- ИЗМЕНЕНИЕ: Используем MIMEMultipart('mixed') для поддержки вложений ---
         msg = MIMEMultipart('mixed')
