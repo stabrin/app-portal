@@ -460,9 +460,10 @@ class OrderService:
                 # --- ИЗМЕНЕНИЕ: Формируем JSON с учетом требований товарной группы ---
                 def create_payload(row):
                     attributes = {
-                        "production_date": str(row.production_date),
-                        "expiration_date": str(row.expiration_date) if row.expiration_date else None
+                        "production_date": str(row.production_date)
                     }
+                    if pd.notna(row.expiration_date):
+                        attributes["expiration_date"] = str(row.expiration_date)
                     if order_info.get('fias_required') and order_info.get('fias_code'):
                         attributes['fiasid'] = order_info['fias_code']
                     if order_info.get('kpp_required') and order_info.get('kpp'):
