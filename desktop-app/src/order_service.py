@@ -335,7 +335,11 @@ class OrderService:
         df.loc[~mask, 'EndDate'] = None
         logging.debug(f"[Delta Import] After date processing - EndDate unique: {df['EndDate'].unique()}")
         # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
-
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT o.id, o.product_group_id, pg.fias_required, pg.kpp_required, pg.variables_required, o.fias_code, o.kpp
+                    FROM orders o
                     LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
                     WHERE o.id = %s
                 """, (order_id,))
