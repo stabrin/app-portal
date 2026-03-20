@@ -49,12 +49,96 @@ class OrderService:
                 cur.execute("SELECT * FROM dmkod_aggregation_details WHERE order_id = %s ORDER BY id", (order_id,))
                 return cur.fetchall()
 
-    def save_order_changes(self, order_id: int, updates: list, notes: str, fias_code: str, kpp: str):
-        """Сохраняет изменения в заказе (комментарий, ФИАС, КПП) и его детализации в одной транзакции."""
+    def create_order_from_api_order(self, api_order_data: dict, participants_dict: dict):
+        """Создает заказ в БД клиента на основе данных из API.
+        
+        Args:
+            api_order_data: Словарь с данными заказа из API (order_id, participant, products, etc.)
+            participants_dict: Словарь {participant_id: {"id": ..., "name": ...}}
+        
+        Returns:
+            int: ID созданного заказа
+        """
+        from datetime import datetime, timedelta
+        
+        api_order_id = api_order_data.get('order_id')
+        participant_id = api_order_data.get('participant')
+        products = api_order_data.get('products', [])
+        
+        if not api_order_id or not participant_id:
+            raise ValueError("api_order_id и participant обязательны.")
+        
+        # Получаем данные участника из справочника
+        participant_info = participants_dict.get(participant_id)
+        if not participant_info:
+            raise ValueError(f"Участник {participant_id} не найден в справочнике.")
+        
+        client_name = participant_info.get('name', f"Участник {participant_id}")
+        client_api_id = participant_info.get('id', participant_id)
+        
+        # Формируем даты
+        today = datetime.now().date()
+        tomorrow = today + timedelta(days=1)
+        
+        with self._get_connection() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1. Создаем заказ в таблице orders
+                cur.execute("""
+                    INSERT INTO orders (
+                        client_name, order_date, status, notes, api_status, 
+                        api_order_id, scenario_id, client_api_id
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (
+                    client_name,
+                    today,
+                    "dmkod",
+                    "Заказ из АПИ",
+                    "Запрос создан",
+                    api_order_id,
+                    1,  # scenario_id = 1
+                    client_api_id
+                ))
+                
+                order_id = cur.fetchone()['id']
+                logging.info(f"Создан заказ ID {order_id} из API заказа {api_order_id}.")
+                
+                # 2. Создаем детализацию для каждого продукта
+                if products:
+                    details_data = [
+                        (
+                            order_id,
+                            product.get('gtin'),
+                            product.get('qty', 0),
+                            0,  # aggregation_level
+                            today,
+                            tomorrow
+                        )
+                        for product in products
+                    ]
+                    
+                    insert_query = """
+                        INSERT INTO dmkod_aggregation_details (
+                            order_id, gtin, dm_quantity, aggregation_level, 
+                            production_date, expiry_date
+                        ) VALUES %s
+                    """
+                    execute_values(cur, insert_query, details_data)
+                    logging.info(f"Добавлено {len(details_data)} товаров в детализацию заказа {order_id}.")
+                
+                conn.commit()
+            
+        return order_id
+
+    def save_order_changes(self, order_id: int, updates: list, notes: str, fias_code: str, kpp: str, product_group_id: int = None):
+        """Сохраняет изменения в заказе (комментарий, ФИАС, КПП, продуктовая группа) и его детализации в одной транзакции."""
         with self._get_connection() as conn:
             with conn.cursor() as cur:
                 # 1. Обновляем основные данные заказа
-                cur.execute("UPDATE orders SET notes = %s, fias_code = %s, kpp = %s WHERE id = %s", (notes, fias_code, kpp, order_id))
+                if product_group_id is not None:
+                    cur.execute("UPDATE orders SET notes = %s, fias_code = %s, kpp = %s, product_group_id = %s WHERE id = %s", (notes, fias_code, kpp, product_group_id, order_id))
+                else:
+                    cur.execute("UPDATE orders SET notes = %s, fias_code = %s, kpp = %s WHERE id = %s", (notes, fias_code, kpp, order_id))
                 
                 # 2. Обновляем строки в детализации
                 for item in updates:
@@ -243,24 +327,29 @@ class OrderService:
         df['Barcode'] = df['Barcode'].apply(lambda x: '0' + str(x) if isinstance(x, str) and len(x) == 13 else x)
         df['BoxSSCC'] = df['BoxSSCC'].str[-18:]
         df['PaletSSCC'] = df['PaletSSCC'].str[-18:]
-        df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-        df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d').dt.strftime('%Y-%m-%d')
-        
-        with self._get_connection() as conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # --- НОВЫЙ БЛОК: Получаем информацию о заказе и его товарной группе ---
-                cur.execute("""
-                    SELECT 
-                        o.fias_code, o.kpp, 
-                        pg.fias_required, pg.kpp_required
-                    FROM orders o
+        # --- ИСПРАВЛЕНИЕ: Обрабатываем пустые даты ---
+        df['StartDate'] = pd.to_datetime(df['StartDate'], format='%Y-%m-%d', errors='coerce').dt.strftime('%Y-%m-%d')
+        df['EndDate'] = pd.to_datetime(df['EndDate'], format='%Y-%m-%d', errors='coerce')
+        mask = df['EndDate'].notna()
+        df.loc[mask, 'EndDate'] = df.loc[mask, 'EndDate'].dt.strftime('%Y-%m-%d')
+        df.loc[~mask, 'EndDate'] = None
+        logging.debug(f"[Delta Import] After date processing - EndDate unique: {df['EndDate'].unique()}")
+        # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
+
                     LEFT JOIN dmkod_product_groups pg ON o.product_group_id = pg.id
                     WHERE o.id = %s
                 """, (order_id,))
                 order_info = cur.fetchone()
                 if not order_info:
                     raise ValueError(f"Не удалось найти информацию для заказа ID {order_id}")
-                # --- КОНЕЦ НОВОГО БЛОКА ---
+
+                # --- ЛОГИРОВАНИЕ: Проверка параметров заказа ---
+                logging.debug(
+                    f"[Delta Import] order_id={order_id}, product_group_id={order_info.get('product_group_id')}, "
+                    f"fias_required={order_info.get('fias_required')}, kpp_required={order_info.get('kpp_required')}, "
+                    f"variables_required={order_info.get('variables_required')}"
+                )
+                # --- КОНЕЦ ЛОГА ---
 
                 # 1. Создание упаковок (короба и паллеты)
                 unique_boxes = df[['BoxSSCC']].dropna().drop_duplicates().rename(columns={'BoxSSCC': 'sscc'})
@@ -321,39 +410,100 @@ class OrderService:
                 df_for_json = df.copy()
                 df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
                 df_for_json['gtin'] = df_for_json['gtin'].astype(str)
+                # --- ИСПРАВЛЕНИЕ: Приводим NaT к None для корректной группировки ---
+                df_for_json['expiration_date'] = df_for_json['expiration_date'].where(df_for_json['expiration_date'].notna(), None)
+                # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
                 
                 cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (order_id,))
-                gtin_to_printrun_map = {str(row['gtin']): row['api_id'] for row in cur.fetchall()}
+                # --- ЛОГИРОВАНИЕ: GTIN из заказа ---
+                order_gtins = cur.fetchall()
+                logging.debug(f"[Delta Import] GTINs from order {order_id}: {[(r['gtin'], r['api_id']) for r in order_gtins]}")
+                # --- КОНЕЦ ЛОГА ---
+                gtin_to_printrun_map = {str(row['gtin']): row['api_id'] for row in order_gtins}
 
                 if not gtin_to_printrun_map:
                     raise Exception("Не удалось найти ID тиражей (api_id) в деталях заказа. Убедитесь, что тиражи созданы в API.")
+
+                # Создаем обратную карту: printrun_id -> gtin, чтобы при формировании payload знать GTIN
+                printrun_to_gtin_map = {v: k for k, v in gtin_to_printrun_map.items()}
 
                 df_for_json['printrun_id'] = df_for_json['gtin'].map(gtin_to_printrun_map)
                 if df_for_json['printrun_id'].isnull().any():
                     unmapped_gtins = df_for_json[df_for_json['printrun_id'].isnull()]['gtin'].unique()
                     raise ValueError(f"Ошибка: Для GTIN(ов) {list(unmapped_gtins)} из файла не найден соответствующий ID тиража в заказе.")
 
+                # Подготавливаем сопоставление GTIN -> description_1 (если в справочнике есть данные)
+                # даже если переменные не требуются, это позволяет автоматически добавлять описание при наличии.
+                gtin_to_description = {}
+                unique_gtins = df_for_json['gtin'].dropna().unique().tolist()
+                logging.debug(f"[Delta Import] Unique GTINs from CSV: {unique_gtins}")
+                if unique_gtins:
+                    cur.execute("SELECT gtin, description_1 FROM products WHERE gtin IN %s", (tuple(unique_gtins),))
+                    fetched = cur.fetchall()
+                    logging.debug(f"[Delta Import] Fetched from products: {[(r['gtin'], r['description_1'][:50] if r['description_1'] else '') for r in fetched]}")
+                    gtin_to_description = {
+                        str(row['gtin']): str(row['description_1']) if row.get('description_1') is not None else ''
+                        for row in fetched
+                    }
+                    logging.debug(f"[Delta Import] GTIN->description_1 mapping: {gtin_to_description}")
+
+                logging.debug(f"[Delta Import] df_for_json sample:\n{df_for_json.head().to_string()}")
                 grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
+                logging.debug(f"[Delta Import] Grouped for API: {len(grouped_for_api)} groups")
+                if len(grouped_for_api) == 0:
+                    logging.debug(f"[Delta Import] No groups - checking expiration_date types: {df_for_json['expiration_date'].dtype}, unique: {df_for_json['expiration_date'].unique()}")
                 
                 # --- ИЗМЕНЕНИЕ: Формируем JSON с учетом требований товарной группы ---
                 def create_payload(row):
                     attributes = {
                         "production_date": str(row.production_date),
-                        "expiration_date": str(row.expiration_date)
+                        "expiration_date": str(row.expiration_date) if row.expiration_date else None
                     }
                     if order_info.get('fias_required') and order_info.get('fias_code'):
                         attributes['fiasid'] = order_info['fias_code']
                     if order_info.get('kpp_required') and order_info.get('kpp'):
                         attributes['kpp'] = order_info['kpp']
-                    
+
+                    # Определяем GTIN по printrun_id, если нужно подставить переменные
+                    description = None
+                    gtin_for_row = None
+                    if order_info.get('variables_required'):
+                        gtin_for_row = printrun_to_gtin_map.get(row.printrun_id)
+                        if gtin_for_row is not None:
+                            description = gtin_to_description.get(str(gtin_for_row))
+
+                    def format_code(code: str):
+                        cleaned = code.replace('\x1d', '')
+                        if description:
+                            formatted = f"{cleaned},{description}"
+                            logging.debug(f"[Delta Import] Formatted code: {formatted[:100]}... (GTIN: {gtin_for_row}, desc: '{description}')")
+                            return formatted
+                        return cleaned
+
+                    codes_list = [{"code": format_code(code)} for code in row.DataMatrix]
+                    logging.debug(f"[Delta Import] For printrun {row.printrun_id} (GTIN {gtin_for_row}): {len(codes_list)} codes, desc='{description}'")
+
                     return json.dumps({
-                        "include": [{"code": code.replace('\x1d', '')} for code in row.DataMatrix],
+                        "include": codes_list,
                         "attributes": attributes
                     })
-                grouped_for_api['codes_json'] = grouped_for_api.apply(create_payload, axis=1)
+
+
+                # Pandas apply может вернуть DataFrame, если функция возвращает Series/словарь.
+                # Поэтому формируем список вручную и присваиваем колонку через assign.
+                codes_json_list = [create_payload(row) for _, row in grouped_for_api.iterrows()]
+                grouped_for_api = grouped_for_api.assign(codes_json=codes_json_list)
                 grouped_for_api['order_id'] = order_id
                 grouped_for_api['printrun_id'] = grouped_for_api['printrun_id'].astype(int)
                 grouped_for_api['production_date'] = pd.to_datetime(grouped_for_api['production_date']).dt.date
+
+                # --- ЛОГИРОВАНИЕ: Показываем как минимум одну сформированную запись для отладки ---
+                if not grouped_for_api.empty:
+                    sample = grouped_for_api.iloc[0]
+                    logging.debug(
+                        "[Delta Import] Пример сформированного codes_json (первые 200 символов): %s",
+                        str(sample['codes_json'])[:200]
+                    )
 
                 delta_result_df = grouped_for_api[['order_id', 'printrun_id', 'production_date', 'codes_json']]
                 # --- ИСПРАВЛЕНИЕ: Аргументы dataframe и table_name были перепутаны местами. ---

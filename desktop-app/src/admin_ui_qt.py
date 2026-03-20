@@ -399,6 +399,11 @@ class OrderEditorFrameQt(QWidget):
             self.kpp_edit = QLineEdit()
             # --- КОНЕЦ НОВЫХ ПОЛЕЙ ---
             
+            # --- НОВОЕ ПОЛЕ: Продуктовая группа ---
+            self.product_group_label = QLabel("Продуктовая группа:")
+            self.product_group_combo = QComboBox()
+            # --- КОНЕЦ НОВОГО ПОЛЯ ---
+            
             btn_save = QPushButton("Сохранить")
             btn_save.clicked.connect(self._save_changes)
 
@@ -410,6 +415,7 @@ class OrderEditorFrameQt(QWidget):
             fias_kpp_layout = QFormLayout()
             fias_kpp_layout.addRow(self.fias_label, self.fias_edit)
             fias_kpp_layout.addRow(self.kpp_label, self.kpp_edit)
+            fias_kpp_layout.addRow(self.product_group_label, self.product_group_combo)
             # --- КОНЕЦ НОВОГО БЛОКА ---
             
             main_layout.addLayout(controls_frame_1)
@@ -532,6 +538,20 @@ class OrderEditorFrameQt(QWidget):
                     fias_required = product_group.get('fias_required', False)
                     kpp_required = product_group.get('kpp_required', False)
 
+            # --- НОВАЯ ЛОГИКА: Управление видимостью поля продуктовой группы ---
+            if product_group_id is None:
+                # Загружаем список групп
+                groups = self.main_app_window.catalogs_service.get_product_groups()
+                self.product_group_combo.clear()
+                self.product_group_combo.addItem("Выберите группу", None)
+                for g in groups:
+                    self.product_group_combo.addItem(g['display_name'], g['id'])
+                self.product_group_label.setVisible(True)
+                self.product_group_combo.setVisible(True)
+            else:
+                self.product_group_label.setVisible(False)
+                self.product_group_combo.setVisible(False)
+
             # --- ИЗМЕНЕНИЕ: Загружаем не только детали, но и основную информацию о заказе ---
             if not self.is_archive:
                 # Получаем данные самого заказа
@@ -587,15 +607,16 @@ class OrderEditorFrameQt(QWidget):
         comment_text = self.comment_edit.text()
         fias_code_text = self.fias_edit.text()
         kpp_text = self.kpp_edit.text()
+        product_group_id = self.product_group_combo.currentData() if self.product_group_combo.isVisible() else None
 
         try:
             # 3. Вызываем обновленный сервисный метод для сохранения всего вместе.
-            self.order_service.save_order_changes(self.order_id, detail_updates, comment_text, fias_code_text, kpp_text)
+            self.order_service.save_order_changes(self.order_id, detail_updates, comment_text, fias_code_text, kpp_text, product_group_id)
             QMessageBox.information(self, "Успех", "Изменения успешно сохранены.")
             
             # 4. Обновляем список заказов, чтобы отобразить новый комментарий
             if self.main_app_window:
-                 self.main_app_window.load_orders(is_archive=self.is_archive)
+                 self.main_app_window.refresh_orders()
 
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось сохранить изменения: {e}")
@@ -643,7 +664,7 @@ class OrderEditorFrameQt(QWidget):
             self.order_service.move_order_to_archive(self.order_id)
             
             if self.main_app_window:
-                self.main_app_window.load_orders(is_archive=False)
+                self.main_app_window.refresh_orders()
                 self.main_app_window.load_orders(is_archive=True)
 
             QMessageBox.information(self, "Успех", "Заказ успешно перемещен в архив.")
@@ -763,7 +784,7 @@ class OrderEditorFrameQt(QWidget):
             df.to_csv(filepath, sep='\t', index=False, encoding='utf-8', lineterminator='\r\n', quoting=csv.QUOTE_NONE)
             
             QMessageBox.information(self, "Успех", f"Данные успешно выгружены в файл:\n{filepath}\n\nСтатус заказа обновлен на 'delta'.")
-            self.main_app_window.load_orders(is_archive=False) # Обновляем UI
+            self.main_app_window.refresh_orders() # Обновляем UI
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось экспортировать данные: {e}")
 
@@ -2925,6 +2946,8 @@ class AdminWindowQt(QMainWindow):
         # --- ИСПРАВЛЕНИЕ: Инициализируем кэши для заказов ---
         self.in_progress_orders_cache = []
         self.archive_orders_cache = []
+        self.incoming_orders_cache = []
+        self.incoming_participants_dict = {}
 
         # --- ИСПРАВЛЕНИЕ: Инициализируем сервисы ---
         self.order_service = OrderService(self.user_info)
@@ -3383,7 +3406,7 @@ class AdminWindowQt(QMainWindow):
         return widget
 
     def _build_orders_page(self):
-        """Создает страницу для управления заказами с вкладками 'В работе' и 'Архив'."""
+        """Создает страницу для управления заказами с вкладками 'В работе', 'Архив' и 'Входящие'."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
@@ -3410,16 +3433,32 @@ class AdminWindowQt(QMainWindow):
         ) = self._create_orders_view(is_archive=True)
         self.orders_tab_widget.addTab(archive_widget, "Архив")
 
+        # Вкладка "Входящие" (новая)
+        (incoming_widget,
+         _, _, _, _, _, _, _, _, _
+        ) = self._create_orders_view(is_archive=False, incoming=True)
+        self.orders_tab_widget.addTab(incoming_widget, "Входящие")
+
         self.orders_tab_widget.currentChanged.connect(self._on_orders_tab_changed)
 
         layout.addWidget(self.orders_tab_widget)
         return widget
 
-    def _create_orders_view(self, is_archive):
-        """Создает UI для одной вкладки заказов (активных или архивных)."""
+    def _create_orders_view(self, is_archive, incoming=False):
+        """Создает UI для одной вкладки заказов (активных, архивных или входящих)."""
         # Основной виджет вкладки
         view_widget = QWidget()
         main_layout = QVBoxLayout(view_widget)
+
+        if incoming:
+            # Для вкладки "Входящие" - скроллируемая область с табличками заказов из API
+            scroll_area = QScrollArea()
+            scroll_widget = QWidget()
+            self.incoming_layout = QVBoxLayout(scroll_widget)
+            scroll_area.setWidget(scroll_widget)
+            scroll_area.setWidgetResizable(True)
+            main_layout.addWidget(scroll_area)
+            return view_widget, None, None, None, None, None, None, None, None, None
 
         # Разделитель для таблицы и статистики
         main_splitter = QSplitter(Qt.Vertical)
@@ -3477,7 +3516,7 @@ class AdminWindowQt(QMainWindow):
         
         # --- ИЗМЕНЕНИЕ: Добавляем кнопку "Обновить" ---
         btn_refresh = QPushButton("Обновить")
-        btn_refresh.clicked.connect(lambda: self.load_orders(is_archive))
+        btn_refresh.clicked.connect(lambda: self.load_orders(is_archive, incoming))
         filter_layout.addWidget(btn_refresh)
         
         # Добавляем фильтры над таблицей
@@ -3518,32 +3557,91 @@ class AdminWindowQt(QMainWindow):
         main_layout.addWidget(main_splitter)
 
         # Привязываем обработчики к фильтрам
-        table_widget.itemSelectionChanged.connect(lambda: self.on_order_select(is_archive))
-        client_filter_combo.currentIndexChanged.connect(lambda: self.apply_order_filters(is_archive))
-        search_filter_edit.textChanged.connect(lambda: self.apply_order_filters(is_archive))
+        table_widget.itemSelectionChanged.connect(lambda: self.on_order_select(is_archive, incoming))
+        client_filter_combo.currentIndexChanged.connect(lambda: self.apply_order_filters(is_archive, incoming))
+        search_filter_edit.textChanged.connect(lambda: self.apply_order_filters(is_archive, incoming))
 
         # --- ИЗМЕНЕНИЕ: Возвращаем все созданные виджеты, включая новую вкладку документов ---
         return view_widget, table_widget, management_stack, client_filter_combo, search_filter_edit, order_edit_tab, order_api_tab, order_upload_tab, order_docs_tab, stats_table
 
     def _on_orders_tab_changed(self, index):
-        """Загружает данные при переключении вкладок 'В работе' / 'Архив'."""
+        """Загружает данные при переключении вкладок заказов."""
+        # 0: В работе, 1: Архив, 2: Входящие
         is_archive = (index == 1)
-        self._load_order_statistics()
-        self.load_orders(is_archive)
+        incoming = (index == 2)
+        if not incoming:
+            self._load_order_statistics()
+        self.load_orders(is_archive, incoming)
 
-    def load_orders(self, is_archive):
-        """Загружает заказы в соответствующую таблицу."""
-        table = self.archive_orders_table if is_archive else self.in_progress_orders_table
-        # --- НОВЫЙ БЛОК: Получаем нужные виджеты фильтров ---
-        client_filter = self.archive_client_filter if is_archive else self.in_progress_client_filter
-        search_filter = self.archive_search_filter if is_archive else self.in_progress_search_filter
-        cache = self.archive_orders_cache if is_archive else self.in_progress_orders_cache # --- ИЗМЕНЕНИЕ: Используем правильный кеш ---
+    def load_orders(self, is_archive, incoming=False):
+        """Загружает заказы в соответствующую таблицу.
+
+        Параметры:
+            is_archive (bool): Отображать архивные заказы.
+            incoming (bool): Отображать входящие заказы.
+        """
+        if incoming:
+            # Загрузка входящих заказов из API
+            try:
+                # Очищаем предыдущие виджеты
+                while self.incoming_layout.count():
+                    item = self.incoming_layout.takeAt(0)
+                    widget = item.widget()
+                    if widget:
+                        widget.deleteLater()
+
+                # Получаем заказы из API
+                psp_orders = self.api_service.get_psp_orders("last30")
+                if not isinstance(psp_orders, list):
+                    QMessageBox.warning(self, "Предупреждение", "API вернул неожиданный формат данных.")
+                    return
+
+                # Фильтруем заказы: own: false и state: HOLDED или ACTIVE
+                filtered_orders = [
+                    order for order in psp_orders
+                    if not order.get('own', True) and order.get('state') in ['HOLDED', 'ACTIVE']
+                ]
+
+                if not filtered_orders:
+                    self.incoming_layout.addWidget(QLabel("Нет входящих заказов для обработки."))
+                    return
+
+                # Обновляем справочник участников (храним в полном формате)
+                participants = self.api_service.get_participants()
+                self.incoming_participants_dict = {p['id']: p for p in participants}
+
+                # Строим UI для каждого заказа
+                for order in filtered_orders:
+                    self._build_incoming_order_ui(order, self.incoming_participants_dict)
+
+                self.incoming_layout.addStretch()  # Добавляем растяжку в конце
+
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить входящие заказы: {e}")
+                logging.error(f"Ошибка загрузки входящих заказов: {e}", exc_info=True)
+            return
+
+        if is_archive:
+            table = self.archive_orders_table
+            client_filter = self.archive_client_filter
+            search_filter = self.archive_search_filter
+            cache = self.archive_orders_cache
+        else:
+            table = self.in_progress_orders_table
+            client_filter = self.in_progress_client_filter
+            search_filter = self.in_progress_search_filter
+            cache = self.in_progress_orders_cache
 
         # Блокируем сигналы, чтобы избежать лишних вызовов apply_filters при очистке
         client_filter.blockSignals(True)
         table.setRowCount(0)
         try:
             orders = self.order_service.get_orders(is_archive)
+
+            # --- НОВЫЙ БЛОК: Фильтруем заказы для вкладок "В работе" / "Входящие" ---
+            if not is_archive:
+                # В работе: исключаем входящие
+                orders = [o for o in orders if (o.get('status') or '').lower() != 'new']
 
             # Сохраняем данные в кэш
             cache.clear()
@@ -3561,13 +3659,124 @@ class AdminWindowQt(QMainWindow):
         finally:
             client_filter.blockSignals(False)
             # После загрузки применяем фильтры
-            self.apply_order_filters(is_archive)
+            self.apply_order_filters(is_archive, incoming)
 
-    def on_order_select(self, is_archive):
+    def refresh_orders(self):
+        """Обновляет текущую вкладку заказов (В работе / Архив / Входящие)."""
+        if hasattr(self, 'orders_tab_widget'):
+            self._on_orders_tab_changed(self.orders_tab_widget.currentIndex())
+
+    def _build_incoming_order_ui(self, order, participants_dict):
+        """Строит UI для одного входящего заказа из API.
+        
+        Args:
+            order: Данные заказа из API
+            participants_dict: Словарь вида {participant_id: {full participant dict}}
+        """
+        participant_id = order.get('participant')
+        participant_info = participants_dict.get(participant_id, {})
+        participant_name = participant_info.get('name', f"Участник {participant_id}")
+        order_state = order.get('state')
+        order_own = order.get('own')
+
+        # Группа для заказа
+        group = QGroupBox(f"Заказ {order.get('order_id')} - {participant_name}")
+        layout = QVBoxLayout(group)
+
+        # Таблица продуктов
+        table = QTableWidget()
+        table.setColumnCount(3)
+        table.setHorizontalHeaderLabels(["GTIN", "Группа товара", "Количество"])
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+
+        products = order.get('products', [])
+        table.setRowCount(len(products))
+        for row, product in enumerate(products):
+            table.setItem(row, 0, QTableWidgetItem(product.get('gtin', '')))
+            table.setItem(row, 1, QTableWidgetItem(product.get('product_group', '')))
+            table.setItem(row, 2, QTableWidgetItem(str(product.get('qty', 0))))
+
+        layout.addWidget(table)
+
+        # Кнопки
+        buttons_layout = QHBoxLayout()
+        
+        # Проверяем условие: если state = ACTIVE и own = false, показываем "Создать заказ"
+        if order_state == 'ACTIVE' and not order_own:
+            create_btn = QPushButton("Создать заказ")
+            create_btn.clicked.connect(lambda: self._create_order_from_api(order, None))
+            buttons_layout.addWidget(create_btn)
+        else:
+            # Иначе показываем "Принять" и "Отклонить"
+            accept_btn = QPushButton("Принять")
+            accept_btn.clicked.connect(lambda: self._accept_incoming_order(order))
+            reject_btn = QPushButton("Отклонить")
+            reject_btn.clicked.connect(lambda: self._reject_incoming_order(order))
+            buttons_layout.addWidget(accept_btn)
+            buttons_layout.addWidget(reject_btn)
+        
+        buttons_layout.addStretch()
+        layout.addLayout(buttons_layout)
+
+        self.incoming_layout.addWidget(group)
+
+    def _accept_incoming_order(self, order):
+        """Отправляет запрос на активацию входящего заказа."""
+        order_id = order.get('order_id')
+        if not order_id:
+            QMessageBox.warning(self, "Ошибка", "Не удалось определить номер заказа.")
+            return
+
+        try:
+            response = self.api_service.activate_order(order_id)
+            QMessageBox.information(self, "Успех", f"Заказ {order_id} активирован.\nОтвет API: {response}")
+            self.refresh_orders()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось активировать заказ {order_id}: {e}")
+
+    def _reject_incoming_order(self, order):
+        """Отправляет запрос на отмену входящего заказа."""
+        order_id = order.get('order_id')
+        if not order_id:
+            QMessageBox.warning(self, "Ошибка", "Не удалось определить номер заказа.")
+            return
+
+        try:
+            response = self.api_service.cancel_order(order_id)
+            QMessageBox.information(self, "Успех", f"Заказ {order_id} отменен.\nОтвет API: {response}")
+            self.refresh_orders()
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось отменить заказ {order_id}: {e}")
+
+    def _create_order_from_api(self, api_order_data, _unused):
+        """Создает заказ в БД клиента на основе API заказа."""
+        api_order_id = api_order_data.get('order_id')
+        if not api_order_id:
+            QMessageBox.warning(self, "Ошибка", "Не удалось определить номер заказа.")
+            return
+
+        try:
+            # Используем полный справочник участников, сохраненный в атрибуте класса
+            order_id = self.order_service.create_order_from_api_order(api_order_data, self.incoming_participants_dict)
+            QMessageBox.information(self, "Успех", f"Заказ успешно создан в БД клиента.\nID заказа: {order_id}\nAPI Order ID: {api_order_id}")
+            self.refresh_orders()
+        except Exception as e:
+            logging.error(f"Ошибка при создании заказа из API: {e}", exc_info=True)
+            QMessageBox.critical(self, "Ошибка", f"Не удалось создать заказ: {e}")
+
+    def on_order_select(self, is_archive, incoming=False):
         """Обработчик выбора заказа в таблице. Отображает панель управления."""
-        # logging.debug(f"on_order_select: Сработал обработчик выбора заказа. is_archive={is_archive}")
-        table = self.archive_orders_table if is_archive else self.in_progress_orders_table
-        management_stack = self.archive_management_stack if is_archive else self.in_progress_management_stack
+        if incoming:
+            return  # Для входящих заказов управление не требуется
+
+        # logging.debug(f"on_order_select: Сработал обработчик выбора заказа. is_archive={is_archive}, incoming={incoming}")
+        if is_archive:
+            table = self.archive_orders_table
+            management_stack = self.archive_management_stack
+        else:
+            table = self.in_progress_orders_table
+            management_stack = self.in_progress_management_stack
 
         current_row = table.currentRow()
         if current_row < 0:
@@ -3616,10 +3825,16 @@ class AdminWindowQt(QMainWindow):
             # logging.debug("on_order_select: Очистка вкладок завершена.")
 
             # --- ИСПРАВЛЕНИЕ: Получаем правильные виджеты вкладок для текущей панели ---
-            edit_tab = self.archive_edit_tab if is_archive else self.in_progress_edit_tab
-            api_tab = self.archive_api_tab if is_archive else self.in_progress_api_tab
-            upload_tab = self.archive_upload_tab if is_archive else self.in_progress_upload_tab
-            docs_tab = self.archive_docs_tab if is_archive else self.in_progress_docs_tab # --- ИЗМЕНЕНИЕ: Получаем виджет вкладки документов ---
+            if incoming:
+                edit_tab = self.incoming_edit_tab
+                api_tab = self.incoming_api_tab
+                upload_tab = self.incoming_upload_tab
+                docs_tab = self.incoming_docs_tab
+            else:
+                edit_tab = self.archive_edit_tab if is_archive else self.in_progress_edit_tab
+                api_tab = self.archive_api_tab if is_archive else self.in_progress_api_tab
+                upload_tab = self.archive_upload_tab if is_archive else self.in_progress_upload_tab
+                docs_tab = self.archive_docs_tab if is_archive else self.in_progress_docs_tab # --- ИЗМЕНЕНИЕ: Получаем виджет вкладки документов ---
 
             # 3. Создаем и размещаем новые виджеты
             # Вкладка "Редактирование" всегда есть
@@ -3887,7 +4102,12 @@ class AdminWindowQt(QMainWindow):
         """Загружает и отображает статистику по активным заказам."""
         # --- ИСПРАВЛЕНИЕ: Определяем, какую таблицу обновлять, и проверяем, нужно ли это делать ---
         current_tab_index = self.orders_tab_widget.currentIndex()
-        target_table = self.in_progress_stats_table if current_tab_index == 0 else self.archive_stats_table
+        if current_tab_index == 0:
+            target_table = self.in_progress_stats_table
+        elif current_tab_index == 1:
+            target_table = self.archive_stats_table
+        else:  # index == 2 (Входящие)
+            target_table = self.incoming_stats_table
         
         # Если выбрана вкладка "Архив", просто очищаем ее таблицу статистики и выходим
         if current_tab_index == 1:
@@ -3940,12 +4160,21 @@ class AdminWindowQt(QMainWindow):
             logging.error(f"Ошибка при загрузке статистики заказов: {e}", exc_info=True)
             # Можно добавить label с ошибкой в self.stats_layout, если нужно
 
-    def apply_order_filters(self, is_archive):
+    def apply_order_filters(self, is_archive, incoming=False):
         """Фильтрует и отображает заказы на основе значений в полях фильтра."""
-        table = self.archive_orders_table if is_archive else self.in_progress_orders_table
-        cache = self.archive_orders_cache if is_archive else self.in_progress_orders_cache
-        client_filter = self.archive_client_filter if is_archive else self.in_progress_client_filter
-        search_filter = self.archive_search_filter if is_archive else self.in_progress_search_filter
+        if incoming:
+            return  # Для входящих заказов фильтры не применяются
+
+        if is_archive:
+            table = self.archive_orders_table
+            cache = self.archive_orders_cache
+            client_filter = self.archive_client_filter
+            search_filter = self.archive_search_filter
+        else:
+            table = self.in_progress_orders_table
+            cache = self.in_progress_orders_cache
+            client_filter = self.in_progress_client_filter
+            search_filter = self.in_progress_search_filter
 
         client_query = client_filter.currentText()
         search_query = search_filter.text().lower()
@@ -4271,7 +4500,7 @@ class AdminWindowQt(QMainWindow):
         details_controls.addWidget(btn_save_details)
         details_controls.addStretch()
         details_layout.addLayout(details_controls)
-        self.order_details_table = QTableWidget(0, 7)
+        self.order_details_table = QTableWidget(0, 8)
         self.order_details_table.setHorizontalHeaderLabels([
             "ID", "GTIN", "Кол-во", "Агрегация", "Дата производства", "Срок годн. (мес)", "Годен до"
         ])
@@ -5044,8 +5273,8 @@ class AdminWindowQt(QMainWindow):
         layout.addLayout(controls_layout)
 
         # Таблица
-        self.product_groups_table = QTableWidget(0, 7)
-        self.product_groups_table.setHorizontalHeaderLabels(["ID", "Системное имя", "Отображаемое имя", "Нужен ФИАС", "Нужен КПП", "Шаблон кода", "Шаблон ДМ"])
+        self.product_groups_table = QTableWidget(0, 8)
+        self.product_groups_table.setHorizontalHeaderLabels(["ID", "Системное имя", "Отображаемое имя", "Нужен ФИАС", "Нужен КПП", "Шаблон кода", "Шаблон ДМ", "Требуются переменные"])
         self.product_groups_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.product_groups_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.product_groups_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -5080,6 +5309,7 @@ class AdminWindowQt(QMainWindow):
                 self.product_groups_table.setItem(row, 4, QTableWidgetItem(str(group.get('kpp_required', False))))
                 self.product_groups_table.setItem(row, 5, QTableWidgetItem(group.get('code_template', '')))
                 self.product_groups_table.setItem(row, 6, QTableWidgetItem(group.get('dm_template', '')))
+                self.product_groups_table.setItem(row, 7, QTableWidgetItem(str(group.get('variables_required', False))))
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить товарные группы: {e}")
 
@@ -5100,10 +5330,12 @@ class AdminWindowQt(QMainWindow):
             'fias_required': QCheckBox(),
             'kpp_required': QCheckBox(),
             'code_template': QLineEdit(group_data.get('code_template', '')),
-            'dm_template': QLineEdit(group_data.get('dm_template', ''))
+            'dm_template': QLineEdit(group_data.get('dm_template', '')),
+            'variables_required': QCheckBox()
         }
         fields['fias_required'].setChecked(bool(group_data.get('fias_required', False)))
         fields['kpp_required'].setChecked(bool(group_data.get('kpp_required', False)))
+        fields['variables_required'].setChecked(bool(group_data.get('variables_required', False)))
 
         form_layout.addRow("Системное имя:", fields['group_name'])
         form_layout.addRow("Отображаемое имя:", fields['display_name'])
@@ -5111,6 +5343,7 @@ class AdminWindowQt(QMainWindow):
         form_layout.addRow("Нужен КПП:", fields['kpp_required'])
         form_layout.addRow("Шаблон кода:", fields['code_template'])
         form_layout.addRow("Шаблон ДМ:", fields['dm_template'])
+        form_layout.addRow("Требуются переменные:", fields['variables_required'])
         
         layout.addLayout(form_layout)
 
@@ -5145,7 +5378,8 @@ class AdminWindowQt(QMainWindow):
             'fias_required': self.product_groups_table.item(sel_row, 3).text().lower() == 'true',
             'kpp_required': self.product_groups_table.item(sel_row, 4).text().lower() == 'true',
             'code_template': self.product_groups_table.item(sel_row, 5).text(),
-            'dm_template': self.product_groups_table.item(sel_row, 6).text()
+            'dm_template': self.product_groups_table.item(sel_row, 6).text(),
+            'variables_required': self.product_groups_table.item(sel_row, 7).text().lower() == 'true'
         }
         self._open_product_group_editor(group_data)
 
@@ -5349,8 +5583,8 @@ class AdminWindowQt(QMainWindow):
         layout.addLayout(controls_layout)
 
         # Таблица
-        self.product_groups_table = QTableWidget(0, 7)
-        self.product_groups_table.setHorizontalHeaderLabels(["ID", "Системное имя", "Отображаемое имя", "Нужен ФИАС", "Нужен КПП", "Шаблон кода", "Шаблон ДМ"])
+        self.product_groups_table = QTableWidget(0, 8)
+        self.product_groups_table.setHorizontalHeaderLabels(["ID", "Системное имя", "Отображаемое имя", "Нужен ФИАС", "Нужен КПП", "Шаблон кода", "Шаблон ДМ", "Требуются переменные"])
         self.product_groups_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.product_groups_table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.product_groups_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
@@ -5385,6 +5619,7 @@ class AdminWindowQt(QMainWindow):
                 self.product_groups_table.setItem(row, 4, QTableWidgetItem(str(group.get('kpp_required', False))))
                 self.product_groups_table.setItem(row, 5, QTableWidgetItem(group.get('code_template', '')))
                 self.product_groups_table.setItem(row, 6, QTableWidgetItem(group.get('dm_template', '')))
+                self.product_groups_table.setItem(row, 7, QTableWidgetItem(str(group.get('variables_required', False))))
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить товарные группы: {e}")
 
@@ -5405,10 +5640,12 @@ class AdminWindowQt(QMainWindow):
             'fias_required': QCheckBox(),
             'kpp_required': QCheckBox(),
             'code_template': QLineEdit(group_data.get('code_template', '')),
-            'dm_template': QLineEdit(group_data.get('dm_template', ''))
+            'dm_template': QLineEdit(group_data.get('dm_template', '')),
+            'variables_required': QCheckBox()
         }
         fields['fias_required'].setChecked(bool(group_data.get('fias_required', False)))
         fields['kpp_required'].setChecked(bool(group_data.get('kpp_required', False)))
+        fields['variables_required'].setChecked(bool(group_data.get('variables_required', False)))
 
         form_layout.addRow("Системное имя:", fields['group_name'])
         form_layout.addRow("Отображаемое имя:", fields['display_name'])
@@ -5416,6 +5653,7 @@ class AdminWindowQt(QMainWindow):
         form_layout.addRow("Нужен КПП:", fields['kpp_required'])
         form_layout.addRow("Шаблон кода:", fields['code_template'])
         form_layout.addRow("Шаблон ДМ:", fields['dm_template'])
+        form_layout.addRow("Требуются переменные:", fields['variables_required'])
         
         layout.addLayout(form_layout)
 
@@ -5450,7 +5688,8 @@ class AdminWindowQt(QMainWindow):
             'fias_required': self.product_groups_table.item(sel_row, 3).text().lower() == 'true',
             'kpp_required': self.product_groups_table.item(sel_row, 4).text().lower() == 'true',
             'code_template': self.product_groups_table.item(sel_row, 5).text(),
-            'dm_template': self.product_groups_table.item(sel_row, 6).text()
+            'dm_template': self.product_groups_table.item(sel_row, 6).text(),
+            'variables_required': self.product_groups_table.item(sel_row, 7).text().lower() == 'true'
         }
         self._open_product_group_editor(group_data)
 

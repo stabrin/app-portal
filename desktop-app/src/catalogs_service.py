@@ -35,25 +35,26 @@ class CatalogsService:
         logger.info("Запрос справочника товарных групп из БД клиента.")
         with self.get_db_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT id, group_name, display_name, fias_required, kpp_required, code_template, dm_template FROM dmkod_product_groups ORDER BY display_name")
+                cur.execute("SELECT id, group_name, display_name, fias_required, kpp_required, code_template, dm_template, variables_required FROM dmkod_product_groups ORDER BY display_name")
                 return cur.fetchall()
 
     def upsert_product_group(self, group_data: dict):
         """Добавляет или обновляет товарную группу."""
         group_id = group_data.get('id')
         kpp_required = group_data.get('kpp_required', False)
+        variables_required = group_data.get('variables_required', False)
         with self.get_db_connection() as conn:
             with conn.cursor() as cur:
                 if group_id: # Обновление
                     cur.execute("""
-                        UPDATE dmkod_product_groups SET group_name=%s, display_name=%s, fias_required=%s, kpp_required=%s, code_template=%s, dm_template=%s
+                        UPDATE dmkod_product_groups SET group_name=%s, display_name=%s, fias_required=%s, kpp_required=%s, code_template=%s, dm_template=%s, variables_required=%s
                         WHERE id=%s
-                    """, (group_data['group_name'], group_data['display_name'], group_data['fias_required'], kpp_required, group_data['code_template'], group_data['dm_template'], group_id))
+                    """, (group_data['group_name'], group_data['display_name'], group_data['fias_required'], kpp_required, group_data['code_template'], group_data['dm_template'], variables_required, group_id))
                 else: # Вставка
                     cur.execute("""
-                        INSERT INTO dmkod_product_groups (group_name, display_name, fias_required, kpp_required, code_template, dm_template)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (group_data['group_name'], group_data['display_name'], group_data['fias_required'], kpp_required, group_data['code_template'], group_data['dm_template']))
+                        INSERT INTO dmkod_product_groups (group_name, display_name, fias_required, kpp_required, code_template, dm_template, variables_required)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (group_data['group_name'], group_data['display_name'], group_data['fias_required'], kpp_required, group_data['code_template'], group_data['dm_template'], variables_required))
             conn.commit()
 
     def delete_product_group(self, group_id: int):
@@ -65,7 +66,7 @@ class CatalogsService:
 
     def get_product_groups_template(self):
         """Возвращает шаблон для импорта товарных групп."""
-        return pd.DataFrame(columns=['id', 'group_name', 'display_name', 'fias_required', 'kpp_required', 'code_template', 'dm_template'])
+        return pd.DataFrame(columns=['id', 'group_name', 'display_name', 'fias_required', 'kpp_required', 'code_template', 'dm_template', 'variables_required'])
 
     def process_product_groups_import(self, df: pd.DataFrame):
         """Обрабатывает импорт товарных групп из DataFrame."""

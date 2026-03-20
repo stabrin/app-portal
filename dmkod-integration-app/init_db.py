@@ -63,6 +63,7 @@ def update_schema(conn):
         # Безопасное добавление колонок, если они отсутствуют
         sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS code_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS dm_template TEXT;").format(pg_table=sql.Identifier(product_groups_table)),
+        sql.SQL("ALTER TABLE {pg_table} ADD COLUMN IF NOT EXISTS variables_required BOOLEAN NOT NULL DEFAULT FALSE;").format(pg_table=sql.Identifier(product_groups_table)),
         sql.SQL("COMMENT ON COLUMN {pg_table}.dm_template IS 'Шаблон DataMatrix кода';").format(pg_table=sql.Identifier(product_groups_table)),
 
         # 2. Модификация таблицы 'orders'

@@ -702,6 +702,27 @@ class ApiService:
             logger.error(f"Не удалось получить список участников из API: {e}", exc_info=True)
             raise
 
+    def get_psp_orders(self, range_param: str):
+        """Получает список заказов из API по заданному диапазону."""
+        logger.info(f"Получение списка заказов из API с range: {range_param}")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/orders"
+            payload = {"range": range_param}
+            response = self._api_request('get', url, json=payload)
+            parsed = response.json()
+
+            # API может возвращать либо список заказов, либо объект с ключом "orders".
+            if isinstance(parsed, list):
+                return parsed
+            if isinstance(parsed, dict) and 'orders' in parsed:
+                return parsed.get('orders') or []
+
+            logger.warning(f"Неожиданный формат ответа от /psp/orders: {type(parsed)}")
+            return []
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Не удалось получить список заказов из API: {e}", exc_info=True)
+            raise
+
     def create_order(self, payload: dict):
         """Создает заказ в API ДМкод."""
         logger.info(f"Отправка запроса на создание заказа в API. Payload: {payload}")
@@ -712,6 +733,30 @@ class ApiService:
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Ошибка при создании заказа в API: {e}", exc_info=True)
+            raise
+
+    def activate_order(self, order_id: int):
+        """Активирует заказ в API (psp/order/activate)."""
+        logger.info(f"Отправка запроса на активацию заказа {order_id}.")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/order/activate"
+            response = self._api_request('post', url, json={'order_id': int(order_id)})
+            logger.info(f"Заказ {order_id} активирован. Ответ: {response.json()}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Не удалось активировать заказ {order_id}: {e}", exc_info=True)
+            raise
+
+    def cancel_order(self, order_id: int):
+        """Отменяет заказ в API (psp/order/cancel)."""
+        logger.info(f"Отправка запроса на отмену заказа {order_id}.")
+        try:
+            url = f"{self.api_base_url.rstrip('/')}/psp/order/cancel"
+            response = self._api_request('post', url, json={'order_id': int(order_id)})
+            logger.info(f"Заказ {order_id} отменен. Ответ: {response.json()}")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Не удалось отменить заказ {order_id}: {e}", exc_info=True)
             raise
 
     def create_suborder_request(self, payload: dict):
