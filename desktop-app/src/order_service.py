@@ -452,7 +452,7 @@ class OrderService:
                     logging.debug(f"[Delta Import] GTIN->description_1 mapping: {gtin_to_description}")
 
                 logging.debug(f"[Delta Import] df_for_json sample:\n{df_for_json.head().to_string()}")
-                grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date']).agg({'DataMatrix': list}).reset_index()
+                grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date'], dropna=False).agg({'DataMatrix': list}).reset_index()
                 logging.debug(f"[Delta Import] Grouped for API: {len(grouped_for_api)} groups")
                 if len(grouped_for_api) == 0:
                     logging.debug(f"[Delta Import] No groups - checking expiration_date types: {df_for_json['expiration_date'].dtype}, unique: {df_for_json['expiration_date'].unique()}")
