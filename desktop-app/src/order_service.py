@@ -413,11 +413,11 @@ class OrderService:
                 # 3. Подготовка данных для delta_result
                 df_for_json = df.copy()
                 df_for_json.rename(columns={'Barcode': 'gtin', 'StartDate': 'production_date', 'EndDate': 'expiration_date'}, inplace=True)
-                df_for_json['gtin'] = df_for_json['gtin'].astype(str)
                 # --- ИСПРАВЛЕНИЕ: Приводим NaT к None для корректной группировки ---
-                df_for_json['expiration_date'] = df_for_json['expiration_date'].where(df_for_json['expiration_date'].notna(), None)
+                df_for_json['expiration_date'] = df_for_json['expiration_date'].astype('object').where(df_for_json['expiration_date'].notna(), None)
                 # --- КОНЕЦ ИСПРАВЛЕНИЯ ---
                 
+                df_for_json['gtin'] = df_for_json['gtin'].astype(str)
                 cur.execute("SELECT gtin, api_id FROM dmkod_aggregation_details WHERE order_id = %s AND api_id IS NOT NULL", (order_id,))
                 # --- ЛОГИРОВАНИЕ: GTIN из заказа ---
                 order_gtins = cur.fetchall()
