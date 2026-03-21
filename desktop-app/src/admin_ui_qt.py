@@ -538,19 +538,21 @@ class OrderEditorFrameQt(QWidget):
                     fias_required = product_group.get('fias_required', False)
                     kpp_required = product_group.get('kpp_required', False)
 
-            # --- НОВАЯ ЛОГИКА: Управление видимостью поля продуктовой группы ---
-            if product_group_id is None:
-                # Загружаем список групп
-                groups = self.main_app_window.catalogs_service.get_product_groups()
-                self.product_group_combo.clear()
-                self.product_group_combo.addItem("Выберите группу", None)
-                for g in groups:
-                    self.product_group_combo.addItem(g['display_name'], g['id'])
-                self.product_group_label.setVisible(True)
-                self.product_group_combo.setVisible(True)
-            else:
-                self.product_group_label.setVisible(False)
-                self.product_group_combo.setVisible(False)
+            # --- ИСПРАВЛЕНИЕ: Этот блок выполняется только для неархивных заказов ---
+            if not self.is_archive:
+                # --- НОВАЯ ЛОГИКА: Управление видимостью поля продуктовой группы ---
+                if product_group_id is None:
+                    # Загружаем список групп
+                    groups = self.main_app_window.catalogs_service.get_product_groups()
+                    self.product_group_combo.clear()
+                    self.product_group_combo.addItem("Выберите группу", None)
+                    for g in groups:
+                        self.product_group_combo.addItem(g['display_name'], g['id'])
+                    self.product_group_label.setVisible(True)
+                    self.product_group_combo.setVisible(True)
+                else:
+                    self.product_group_label.setVisible(False)
+                    self.product_group_combo.setVisible(False)
 
             # --- ИЗМЕНЕНИЕ: Загружаем не только детали, но и основную информацию о заказе ---
             if not self.is_archive:
