@@ -26,7 +26,7 @@ class EmailService:
             'password': 'Rv3a$3', # ЗАМЕНИТЕ НА РЕАЛЬНЫЙ ПАРОЛЬ
             'sender_email': 'tilda@it-workshop.ru',
             'recipient': 'markirovka@vedug-tlt.ru',
-            'bcc': ['sergey@tabrin.ru', 'pikalova@ved-ug.ru']
+            'bcc': ['sergey@tabrin.ru', 'pikalova@ved-ug.ru', 'sales@ved-ug.ru', 'vdovin@vedug-tlt.ru']
         }
 
     def send_email(self, to_email: str, subject: str, body_html: str, body_text: str = None, attachment: Optional[Tuple[bytes, str]] = None):
