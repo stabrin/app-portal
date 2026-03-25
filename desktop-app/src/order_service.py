@@ -469,24 +469,34 @@ class OrderService:
                     if order_info.get('kpp_required') and order_info.get('kpp'):
                         attributes['kpp'] = order_info['kpp']
 
-                    # Определяем GTIN по printrun_id, если нужно подставить переменные
-                    description = None
-                    gtin_for_row = None
-                    if order_info.get('variables_required'):
-                        gtin_for_row = printrun_to_gtin_map.get(row.printrun_id)
-                        if gtin_for_row is not None:
+                    codes_list = []
+                    gtin_for_row = printrun_to_gtin_map.get(row.printrun_id)
+
+                    for code in row.DataMatrix:
+                        cleaned_code = code.replace('\x1d', '')
+                        code_obj = {"code": cleaned_code}
+
+                        # Если требуются переменные, парсим их из description_1
+                        if order_info.get('variables_required') and gtin_for_row:
                             description = gtin_to_description.get(str(gtin_for_row))
+                            if description:
+                                try:
+                                    # Ожидаем формат "ключ:значение"
+                                    key, value = description.split(':', 1)
+                                    code_obj[key.strip()] = value.strip()
+                                    logging.debug(
+                                        f"[Delta Import] Added variable to code object: "
+                                        f"GTIN={gtin_for_row}, key='{key.strip()}', value='{value.strip()}'"
+                                    )
+                                except ValueError:
+                                    logging.warning(
+                                        f"[Delta Import] Некорректный формат переменных в description_1 для GTIN {gtin_for_row}. "
+                                        f"Ожидался 'ключ:значение', получено: '{description}'"
+                                    )
+                        
+                        codes_list.append(code_obj)
 
-                    def format_code(code: str):
-                        cleaned = code.replace('\x1d', '')
-                        if description:
-                            formatted = f"{cleaned},{description}"
-                            logging.debug(f"[Delta Import] Formatted code: {formatted[:100]}... (GTIN: {gtin_for_row}, desc: '{description}')")
-                            return formatted
-                        return cleaned
-
-                    codes_list = [{"code": format_code(code)} for code in row.DataMatrix]
-                    logging.debug(f"[Delta Import] For printrun {row.printrun_id} (GTIN {gtin_for_row}): {len(codes_list)} codes, desc='{description}'")
+                    logging.debug(f"[Delta Import] For printrun {row.printrun_id} (GTIN {gtin_for_row}): {len(codes_list)} codes prepared.")
 
                     return json.dumps({
                         "include": codes_list,
