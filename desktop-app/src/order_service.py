@@ -482,7 +482,10 @@ class OrderService:
                             if description:
                                 try:
                                     # Ожидаем формат "ключ:значение"
-                                    key, value = description.split(':', 1)
+                                    key, value = (s.strip() for s in description.split(':', 1))
+                                    # Убираем кавычки, если они есть по краям
+                                    key = key.strip('"')
+                                    value = value.strip('"')
                                     code_obj[key.strip()] = value.strip()
                                     logging.debug(
                                         f"[Delta Import] Added variable to code object: "
