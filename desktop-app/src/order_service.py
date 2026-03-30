@@ -266,39 +266,63 @@ class OrderService:
 
     def export_data_for_external_sw(self, order_id: int):
         """Готовит DataFrame для выгрузки данных в формате 'Дельта'."""
+        all_rows = []
         with self._get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT notes FROM orders WHERE id = %s", (order_id,))
+                # 1. Получаем информацию о заказе и его сценарии
+                cur.execute("""
+                    SELECT o.notes, s.scenario_data
+                    FROM orders o
+                    JOIN ap_marking_scenarios s ON o.scenario_id = s.id
+                    WHERE o.id = %s
+                """, (order_id,))
                 order_info = cur.fetchone()
-                
-                cur.execute(
-                    "SELECT api_codes_json, production_date, expiry_date FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
-                    (order_id,)
-                )
-                details_to_process = cur.fetchall()
+                if not order_info:
+                    raise ValueError(f"Заказ с ID {order_id} не найден.")
 
-        if not details_to_process:
-            return None, None # Нет данных для экспорта
+                dm_source = order_info.get('scenario_data', {}).get('dm_source')
 
-        all_rows = []
-        for detail in details_to_process:
-            codes = detail.get('api_codes_json', {}).get('codes', [])
-            prod_date = detail.get('production_date')
-            exp_date = detail.get('expiry_date')
+                # 2. В зависимости от источника, выбираем данные из разных таблиц
+                if dm_source == 'Файлы клиента (csv, txt)':
+                    logging.info(f"Экспорт для заказа {order_id}. Источник: Файлы клиента. Запрос к 'items'.")
+                    # Для клиентских файлов даты производства/годности не хранятся, поэтому LifeTime будет пустым
+                    cur.execute(
+                        "SELECT datamatrix FROM items WHERE order_id = %s AND datamatrix IS NOT NULL",
+                        (order_id,)
+                    )
+                    codes_from_db = cur.fetchall()
+                    for row in codes_from_db:
+                        code = row['datamatrix']
+                        if not code or len(code) < 16: continue
+                        all_rows.append({
+                            'DataMatrix': code, 'DataMatrixCode': '', 'Barcode': code[2:16], 'LifeTime': ''
+                        })
 
-            life_time_months = ''
-            if prod_date and exp_date:
-                delta = relativedelta(exp_date, prod_date)
-                life_time_months = delta.years * 12 + delta.months
+                else: # Логика по умолчанию для кодов из API
+                    logging.info(f"Экспорт для заказа {order_id}. Источник: API. Запрос к 'dmkod_aggregation_details'.")
+                    cur.execute(
+                        "SELECT api_codes_json, production_date, expiry_date FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
+                        (order_id,)
+                    )
+                    details_to_process = cur.fetchall()
+                    for detail in details_to_process:
+                        codes = detail.get('api_codes_json', {}).get('codes', [])
+                        prod_date = detail.get('production_date')
+                        exp_date = detail.get('expiry_date')
 
-            for code in codes:
-                if not code or len(code) < 16: continue
-                all_rows.append({
-                    'DataMatrix': code,
-                    'DataMatrixCode': '',
-                    'Barcode': code[2:16],
-                    'LifeTime': life_time_months
-                })
+                        life_time_months = ''
+                        if prod_date and exp_date:
+                            delta = relativedelta(exp_date, prod_date)
+                            life_time_months = delta.years * 12 + delta.months
+
+                        for code in codes:
+                            if not code or len(code) < 16: continue
+                            all_rows.append({
+                                'DataMatrix': code,
+                                'DataMatrixCode': '',
+                                'Barcode': code[2:16],
+                                'LifeTime': life_time_months
+                            })
         
         if not all_rows:
             return None, None
