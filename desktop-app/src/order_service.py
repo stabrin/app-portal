@@ -301,19 +301,25 @@ class OrderService:
                 else: # Логика по умолчанию для кодов из API
                     logging.info(f"Экспорт для заказа {order_id}. Источник: API. Запрос к 'dmkod_aggregation_details'.")
                     cur.execute(
-                        "SELECT api_codes_json, production_date, expiry_date FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
+                        "SELECT api_codes_json, production_date, expiry_date, shelf_life_months FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
                         (order_id,)
                     )
                     details_to_process = cur.fetchall()
                     for detail in details_to_process:
                         codes = detail.get('api_codes_json', {}).get('codes', [])
-                        prod_date = detail.get('production_date')
-                        exp_date = detail.get('expiry_date')
-
+                        
+                        # --- ИЗМЕНЕНИЕ: Логика определения LifeTime ---
                         life_time_months = ''
-                        if prod_date and exp_date:
-                            delta = relativedelta(exp_date, prod_date)
-                            life_time_months = delta.years * 12 + delta.months
+                        # 1. Приоритет у поля shelf_life_months
+                        if detail.get('shelf_life_months') is not None:
+                            life_time_months = detail['shelf_life_months']
+                        # 2. Если его нет, считаем по датам (старая логика)
+                        else:
+                            prod_date = detail.get('production_date')
+                            exp_date = detail.get('expiry_date')
+                            if prod_date and exp_date:
+                                delta = relativedelta(exp_date, prod_date)
+                                life_time_months = delta.years * 12 + delta.months
 
                         for code in codes:
                             if not code or len(code) < 16: continue
