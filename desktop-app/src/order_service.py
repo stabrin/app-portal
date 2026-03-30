@@ -310,7 +310,14 @@ class OrderService:
                 else: # Логика по умолчанию для кодов из API (сценарии "Заказ в ДМ.Код" и "Внешняя система (1С)")
                     logging.info(f"Экспорт для заказа {order_id}. Источник: API. Запрос к 'dmkod_aggregation_details'.")
                     cur.execute(
-                        "SELECT api_codes_json, production_date, expiry_date, shelf_life_months FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
+                        """
+                        SELECT 
+                            d.api_codes_json, d.production_date, d.expiry_date, snd.shelf_life_months 
+                        FROM dmkod_aggregation_details d
+                        JOIN orders o ON d.order_id = o.id
+                        LEFT JOIN ap_supply_notification_details snd ON o.notification_id = snd.notification_id AND d.gtin = snd.gtin
+                        WHERE d.order_id = %s AND d.api_codes_json IS NOT NULL
+                        """,
                         (order_id,)
                     )
                     details_to_process = cur.fetchall()
