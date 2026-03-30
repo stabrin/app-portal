@@ -283,22 +283,31 @@ class OrderService:
                 dm_source = order_info.get('scenario_data', {}).get('dm_source')
 
                 # 2. В зависимости от источника, выбираем данные из разных таблиц
-                if dm_source == 'Файлы клиента (csv, txt)':
+                if dm_source == 'Файлы клиента (csv, txt)': # Сценарий для кодов от клиента
                     logging.info(f"Экспорт для заказа {order_id}. Источник: Файлы клиента. Запрос к 'items'.")
-                    # Для клиентских файлов даты производства/годности не хранятся, поэтому LifeTime будет пустым
+                    # --- ИЗМЕНЕНИЕ: Добавляем запрос для получения срока годности ---
                     cur.execute(
-                        "SELECT datamatrix FROM items WHERE order_id = %s AND datamatrix IS NOT NULL",
+                        """
+                        SELECT 
+                            i.datamatrix,
+                            d.shelf_life_months
+                        FROM items i
+                        JOIN orders o ON i.order_id = o.id
+                        LEFT JOIN ap_supply_notification_details d ON o.notification_id = d.notification_id AND i.gtin = d.gtin
+                        WHERE i.order_id = %s AND i.datamatrix IS NOT NULL
+                        """,
                         (order_id,)
                     )
                     codes_from_db = cur.fetchall()
                     for row in codes_from_db:
                         code = row['datamatrix']
+                        life_time = row.get('shelf_life_months', '')
                         if not code or len(code) < 16: continue
                         all_rows.append({
-                            'DataMatrix': code, 'DataMatrixCode': '', 'Barcode': code[2:16], 'LifeTime': ''
+                            'DataMatrix': code, 'DataMatrixCode': '', 'Barcode': code[2:16], 'LifeTime': life_time
                         })
 
-                else: # Логика по умолчанию для кодов из API
+                else: # Логика по умолчанию для кодов из API (сценарии "Заказ в ДМ.Код" и "Внешняя система (1С)")
                     logging.info(f"Экспорт для заказа {order_id}. Источник: API. Запрос к 'dmkod_aggregation_details'.")
                     cur.execute(
                         "SELECT api_codes_json, production_date, expiry_date, shelf_life_months FROM dmkod_aggregation_details WHERE order_id = %s AND api_codes_json IS NOT NULL",
