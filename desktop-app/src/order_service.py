@@ -516,6 +516,9 @@ class OrderService:
                         codes_list.append(code_obj)
                     # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
+                    # --- ИСПРАВЛЕНИЕ: Получаем GTIN для логирования ---
+                    gtin_for_row = printrun_to_gtin_map.get(row.printrun_id)
+
                     logging.debug(f"[Delta Import] For printrun {row.printrun_id} (GTIN {gtin_for_row}): {len(codes_list)} codes prepared.")
 
                     return json.dumps({
