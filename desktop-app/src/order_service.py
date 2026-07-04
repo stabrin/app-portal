@@ -481,24 +481,14 @@ class OrderService:
                 if df_for_json['printrun_id'].isnull().any():
                     unmapped_gtins = df_for_json[df_for_json['printrun_id'].isnull()]['gtin'].unique()
                     raise ValueError(f"Ошибка: Для GTIN(ов) {list(unmapped_gtins)} из файла не найден соответствующий ID тиража в заказе.")
-
-                # Подготавливаем сопоставление GTIN -> description_1 (если в справочнике есть данные)
-                # даже если переменные не требуются, это позволяет автоматически добавлять описание при наличии.
-                gtin_to_description = {}
-                unique_gtins = df_for_json['gtin'].dropna().unique().tolist()
-                logging.debug(f"[Delta Import] Unique GTINs from CSV: {unique_gtins}")
-                if unique_gtins:
-                    cur.execute("SELECT gtin, description_1 FROM products WHERE gtin IN %s", (tuple(unique_gtins),))
-                    fetched = cur.fetchall()
-                    logging.debug(f"[Delta Import] Fetched from products: {[(r['gtin'], r['description_1'][:50] if r['description_1'] else '') for r in fetched]}")
-                    gtin_to_description = {
-                        str(row['gtin']): str(row['description_1']) if row.get('description_1') is not None else ''
-                        for row in fetched
-                    }
-                    logging.debug(f"[Delta Import] GTIN->description_1 mapping: {gtin_to_description}")
-
-                logging.debug(f"[Delta Import] df_for_json sample:\n{df_for_json.head().to_string()}")
-                grouped_for_api = df_for_json.groupby(['printrun_id', 'production_date', 'expiration_date'], dropna=False).agg({'DataMatrix': list}).reset_index()
+                
+                # --- ИЗМЕНЕНИЕ: Группируем данные, включая ed30, если он нужен ---
+                grouping_columns = ['printrun_id', 'production_date', 'expiration_date']
+                if order_info.get('variables_required') and 'ed30' in df_for_json.columns:
+                    grouping_columns.append('ed30')
+                
+                # Группируем по кодам и датам, чтобы получить список кодов для каждой группы
+                grouped_for_api = df_for_json.groupby(grouping_columns, dropna=False).agg(DataMatrix=('DataMatrix', list)).reset_index()
                 logging.debug(f"[Delta Import] Grouped for API: {len(grouped_for_api)} groups")
                 if len(grouped_for_api) == 0:
                     logging.debug(f"[Delta Import] No groups - checking expiration_date types: {df_for_json['expiration_date'].dtype}, unique: {df_for_json['expiration_date'].unique()}")
@@ -515,35 +505,16 @@ class OrderService:
                     if order_info.get('kpp_required') and order_info.get('kpp'):
                         attributes['kpp'] = order_info['kpp']
 
+                    # --- ИЗМЕНЕНИЕ: Формируем список кодов с учетом ed30 ---
                     codes_list = []
-                    gtin_for_row = printrun_to_gtin_map.get(row.printrun_id)
-
-                    for code in row.DataMatrix:
-                        cleaned_code = code.replace('\x1d', '')
-                        code_obj = {"code": cleaned_code}
-
-                        # Если требуются переменные, парсим их из description_1
-                        if order_info.get('variables_required') and gtin_for_row:
-                            description = gtin_to_description.get(str(gtin_for_row))
-                            if description:
-                                try:
-                                    # Ожидаем формат "ключ:значение"
-                                    key, value = (s.strip() for s in description.split(':', 1))
-                                    # Убираем кавычки, если они есть по краям
-                                    key = key.strip('"')
-                                    value = value.strip('"')
-                                    code_obj[key.strip()] = value.strip()
-                                    logging.debug(
-                                        f"[Delta Import] Added variable to code object: "
-                                        f"GTIN={gtin_for_row}, key='{key.strip()}', value='{value.strip()}'"
-                                    )
-                                except ValueError:
-                                    logging.warning(
-                                        f"[Delta Import] Некорректный формат переменных в description_1 для GTIN {gtin_for_row}. "
-                                        f"Ожидался 'ключ:значение', получено: '{description}'"
-                                    )
-                        
+                    for dm_code in row.DataMatrix:
+                        code_obj = {"code": dm_code.replace('\x1d', '')}
+                        # Если для товарной группы требуются переменные и в данных есть колонка ed30,
+                        # добавляем ее значение к коду.
+                        if order_info.get('variables_required') and 'ed30' in row.index and pd.notna(row.ed30):
+                            code_obj['ed30'] = str(row.ed30)
                         codes_list.append(code_obj)
+                    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
                     logging.debug(f"[Delta Import] For printrun {row.printrun_id} (GTIN {gtin_for_row}): {len(codes_list)} codes prepared.")
 
