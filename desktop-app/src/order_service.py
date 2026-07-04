@@ -485,10 +485,15 @@ class OrderService:
                 # --- ИЗМЕНЕНИЕ: Группируем данные, включая ed30, если он нужен ---
                 grouping_columns = ['printrun_id', 'production_date', 'expiration_date']
                 if order_info.get('variables_required') and 'ed30' in df_for_json.columns:
-                    grouping_columns.append('ed30')
-                
-                # Группируем по кодам и датам, чтобы получить список кодов для каждой группы
-                grouped_for_api = df_for_json.groupby(grouping_columns, dropna=False).agg(DataMatrix=('DataMatrix', list)).reset_index()
+                    # --- ИСПРАВЛЕНИЕ: Агрегируем пары (DataMatrix, ed30) вместо добавления ed30 в ключ ---
+                    # Это сохраняет связь между кодом и его переменной, не создавая лишних групп.
+                    grouped_for_api = df_for_json.groupby(grouping_columns, dropna=False).apply(
+                        lambda x: list(zip(x['DataMatrix'], x['ed30']))
+                    ).reset_index(name='dm_with_vars')
+                else:
+                    # Старая логика для случаев, когда переменные не нужны
+                    grouped_for_api = df_for_json.groupby(grouping_columns, dropna=False).agg(DataMatrix=('DataMatrix', list)).reset_index()
+
                 logging.debug(f"[Delta Import] Grouped for API: {len(grouped_for_api)} groups")
                 if len(grouped_for_api) == 0:
                     logging.debug(f"[Delta Import] No groups - checking expiration_date types: {df_for_json['expiration_date'].dtype}, unique: {df_for_json['expiration_date'].unique()}")
@@ -505,16 +510,18 @@ class OrderService:
                     if order_info.get('kpp_required') and order_info.get('kpp'):
                         attributes['kpp'] = order_info['kpp']
 
-                    # --- ИЗМЕНЕНИЕ: Формируем список кодов с учетом ed30 ---
+                    # --- ИСПРАВЛЕНИЕ: Обрабатываем новый формат сгруппированных данных ---
                     codes_list = []
-                    for dm_code in row.DataMatrix:
-                        code_obj = {"code": dm_code.replace('\x1d', '')}
-                        # Если для товарной группы требуются переменные и в данных есть колонка ed30,
-                        # добавляем ее значение к коду.
-                        if order_info.get('variables_required') and 'ed30' in row.index and pd.notna(row.ed30):
-                            code_obj['ed30'] = str(row.ed30)
+                    if 'dm_with_vars' in row: # Новый формат с переменными
+                        for dm_code, ed30_val in row.dm_with_vars:
+                            code_obj = {"code": dm_code.replace('\x1d', '')}
+                            if pd.notna(ed30_val):
+                                code_obj['ed30'] = str(ed30_val)
+                            codes_list.append(code_obj)
+                    else: # Старый формат без переменных
+                        for dm_code in row.DataMatrix:
+                            code_obj = {"code": dm_code.replace('\x1d', '')}
                         codes_list.append(code_obj)
-                    # --- КОНЕЦ ИЗМЕНЕНИЯ ---
 
                     # --- ИСПРАВЛЕНИЕ: Получаем GTIN для логирования ---
                     gtin_for_row = printrun_to_gtin_map.get(row.printrun_id)
