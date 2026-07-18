@@ -2682,8 +2682,8 @@ class OrderEditorFrame(ttk.Frame):
                 SELECT
                     b.datamatrix,
                     b.gtin,
-                    SUBSTRING(b.datamatrix for 24) AS dm_part_24,
-                    SUBSTRING(b.datamatrix for 31) AS dm_part_31,
+                    SPLIT_PART(b.datamatrix, CHR(29), 1) AS dm_part_prefix,
+                    LENGTH(SPLIT_PART(b.datamatrix, CHR(29), 1)) AS dm_part_length,
                     s.sscc_level_1,
                     s.sscc_level_2,
                     s.sscc_level_3,
@@ -2707,6 +2707,16 @@ class OrderEditorFrame(ttk.Frame):
                     return val.replace('\x1d', ' ') # Заменяем символ GS на пробел
                 return val
             df = df.applymap(clean_illegal_chars)
+
+            if {'dm_part_prefix', 'dm_part_length'}.issubset(df.columns):
+                df = df.copy()
+                df['dm_part_length'] = pd.to_numeric(df['dm_part_length'], errors='coerce')
+                for length in sorted(df['dm_part_length'].dropna().astype(int).unique()):
+                    target_col = f'dm_part_{int(length)}'
+                    df[target_col] = None
+                    mask = df['dm_part_length'].astype(int) == int(length)
+                    df.loc[mask, target_col] = df.loc[mask, 'dm_part_prefix']
+                df = df.drop(columns=['dm_part_prefix', 'dm_part_length'])
 
             report_name = self._sanitize_filename_part(order_info.get('notes') if order_info else '')
 
@@ -2737,39 +2747,65 @@ class OrderEditorFrame(ttk.Frame):
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute(
                         """
-                        SELECT api_codes_json, production_date, expiry_date
-                        FROM dmkod_aggregation_details
-                        WHERE order_id = %s AND api_codes_json IS NOT NULL
+                        SELECT i.datamatrix
+                        FROM items i
+                        WHERE i.order_id = %s
+                          AND i.datamatrix IS NOT NULL
+                          AND TRIM(i.datamatrix) <> ''
                         """,
                         (self.order_id,)
                     )
-                    details_to_process = cur.fetchall()
+                    item_codes = cur.fetchall()
 
-                if not details_to_process:
-                    messagebox.showwarning("Нет данных", "В заказе нет скачанных кодов для выгрузки.", parent=self)
-                    return
-
-                all_rows = []
-                from dateutil.relativedelta import relativedelta
-
-                for detail in details_to_process:
-                    codes = detail.get('api_codes_json', {}).get('codes', [])
-                    prod_date = detail.get('production_date')
-                    exp_date = detail.get('expiry_date')
-
-                    life_time_months = ''
-                    if prod_date and exp_date:
-                        delta = relativedelta(exp_date, prod_date)
-                        life_time_months = delta.years * 12 + delta.months
-
-                    for code in codes:
-                        if not code or len(code) < 16: continue
+                if item_codes:
+                    all_rows = []
+                    for row in item_codes:
+                        code = row.get('datamatrix')
+                        if not code or len(code) < 16:
+                            continue
                         all_rows.append({
                             'DataMatrix': code,
                             'DataMatrixCode': '',
-                            'Barcode': code[2:16], # Извлекаем GTIN
-                            'LifeTime': life_time_months
+                            'Barcode': code[2:16],
+                            'LifeTime': ''
                         })
+                else:
+                    with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute(
+                            """
+                            SELECT api_codes_json, production_date, expiry_date
+                            FROM dmkod_aggregation_details
+                            WHERE order_id = %s AND api_codes_json IS NOT NULL
+                            """,
+                            (self.order_id,)
+                        )
+                        details_to_process = cur.fetchall()
+
+                    if not details_to_process:
+                        messagebox.showwarning("Нет данных", "В заказе нет скачанных кодов для выгрузки.", parent=self)
+                        return
+
+                    all_rows = []
+                    from dateutil.relativedelta import relativedelta
+
+                    for detail in details_to_process:
+                        codes = detail.get('api_codes_json', {}).get('codes', [])
+                        prod_date = detail.get('production_date')
+                        exp_date = detail.get('expiry_date')
+
+                        life_time_months = ''
+                        if prod_date and exp_date:
+                            delta = relativedelta(exp_date, prod_date)
+                            life_time_months = delta.years * 12 + delta.months
+
+                        for code in codes:
+                            if not code or len(code) < 16: continue
+                            all_rows.append({
+                                'DataMatrix': code,
+                                'DataMatrixCode': '',
+                                'Barcode': code[2:16], # Извлекаем GTIN
+                                'LifeTime': life_time_months
+                            })
 
                 if not all_rows:
                     messagebox.showwarning("Нет данных", "Не найдено корректных кодов для выгрузки.", parent=self)

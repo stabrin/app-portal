@@ -280,35 +280,35 @@ class OrderService:
                 if not order_info:
                     raise ValueError(f"Заказ с ID {order_id} не найден.")
 
-                dm_source = order_info.get('scenario_data', {}).get('dm_source')
+                # 2. Сначала пробуем получить коды из таблицы items.
+                # Это подходит для заказов, загруженных из файлов клиента, даже если сценарий
+                # хранит источник с другим форматированием или уже был изменён.
+                logging.info(f"Экспорт для заказа {order_id}. Запрос к 'items'.")
+                cur.execute(
+                    """
+                    SELECT 
+                        i.datamatrix,
+                        d.shelf_life_months
+                    FROM items i
+                    JOIN orders o ON i.order_id = o.id
+                    LEFT JOIN ap_supply_notification_details d ON o.notification_id = d.notification_id AND i.gtin = d.gtin
+                    WHERE i.order_id = %s
+                      AND i.datamatrix IS NOT NULL
+                      AND TRIM(i.datamatrix) <> ''
+                    """,
+                    (order_id,)
+                )
+                codes_from_db = cur.fetchall()
+                for row in codes_from_db:
+                    code = row['datamatrix']
+                    life_time = row.get('shelf_life_months', '')
+                    if not code or len(code) < 16: continue
+                    all_rows.append({
+                        'DataMatrix': code, 'DataMatrixCode': '', 'Barcode': code[2:16], 'LifeTime': life_time
+                    })
 
-                # 2. В зависимости от источника, выбираем данные из разных таблиц
-                if dm_source == 'Файлы клиента (csv, txt)': # Сценарий для кодов от клиента
-                    logging.info(f"Экспорт для заказа {order_id}. Источник: Файлы клиента. Запрос к 'items'.")
-                    # --- ИЗМЕНЕНИЕ: Добавляем запрос для получения срока годности ---
-                    cur.execute(
-                        """
-                        SELECT 
-                            i.datamatrix,
-                            d.shelf_life_months
-                        FROM items i
-                        JOIN orders o ON i.order_id = o.id
-                        LEFT JOIN ap_supply_notification_details d ON o.notification_id = d.notification_id AND i.gtin = d.gtin
-                        WHERE i.order_id = %s AND i.datamatrix IS NOT NULL
-                        """,
-                        (order_id,)
-                    )
-                    codes_from_db = cur.fetchall()
-                    for row in codes_from_db:
-                        code = row['datamatrix']
-                        life_time = row.get('shelf_life_months', '')
-                        if not code or len(code) < 16: continue
-                        all_rows.append({
-                            'DataMatrix': code, 'DataMatrixCode': '', 'Barcode': code[2:16], 'LifeTime': life_time
-                        })
-
-                else: # Логика по умолчанию для кодов из API (сценарии "Заказ в ДМ.Код" и "Внешняя система (1С)")
-                    logging.info(f"Экспорт для заказа {order_id}. Источник: API. Запрос к 'dmkod_aggregation_details'.")
+                if not all_rows:
+                    logging.info(f"Экспорт для заказа {order_id}. В 'items' нет данных, пробуем 'dmkod_aggregation_details'.")
                     cur.execute(
                         """
                         SELECT 
@@ -323,13 +323,10 @@ class OrderService:
                     details_to_process = cur.fetchall()
                     for detail in details_to_process:
                         codes = detail.get('api_codes_json', {}).get('codes', [])
-                        
-                        # --- ИЗМЕНЕНИЕ: Логика определения LifeTime ---
+
                         life_time_months = ''
-                        # 1. Приоритет у поля shelf_life_months
                         if detail.get('shelf_life_months') is not None:
                             life_time_months = detail['shelf_life_months']
-                        # 2. Если его нет, считаем по датам (старая логика)
                         else:
                             prod_date = detail.get('production_date')
                             exp_date = detail.get('expiry_date')
@@ -484,11 +481,25 @@ class OrderService:
                 
                 # --- ИЗМЕНЕНИЕ: Группируем данные, включая ed30, если он нужен ---
                 grouping_columns = ['printrun_id', 'production_date', 'expiration_date']
+                def normalize_ed30_value(value):
+                    if pd.isna(value):
+                        return None
+                    if isinstance(value, (int, float)):
+                        return str(value)
+
+                    text = str(value).strip()
+                    if not text:
+                        return None
+
+                    text = re.sub(r'^ed30\s*[:=]\s*', '', text, flags=re.I)
+                    text = text.strip().strip('"').strip("'")
+                    return text
+
                 if order_info.get('variables_required') and 'ed30' in df_for_json.columns:
                     # --- ИСПРАВЛЕНИЕ: Агрегируем пары (DataMatrix, ed30) вместо добавления ed30 в ключ ---
                     # Это сохраняет связь между кодом и его переменной, не создавая лишних групп.
                     grouped_for_api = df_for_json.groupby(grouping_columns, dropna=False).apply(
-                        lambda x: list(zip(x['DataMatrix'], x['ed30']))
+                        lambda x: list(zip(x['DataMatrix'], x['ed30'].apply(normalize_ed30_value)))
                     ).reset_index(name='dm_with_vars')
                 else:
                     # Старая логика для случаев, когда переменные не нужны
@@ -515,13 +526,14 @@ class OrderService:
                     if 'dm_with_vars' in row: # Новый формат с переменными
                         for dm_code, ed30_val in row.dm_with_vars:
                             code_obj = {"code": dm_code.replace('\x1d', '')}
-                            if pd.notna(ed30_val):
-                                code_obj['ed30'] = str(ed30_val)
+                            normalized_ed30 = normalize_ed30_value(ed30_val)
+                            if normalized_ed30 is not None:
+                                code_obj['ed30'] = normalized_ed30
                             codes_list.append(code_obj)
                     else: # Старый формат без переменных
                         for dm_code in row.DataMatrix:
                             code_obj = {"code": dm_code.replace('\x1d', '')}
-                        codes_list.append(code_obj)
+                            codes_list.append(code_obj)
 
                     # --- ИСПРАВЛЕНИЕ: Получаем GTIN для логирования ---
                     gtin_for_row = printrun_to_gtin_map.get(row.printrun_id)
@@ -618,8 +630,8 @@ class OrderService:
                             b.datamatrix, 
                             b.gtin, 
                             b.r_id as "№_pp",
-                            SUBSTRING(b.datamatrix for 24) AS dm_part_24, 
-                            SUBSTRING(b.datamatrix for 31) AS dm_part_31, 
+                            SPLIT_PART(b.datamatrix, CHR(29), 1) AS dm_part_prefix,
+                            LENGTH(SPLIT_PART(b.datamatrix, CHR(29), 1)) AS dm_part_length,
                             s.sscc_level_1, 
                             s.sscc_level_2, 
                             s.sscc_level_3, 
@@ -641,8 +653,18 @@ class OrderService:
             return None, None
 
         df = pd.DataFrame(report_data)
-        # --- ИСПРАВЛЕНИЕ: Заменяем устаревший applymap на map ---
         df = df.map(lambda val: val.replace('\x1d', ' ') if isinstance(val, str) else val)
+
+        if {'dm_part_prefix', 'dm_part_length'}.issubset(df.columns):
+            df = df.copy()
+            df['dm_part_length'] = pd.to_numeric(df['dm_part_length'], errors='coerce')
+            for length in sorted(df['dm_part_length'].dropna().astype(int).unique()):
+                target_col = f'dm_part_{int(length)}'
+                df[target_col] = None
+                mask = df['dm_part_length'].astype(int) == int(length)
+                df.loc[mask, target_col] = df.loc[mask, 'dm_part_prefix']
+            df = df.drop(columns=['dm_part_prefix', 'dm_part_length'])
+
         report_name = re.sub(r'[^\w]', '_', order_info.get('notes', '') if order_info else '').strip('_')
         
         return df, report_name
